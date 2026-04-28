@@ -40,7 +40,7 @@ export default function Templates() {
   const { data: clients } = useQuery({
     queryKey: ["clients"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("*").eq("user_id", user!.id).order("name");
+      const { data, error } = await supabase.from("clients").select("*").order("name");
       if (error) throw error;
       return data;
     },
@@ -116,7 +116,7 @@ export default function Templates() {
       for (const clientId of selectedClients) {
         const { data: planning, error } = await supabase
           .from("plannings")
-          .insert({ client_id: clientId, user_id: user!.id, month: currentMonth, year: currentYear })
+          .insert({ client_id: clientId, created_by: user!.id, month: currentMonth, year: currentYear })
           .select()
           .single();
         if (error) continue;

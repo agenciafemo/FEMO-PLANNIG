@@ -73,7 +73,7 @@ export default function Plannings() {
     mutationFn: async () => {
       const { data: planning, error } = await supabase
         .from("plannings")
-        .insert({ client_id: selectedClient, user_id: user!.id, month: parseInt(month), year: parseInt(year) })
+        .insert({ client_id: selectedClient, created_by: user!.id, month: parseInt(month), year: parseInt(year) })
         .select()
         .single();
       if (error) throw error;
@@ -116,7 +116,7 @@ export default function Plannings() {
       const nextYear = original.month === 12 ? original.year + 1 : original.year;
       const { data: newPlanning, error } = await supabase
         .from("plannings")
-        .insert({ client_id: original.client_id, user_id: user!.id, month: nextMonth, year: nextYear, notes: original.notes })
+        .insert({ client_id: original.client_id, created_by: user!.id, month: nextMonth, year: nextYear, notes: original.notes })
         .select().single();
       if (error) throw error;
       const { data: originalPosts } = await supabase.from("posts").select("*").eq("planning_id", planningId).order("position");

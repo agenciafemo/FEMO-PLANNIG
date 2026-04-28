@@ -75,7 +75,7 @@ export default function Clients() {
     mutationFn: async () => {
       const { data: newClient, error } = await supabase
         .from("clients")
-        .insert({ user_id: user!.id, name, notes, accent_color: accentColor })
+        .insert({ created_by: user!.id, name, notes, accent_color: accentColor })
         .select()
         .single();
       if (error) throw error;
@@ -139,7 +139,7 @@ export default function Clients() {
     mutationFn: async () => {
       const { data: planning, error } = await supabase
         .from("plannings")
-        .insert({ client_id: planningClientId, user_id: user!.id, month: parseInt(planningMonth), year: parseInt(planningYear) })
+        .insert({ client_id: planningClientId, created_by: user!.id, month: parseInt(planningMonth), year: parseInt(planningYear) })
         .select()
         .single();
       if (error) throw error;
