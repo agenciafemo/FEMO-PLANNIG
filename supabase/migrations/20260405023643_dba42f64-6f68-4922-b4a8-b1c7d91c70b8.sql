@@ -1,0 +1,1 @@
+ALTER TABLE planning_templates ADD COLUMN default_stories_count INTEGER NOT NULL DEFAULT 0;
