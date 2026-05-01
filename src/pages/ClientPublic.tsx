@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar, FileText, Image, Video, Layers, ChevronRight, ArrowLeft, FolderOpen, Download, Sparkles, ScrollText, Send, Mic, Square, X, CheckCircle, XCircle } from "lucide-react";
+import { Calendar, FileText, Image, Video, Layers, ChevronRight, ArrowLeft, FolderOpen, Download, Sparkles, ScrollText, Send, Mic, Square, X, CheckCircle, XCircle, Copy, Pencil, Check } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { PublicPostView } from "@/components/public/PublicPostView";
@@ -30,6 +30,9 @@ export default function ClientPublic() {
   const [selectedReport, setSelectedReport] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("plannings");
   const [reportComment, setReportComment] = useState("");
+  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
+  const [editingScriptField, setEditingScriptField] = useState<string>("");
+  const [editingScriptValue, setEditingScriptValue] = useState<string>("");
   const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -131,6 +134,20 @@ export default function ClientPublic() {
       return data;
     },
     enabled: !!selectedReport,
+  });
+
+  const updateScript = useMutation({
+    mutationFn: async ({ id, field, value }: { id: string; field: string; value: string }) => {
+      const { error } = await supabase.from("video_scripts").update({ [field]: value }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["public-scripts", selectedPlanning] });
+      queryClient.invalidateQueries({ queryKey: ["public-all-scripts", planningIds] });
+      setEditingScriptId(null);
+      toast.success("Roteiro atualizado!");
+    },
+    onError: (e: any) => toast.error(e.message),
   });
 
   const addReportComment = useMutation({
@@ -445,25 +462,76 @@ export default function ClientPublic() {
                             {scripts.map((script: any, i: number) => (
                               <Card key={script.id}>
                                 <CardContent className="p-4 space-y-3">
-                                  <div className="flex items-center gap-2">
-                                    <div className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white" style={{ backgroundColor: accentColor }}>
-                                      {i + 1}
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ backgroundColor: accentColor }}>
+                                        {i + 1}
+                                      </div>
+                                      <h4 className="font-semibold">{script.title || `Roteiro ${i + 1}`}</h4>
                                     </div>
-                                    <h4 className="font-semibold">{script.title || `Roteiro ${i + 1}`}</h4>
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => {
+                                      const parts = [script.title, script.spoken_text, script.references_notes, script.editing_instructions].filter(Boolean).join("\n\n---\n\n");
+                                      navigator.clipboard.writeText(parts);
+                                      toast.success("Roteiro copiado!");
+                                    }}>
+                                      <Copy className="h-3.5 w-3.5" />
+                                    </Button>
                                   </div>
-                                  {script.spoken_text && (
+                                  {script.spoken_text !== undefined && (
                                     <div>
-                                      <p className="text-xs font-medium text-muted-foreground mb-1">📝 Texto falado</p>
-                                      <p className="whitespace-pre-wrap text-sm bg-muted rounded-lg p-3">{script.spoken_text}</p>
+                                      <div className="flex items-center justify-between mb-1">
+                                        <p className="text-xs font-medium text-muted-foreground">📝 Texto falado</p>
+                                        <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => {
+                                          setEditingScriptId(script.id);
+                                          setEditingScriptField("spoken_text");
+                                          setEditingScriptValue(script.spoken_text || "");
+                                        }}>
+                                          <Pencil className="mr-1 h-3 w-3" /> Editar
+                                        </Button>
+                                      </div>
+                                      {editingScriptId === script.id && editingScriptField === "spoken_text" ? (
+                                        <div className="space-y-2">
+                                          <Textarea value={editingScriptValue} onChange={(e) => setEditingScriptValue(e.target.value)} rows={6} className="text-sm" />
+                                          <div className="flex gap-2">
+                                            <Button size="sm" disabled={updateScript.isPending} onClick={() => updateScript.mutate({ id: script.id, field: "spoken_text", value: editingScriptValue })}>
+                                              <Check className="mr-1 h-3 w-3" /> Salvar
+                                            </Button>
+                                            <Button variant="ghost" size="sm" onClick={() => setEditingScriptId(null)}><X className="h-3 w-3" /></Button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <p className="whitespace-pre-wrap text-sm bg-muted rounded-lg p-3">{script.spoken_text || <span className="text-muted-foreground italic">Sem texto</span>}</p>
+                                      )}
                                     </div>
                                   )}
-                                  {script.references_notes && (
+                                  {script.references_notes !== undefined && (
                                     <div>
-                                      <p className="text-xs font-medium text-muted-foreground mb-1">📌 Direcionamentos e referências</p>
-                                      <p className="whitespace-pre-wrap text-sm bg-secondary rounded-lg p-3">{script.references_notes}</p>
+                                      <div className="flex items-center justify-between mb-1">
+                                        <p className="text-xs font-medium text-muted-foreground">📌 Direcionamentos e referências</p>
+                                        <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => {
+                                          setEditingScriptId(script.id);
+                                          setEditingScriptField("references_notes");
+                                          setEditingScriptValue(script.references_notes || "");
+                                        }}>
+                                          <Pencil className="mr-1 h-3 w-3" /> Editar
+                                        </Button>
+                                      </div>
+                                      {editingScriptId === script.id && editingScriptField === "references_notes" ? (
+                                        <div className="space-y-2">
+                                          <Textarea value={editingScriptValue} onChange={(e) => setEditingScriptValue(e.target.value)} rows={3} className="text-sm" />
+                                          <div className="flex gap-2">
+                                            <Button size="sm" disabled={updateScript.isPending} onClick={() => updateScript.mutate({ id: script.id, field: "references_notes", value: editingScriptValue })}>
+                                              <Check className="mr-1 h-3 w-3" /> Salvar
+                                            </Button>
+                                            <Button variant="ghost" size="sm" onClick={() => setEditingScriptId(null)}><X className="h-3 w-3" /></Button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <p className="whitespace-pre-wrap text-sm bg-secondary rounded-lg p-3">{script.references_notes || <span className="text-muted-foreground italic">Sem direcionamentos</span>}</p>
+                                      )}
                                     </div>
                                   )}
-                                  {script.editing_instructions && (
+                                  {script.editing_instructions !== undefined && script.editing_instructions && (
                                     <div>
                                       <p className="text-xs font-medium text-muted-foreground mb-1">🎬 Instruções de edição</p>
                                       <p className="whitespace-pre-wrap text-sm bg-accent rounded-lg p-3">{script.editing_instructions}</p>
@@ -703,22 +771,73 @@ export default function ClientPublic() {
                 {videoScripts.map((script: any, i: number) => (
                   <Card key={script.id}>
                     <CardContent className="p-4 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white" style={{ backgroundColor: accentColor }}>
-                          {i + 1}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ backgroundColor: accentColor }}>
+                            {i + 1}
+                          </div>
+                          <h4 className="font-semibold">{script.title || `Roteiro ${i + 1}`}</h4>
                         </div>
-                        <h4 className="font-semibold">{script.title || `Roteiro ${i + 1}`}</h4>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => {
+                          const parts = [script.title, script.spoken_text, script.references_notes, script.editing_instructions].filter(Boolean).join("\n\n---\n\n");
+                          navigator.clipboard.writeText(parts);
+                          toast.success("Roteiro copiado!");
+                        }}>
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
-                      {script.spoken_text && (
+                      {script.spoken_text !== undefined && (
                         <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-1">📝 Texto falado</p>
-                          <p className="whitespace-pre-wrap text-sm bg-muted rounded-lg p-3">{script.spoken_text}</p>
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="text-xs font-medium text-muted-foreground">📝 Texto falado</p>
+                            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => {
+                              setEditingScriptId(script.id);
+                              setEditingScriptField("spoken_text");
+                              setEditingScriptValue(script.spoken_text || "");
+                            }}>
+                              <Pencil className="mr-1 h-3 w-3" /> Editar
+                            </Button>
+                          </div>
+                          {editingScriptId === script.id && editingScriptField === "spoken_text" ? (
+                            <div className="space-y-2">
+                              <Textarea value={editingScriptValue} onChange={(e) => setEditingScriptValue(e.target.value)} rows={6} className="text-sm" />
+                              <div className="flex gap-2">
+                                <Button size="sm" disabled={updateScript.isPending} onClick={() => updateScript.mutate({ id: script.id, field: "spoken_text", value: editingScriptValue })}>
+                                  <Check className="mr-1 h-3 w-3" /> Salvar
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => setEditingScriptId(null)}><X className="h-3 w-3" /></Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="whitespace-pre-wrap text-sm bg-muted rounded-lg p-3">{script.spoken_text || <span className="text-muted-foreground italic">Sem texto</span>}</p>
+                          )}
                         </div>
                       )}
-                      {script.references_notes && (
+                      {script.references_notes !== undefined && (
                         <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-1">📌 Direcionamentos e referências</p>
-                          <p className="whitespace-pre-wrap text-sm bg-secondary rounded-lg p-3">{script.references_notes}</p>
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="text-xs font-medium text-muted-foreground">📌 Direcionamentos e referências</p>
+                            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => {
+                              setEditingScriptId(script.id);
+                              setEditingScriptField("references_notes");
+                              setEditingScriptValue(script.references_notes || "");
+                            }}>
+                              <Pencil className="mr-1 h-3 w-3" /> Editar
+                            </Button>
+                          </div>
+                          {editingScriptId === script.id && editingScriptField === "references_notes" ? (
+                            <div className="space-y-2">
+                              <Textarea value={editingScriptValue} onChange={(e) => setEditingScriptValue(e.target.value)} rows={3} className="text-sm" />
+                              <div className="flex gap-2">
+                                <Button size="sm" disabled={updateScript.isPending} onClick={() => updateScript.mutate({ id: script.id, field: "references_notes", value: editingScriptValue })}>
+                                  <Check className="mr-1 h-3 w-3" /> Salvar
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => setEditingScriptId(null)}><X className="h-3 w-3" /></Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="whitespace-pre-wrap text-sm bg-secondary rounded-lg p-3">{script.references_notes || <span className="text-muted-foreground italic">Sem direcionamentos</span>}</p>
+                          )}
                         </div>
                       )}
                       {script.editing_instructions && (

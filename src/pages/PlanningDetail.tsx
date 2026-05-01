@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ArrowLeft, Plus, Image, Video, Layers, Circle, FileText, Play, Trash2, ScrollText, CalendarCheck, Pencil } from "lucide-react";
+import { ArrowLeft, Plus, Image, Video, Layers, Circle, FileText, Play, Trash2, ScrollText, CalendarCheck, Pencil, Copy } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -138,23 +138,25 @@ export default function PlanningDetail() {
 
   const saveScript = useMutation({
     mutationFn: async () => {
+      const finalTitle = scriptTitle.trim() || `Roteiro ${(videoScripts?.length ?? 0) + 1}`;
       if (editingScriptId) {
         const { error } = await supabase.from("video_scripts").update({
-          title: scriptTitle,
-          spoken_text: scriptText,
-          editing_instructions: scriptInstructions,
-          references_notes: scriptReferences,
+          title: finalTitle,
+          spoken_text: scriptText || null,
+          editing_instructions: scriptInstructions || null,
+          references_notes: scriptReferences || null,
         }).eq("id", editingScriptId);
         if (error) throw error;
       } else {
-        const maxPos = videoScripts?.length ? Math.max(...videoScripts.map(s => s.position)) + 1 : 0;
+        const positions = videoScripts?.map(s => s.position) ?? [];
+        const maxPos = positions.length > 0 ? Math.max(...positions) + 1 : 0;
         const { error } = await supabase.from("video_scripts").insert({
           planning_id: id!,
           position: maxPos,
-          title: scriptTitle,
-          spoken_text: scriptText,
-          editing_instructions: scriptInstructions,
-          references_notes: scriptReferences,
+          title: finalTitle,
+          spoken_text: scriptText || null,
+          editing_instructions: scriptInstructions || null,
+          references_notes: scriptReferences || null,
         });
         if (error) throw error;
       }
@@ -568,8 +570,8 @@ export default function PlanningDetail() {
                 <Textarea value={scriptInstructions} onChange={(e) => setScriptInstructions(e.target.value)} placeholder="Ex: Usar transições suaves, incluir b-roll de computador..." rows={3} />
               </div>
               <div className="flex gap-2">
-                <Button size="sm" onClick={() => saveScript.mutate()} disabled={!scriptTitle.trim()}>
-                  {editingScriptId ? "Atualizar Roteiro" : "Salvar Roteiro"}
+                <Button size="sm" onClick={() => saveScript.mutate()} disabled={saveScript.isPending}>
+                  {saveScript.isPending ? "Salvando..." : editingScriptId ? "Atualizar Roteiro" : "Salvar Roteiro"}
                 </Button>
                 <Button variant="ghost" size="sm" onClick={resetScriptForm}>Cancelar</Button>
               </div>
@@ -587,9 +589,19 @@ export default function PlanningDetail() {
                       <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">{i + 1}</span>
                       <h4 className="font-semibold text-sm">{script.title || `Roteiro ${i + 1}`}</h4>
                     </div>
-                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); deleteScript.mutate(script.id); }}>
-                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                    </Button>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => {
+                        e.stopPropagation();
+                        const parts = [script.title, script.spoken_text, script.references_notes, script.editing_instructions].filter(Boolean).join("\n\n---\n\n");
+                        navigator.clipboard.writeText(parts);
+                        toast.success("Roteiro copiado!");
+                      }}>
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); deleteScript.mutate(script.id); }}>
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    </div>
                   </div>
                   {script.spoken_text && (
                     <div className="rounded-lg bg-muted p-3">
