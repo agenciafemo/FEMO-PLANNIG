@@ -203,6 +203,17 @@ export default function PlanningDetail() {
     mutationFn: async (status: string) => {
       const { error } = await supabase.from("plannings").update({ status }).eq("id", id!);
       if (error) throw error;
+      if (status === "internal_review" && planning) {
+        const clientName = (planning as any).clients?.name ?? "Cliente";
+        const period = `${MONTHS[(planning.month) - 1]} ${planning.year}`;
+        await supabase.from("notifications").insert({
+          type: "internal_review",
+          title: `Planejamento aguardando aprovação interna`,
+          body: `${clientName} — ${period}`,
+          planning_id: id!,
+          read: false,
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["planning", id] });
