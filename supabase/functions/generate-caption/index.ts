@@ -1,14 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { encodeBase64 } from "https://deno.land/std@0.182.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
-const MODEL_MAP: Record<string, string> = {
-  gemini: "google/gemini-2.5-flash",
-  gpt: "openai/gpt-5-mini",
 };
 
 const SYSTEM_PROMPT = `Você é um social media manager brasileiro especialista em criar legendas para Instagram.
@@ -34,17 +30,14 @@ REGRAS OBRIGATÓRIAS:
 
 FORMATO DE RESPOSTA:
 Responda APENAS com um JSON válido no seguinte formato (sem markdown, sem code blocks):
-{
-  "caption": "texto da legenda aqui",
-  "hashtags": "#hashtag1 #hashtag2 #hashtag3 #hashtag4 #hashtag5"
-}
+{"caption": "texto da legenda aqui", "hashtags": "#hashtag1 #hashtag2 #hashtag3 #hashtag4 #hashtag5"}
 
 As 5 hashtags devem ser relevantes para SEO no Google e Instagram, relacionadas ao conteúdo e ao nicho do cliente.`;
 
 const CHAT_SYSTEM_PROMPT = `Você é um social media manager brasileiro especialista. O usuário está refinando uma legenda de Instagram com você.
 
 REGRAS:
-1. Seja sério, preciso e profissional. Baseie-se em fatos e informações confiáveis.
+1. Seja sério, preciso e profissional.
 2. NUNCA invente dados ou estatísticas.
 3. NUNCA use clichês de IA (jornada, descubra como, você sabia que, travessões, excesso de emojis).
 4. Responda SEMPRE com JSON válido: {"caption": "...", "hashtags": "#... #... #... #... #..."}
@@ -52,106 +45,180 @@ REGRAS:
 6. Máximo 2-3 emojis por legenda. Parágrafos separados por linhas em branco.
 7. 5 hashtags relevantes para SEO.`;
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType: string } | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const contentType = res.headers.get("content-type") || "image/jpeg";
+    const mimeType = contentType.split(";")[0];
+    const buffer = await res.arrayBuffer();
+    const base64 = encodeBase64(new Uint8Array(buffer));
+    return { data: base64, mimeType };
+  } catch {
+    return null;
+  }
+}
+
+async function callGemini(
+  apiKey: string,
+  systemPrompt: string,
+  messages: { role: string; content: string }[],
+  imageUrl?: string
+): Promise<string> {
+  const contents: any[] = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const isLastUser = msg.role === "user" && i === messages.length - 1;
+    const parts: any[] = [];
+
+    if (isLastUser && imageUrl) {
+      const img = await fetchImageAsBase64(imageUrl);
+      if (img) parts.push({ inline_data: { mime_type: img.mimeType, data: img.data } });
+    }
+    parts.push({ text: msg.content });
+
+    contents.push({ role: msg.role === "assistant" ? "model" : "user", parts });
   }
 
-  try {
-    const { contentType, clientNotes, model, currentCaption, imageUrl, videoUrl, topicBrief, messages } = await req.json();
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+      }),
+    }
+  );
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: "LOVABLE_API_KEY not configured" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+}
+
+async function callOpenAI(
+  apiKey: string,
+  systemPrompt: string,
+  messages: { role: string; content: string }[],
+  imageUrl?: string
+): Promise<string> {
+  const apiMessages: any[] = [{ role: "system", content: systemPrompt }];
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const isLastUser = msg.role === "user" && i === messages.length - 1;
+
+    if (isLastUser && imageUrl) {
+      apiMessages.push({
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: imageUrl } },
+          { type: "text", text: msg.content },
+        ],
       });
+    } else {
+      apiMessages.push({ role: msg.role, content: msg.content });
+    }
+  }
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ model: "gpt-4o-mini", messages: apiMessages, max_tokens: 1024 }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`OpenAI ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+function parseJsonResponse(raw: string): { caption: string; hashtags: string } {
+  try {
+    const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return { caption: parsed.caption || "", hashtags: parsed.hashtags || "" };
+  } catch {
+    return { caption: raw, hashtags: "" };
+  }
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  try {
+    const { contentType, clientNotes, model, currentCaption, imageUrl, videoUrl, topicBrief, messages } =
+      await req.json();
+
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+
+    const useGemini = model !== "gpt";
+
+    if (useGemini && !GEMINI_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: "GEMINI_API_KEY não configurada. Adicione-a nas variáveis de ambiente do Supabase." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    if (!useGemini && !OPENAI_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: "OPENAI_API_KEY não configurada. Adicione-a nas variáveis de ambiente do Supabase." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    const selectedModel = MODEL_MAP[model] || MODEL_MAP.gemini;
+    const typeLabel =
+      contentType === "static" ? "arte estática"
+      : contentType === "reels" ? "reels/vídeo"
+      : contentType === "carousel" ? "carrossel"
+      : contentType === "blog" ? "blog"
+      : "story";
 
-    let apiMessages: any[];
+    let apiMessages: { role: string; content: string }[];
+    let systemPrompt: string;
 
     if (messages && Array.isArray(messages) && messages.length > 0) {
-      // Conversational mode: use chat history
-      let contextInfo = `Contexto: post tipo "${contentType === "static" ? "arte estática" : contentType === "reels" ? "reels/vídeo" : contentType === "carousel" ? "carrossel" : contentType === "blog" ? "blog" : "story"}".`;
-      if (topicBrief) contextInfo += ` Tema: ${topicBrief}.`;
-      if (clientNotes) contextInfo += ` Notas do cliente: ${clientNotes}.`;
-      if (currentCaption) contextInfo += ` Legenda atual: "${currentCaption}".`;
-
-      apiMessages = [
-        { role: "system", content: CHAT_SYSTEM_PROMPT + "\n\n" + contextInfo },
-        ...messages.map((m: any) => ({ role: m.role, content: m.content })),
-      ];
+      systemPrompt = CHAT_SYSTEM_PROMPT;
+      let ctx = `Contexto: post tipo "${typeLabel}".`;
+      if (topicBrief) ctx += ` Tema: ${topicBrief}.`;
+      if (clientNotes) ctx += ` Notas do cliente: ${clientNotes}.`;
+      if (currentCaption) ctx += ` Legenda atual: "${currentCaption}".`;
+      systemPrompt += "\n\n" + ctx;
+      apiMessages = messages;
     } else {
-      // Single-shot mode
-      let textPrompt = `Crie uma legenda para um post de Instagram do tipo "${contentType === "static" ? "arte estática" : contentType === "reels" ? "reels/vídeo" : contentType === "carousel" ? "carrossel" : contentType === "blog" ? "blog" : "story"}".`;
-
-      if (topicBrief) textPrompt += `\n\nTEMA/BRIEFING DO POST (use como base principal): ${topicBrief}`;
-      if (clientNotes) textPrompt += `\n\nInformações sobre o cliente/marca: ${clientNotes}`;
-      if (videoUrl) textPrompt += `\n\nEste post tem um vídeo associado: ${videoUrl}. Considere que é um conteúdo em vídeo ao criar a legenda.`;
-      if (currentCaption) textPrompt += `\n\nA legenda atual é: "${currentCaption}". Melhore ela mantendo a essência mas tornando mais envolvente.`;
-      else textPrompt += `\n\nCrie uma legenda original e criativa.`;
-      if (imageUrl) textPrompt += `\n\nAnalise a imagem fornecida e crie a legenda baseada no que você vê nela.`;
-
-      const userContent: any[] = [];
-      if (imageUrl) userContent.push({ type: "image_url", image_url: { url: imageUrl } });
-      userContent.push({ type: "text", text: textPrompt });
-
-      apiMessages = [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userContent },
-      ];
+      systemPrompt = SYSTEM_PROMPT;
+      let prompt = `Crie uma legenda para um post de Instagram do tipo "${typeLabel}".`;
+      if (topicBrief) prompt += `\n\nTEMA/BRIEFING: ${topicBrief}`;
+      if (clientNotes) prompt += `\n\nInformações sobre o cliente/marca: ${clientNotes}`;
+      if (videoUrl) prompt += `\n\nEste post tem um vídeo: ${videoUrl}. Considere que é um conteúdo em vídeo.`;
+      if (currentCaption) prompt += `\n\nLegenda atual (melhore mantendo a essência): "${currentCaption}"`;
+      else prompt += "\n\nCrie uma legenda original.";
+      if (imageUrl) prompt += "\n\nAnálise a imagem fornecida e crie a legenda baseada no que você vê nela.";
+      apiMessages = [{ role: "user", content: prompt }];
     }
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: selectedModel,
-        messages: apiMessages,
-      }),
-    });
-
-    if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Limite de requisições atingido. Tente novamente em alguns segundos." }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Créditos de IA esgotados. Adicione créditos em Configurações > Workspace > Uso." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
-      return new Response(JSON.stringify({ error: "Erro ao gerar legenda" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    let raw: string;
+    if (useGemini) {
+      raw = await callGemini(GEMINI_API_KEY!, systemPrompt, apiMessages, imageUrl || undefined);
+    } else {
+      raw = await callOpenAI(OPENAI_API_KEY!, systemPrompt, apiMessages, imageUrl || undefined);
     }
 
-    const data = await response.json();
-    const rawContent = data.choices?.[0]?.message?.content || "";
-
-    let caption = "";
-    let hashtags = "";
-
-    try {
-      const cleaned = rawContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      const parsed = JSON.parse(cleaned);
-      caption = parsed.caption || "";
-      hashtags = parsed.hashtags || "";
-    } catch {
-      caption = rawContent;
-      hashtags = "";
-    }
+    const { caption, hashtags } = parseJsonResponse(raw);
 
     return new Response(JSON.stringify({ caption, hashtags }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

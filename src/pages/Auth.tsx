@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,12 @@ import { Mail, Lock, User } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function Auth() {
-  const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState("");
+  const [searchParams] = useSearchParams();
+  const inviteEmail = searchParams.get("invite") ?? "";
+  const isInvite = !!inviteEmail;
+
+  const [isLogin, setIsLogin] = useState(!isInvite);
+  const [email, setEmail] = useState(inviteEmail);
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);

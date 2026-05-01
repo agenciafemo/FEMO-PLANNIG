@@ -127,29 +127,43 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
     },
   });
 
+  const getSupportedMimeType = () => {
+    const types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4", "audio/aac", ""];
+    return types.find((t) => !t || MediaRecorder.isTypeSupported(t)) ?? "";
+  };
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+      const mimeType = getSupportedMimeType();
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
-      mediaRecorder.ondataavailable = (e) => chunksRef.current.push(e.data);
+      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        setAudioBlob(blob); setAudioUrl(URL.createObjectURL(blob));
+        const type = mimeType || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type });
+        setAudioBlob(blob);
+        setAudioUrl(URL.createObjectURL(blob));
         stream.getTracks().forEach((t) => t.stop());
       };
-      mediaRecorder.start(); setIsRecording(true);
+      mediaRecorder.start(250);
+      setIsRecording(true);
       setTimeout(() => { if (mediaRecorder.state === "recording") { mediaRecorder.stop(); setIsRecording(false); } }, 120000);
-    } catch { toast.error("Não foi possível acessar o microfone"); }
+    } catch {
+      toast.error("Microfone indisponível. Verifique as permissões do navegador.");
+    }
   };
 
   const stopRecording = () => { mediaRecorderRef.current?.stop(); setIsRecording(false); };
 
   const sendAudioComment = async () => {
     if (!audioBlob) return;
-    const path = `${postId}/${Date.now()}.webm`;
-    const { error } = await supabase.storage.from("comment-audios").upload(path, audioBlob);
+    const ext = audioBlob.type.includes("mp4") || audioBlob.type.includes("aac") ? "mp4" : "webm";
+    const path = `${postId}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from("comment-audios").upload(path, audioBlob, { contentType: audioBlob.type });
     if (error) { toast.error("Erro no upload do áudio"); return; }
     const { data: urlData } = supabase.storage.from("comment-audios").getPublicUrl(path);
     addComment.mutate({ audioUrl: urlData.publicUrl });
@@ -375,7 +389,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
               {comments.map((c) => (
                 <div key={c.id} className={`rounded-lg p-3 ${c.author_type === "client" ? "bg-accent" : "bg-muted"}`}>
                   <div className="mb-1 flex items-center justify-between">
-                    <span className="text-xs font-medium">{c.author_type === "client" ? "Você" : "Gestor"}</span>
+                    <span className="text-xs font-medium">{c.author_type === "client" ? "Cliente" : "Gestor"}</span>
                     <div className="flex items-center gap-1">
                       <span className="text-xs text-muted-foreground">{format(new Date(c.created_at), "dd/MM HH:mm")}</span>
                       {c.author_type === "client" && (
