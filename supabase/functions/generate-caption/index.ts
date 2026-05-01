@@ -163,20 +163,20 @@ serve(async (req) => {
     const { contentType, clientNotes, model, currentCaption, imageUrl, videoUrl, topicBrief, messages } =
       await req.json();
 
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("gemini");
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
     const useGemini = model !== "gpt";
 
     if (useGemini && !GEMINI_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "GEMINI_API_KEY não configurada. Adicione-a nas variáveis de ambiente do Supabase." }),
+        JSON.stringify({ error: "Chave do Gemini não configurada nas variáveis de ambiente do Supabase." }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
     if (!useGemini && !OPENAI_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "OPENAI_API_KEY não configurada. Adicione-a nas variáveis de ambiente do Supabase." }),
+        JSON.stringify({ error: "OPENAI_API_KEY não configurada nas variáveis de ambiente do Supabase." }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
