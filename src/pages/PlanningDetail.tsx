@@ -41,7 +41,8 @@ import { GripVertical } from "lucide-react";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
-const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const slugify = (str: string) =>
+  str.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const contentTypeIcons: Record<string, any> = {
   static: Image,
@@ -77,21 +78,18 @@ export default function PlanningDetail() {
   })();
   const parsedYear = monthYear ? parseInt(monthYear.split("-").pop()!) : 0;
 
-  const { data: planning } = useQuery({
+  const { data: planning, isLoading: planningLoading } = useQuery({
     queryKey: ["planning", clientSlug, monthYear],
     queryFn: async () => {
-      const { data: clientsData } = await supabase.from("clients").select("id, name");
-      const matched = clientsData?.find(c => slugify(c.name) === clientSlug);
-      if (!matched) throw new Error("Cliente não encontrado");
       const { data, error } = await supabase
         .from("plannings")
-        .select("*, clients(name, accent_color, notes, logo_url)")
-        .eq("client_id", matched.id)
+        .select("*, clients!inner(id, name, accent_color, notes, logo_url)")
         .eq("month", parsedMonth)
-        .eq("year", parsedYear)
-        .single();
+        .eq("year", parsedYear);
       if (error) throw error;
-      return data;
+      const match = data?.find(p => slugify((p.clients as any)?.name ?? "") === clientSlug);
+      if (!match) throw new Error("Planejamento não encontrado");
+      return match;
     },
     enabled: !!clientSlug && !!monthYear && parsedMonth > 0,
   });
@@ -343,7 +341,17 @@ export default function PlanningDetail() {
     void reorderedMap;
   };
 
-  if (!planning) return null;
+  if (planningLoading) return (
+    <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+    </div>
+  );
+  if (!planning) return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-muted-foreground">
+      <p>Planejamento não encontrado.</p>
+      <Link to="/plannings"><Button variant="outline" size="sm"><ArrowLeft className="mr-2 h-4 w-4" /> Voltar</Button></Link>
+    </div>
+  );
 
   const client = (planning as any).clients;
   const feedPosts = posts?.filter((p) => !["story", "blog"].includes(p.content_type)) || [];
