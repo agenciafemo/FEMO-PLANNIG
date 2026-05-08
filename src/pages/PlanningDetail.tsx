@@ -40,6 +40,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const contentTypeIcons: Record<string, any> = {
   static: Image,
@@ -58,7 +60,7 @@ const contentTypeLabels: Record<string, string> = {
 };
 
 export default function PlanningDetail() {
-  const { id } = useParams<{ id: string }>();
+  const { clientSlug, monthYear } = useParams<{ clientSlug: string; monthYear: string }>();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -68,47 +70,61 @@ export default function PlanningDetail() {
   const [editMonth, setEditMonth] = useState("");
   const [editYear, setEditYear] = useState("");
 
+  const parsedMonth = (() => {
+    if (!monthYear) return 0;
+    const parts = monthYear.split("-");
+    return MONTH_SLUGS.indexOf(parts.slice(0, -1).join("-")) + 1;
+  })();
+  const parsedYear = monthYear ? parseInt(monthYear.split("-").pop()!) : 0;
+
   const { data: planning } = useQuery({
-    queryKey: ["planning", id],
+    queryKey: ["planning", clientSlug, monthYear],
     queryFn: async () => {
+      const { data: clientsData } = await supabase.from("clients").select("id, name");
+      const matched = clientsData?.find(c => slugify(c.name) === clientSlug);
+      if (!matched) throw new Error("Cliente não encontrado");
       const { data, error } = await supabase
         .from("plannings")
         .select("*, clients(name, accent_color, notes, logo_url)")
-        .eq("id", id!)
+        .eq("client_id", matched.id)
+        .eq("month", parsedMonth)
+        .eq("year", parsedYear)
         .single();
       if (error) throw error;
       return data;
     },
-    enabled: !!id,
+    enabled: !!clientSlug && !!monthYear && parsedMonth > 0,
   });
 
+  const planningId = planning?.id;
+
   const { data: posts } = useQuery({
-    queryKey: ["posts", id],
+    queryKey: ["posts", planningId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("posts")
         .select("*")
-        .eq("planning_id", id!)
+        .eq("planning_id", planningId!)
         .order("position");
       if (error) throw error;
       return data;
     },
-    enabled: !!id,
+    enabled: !!planningId,
   });
 
   // Video scripts
   const { data: videoScripts } = useQuery({
-    queryKey: ["video-scripts", id],
+    queryKey: ["video-scripts", planningId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("video_scripts")
         .select("*")
-        .eq("planning_id", id!)
+        .eq("planning_id", planningId!)
         .order("position");
       if (error) throw error;
       return data;
     },
-    enabled: !!id,
+    enabled: !!planningId,
   });
 
   const [showScriptForm, setShowScriptForm] = useState(false);
@@ -151,7 +167,7 @@ export default function PlanningDetail() {
         const positions = videoScripts?.map(s => s.position) ?? [];
         const maxPos = positions.length > 0 ? Math.max(...positions) + 1 : 0;
         const { error } = await supabase.from("video_scripts").insert({
-          planning_id: id!,
+          planning_id: planningId!,
           position: maxPos,
           title: finalTitle,
           spoken_text: scriptText || null,
@@ -162,7 +178,7 @@ export default function PlanningDetail() {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["video-scripts", id] });
+      queryClient.invalidateQueries({ queryKey: ["video-scripts", planningId] });
       resetScriptForm();
       toast.success(editingScriptId ? "Roteiro atualizado!" : "Roteiro adicionado!");
     },
@@ -175,7 +191,7 @@ export default function PlanningDetail() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["video-scripts", id] });
+      queryClient.invalidateQueries({ queryKey: ["video-scripts", planningId] });
       toast.success("Roteiro removido");
     },
   });
@@ -186,14 +202,14 @@ export default function PlanningDetail() {
       const maxPos = allPosts.length > 0 ? Math.max(...allPosts.map((p) => p.position)) : -1;
       if (allPosts.length >= 50) throw new Error("Máximo de 50 itens por planejamento");
       const { error } = await supabase.from("posts").insert({
-        planning_id: id!,
+        planning_id: planningId!,
         position: maxPos + 1,
         content_type: type,
       });
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["posts", id] });
+      queryClient.invalidateQueries({ queryKey: ["posts", planningId] });
       toast.success("Adicionado!");
     },
     onError: (e: any) => toast.error(e.message),
@@ -201,7 +217,7 @@ export default function PlanningDetail() {
 
   const updateStatus = useMutation({
     mutationFn: async (status: string) => {
-      const { error } = await supabase.from("plannings").update({ status }).eq("id", id!);
+      const { error } = await supabase.from("plannings").update({ status }).eq("id", planningId!);
       if (error) throw error;
       if (status === "internal_review" && planning) {
         const clientName = (planning as any).clients?.name ?? "Cliente";
@@ -210,13 +226,13 @@ export default function PlanningDetail() {
           type: "internal_review",
           title: `Planejamento aguardando aprovação interna`,
           body: `${clientName} — ${period}`,
-          planning_id: id!,
+          planning_id: planningId!,
           read: false,
         });
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["planning", id] });
+      queryClient.invalidateQueries({ queryKey: ["planning", clientSlug, monthYear] });
       queryClient.invalidateQueries({ queryKey: ["plannings"] });
       toast.success("Status atualizado!");
     },
@@ -225,14 +241,15 @@ export default function PlanningDetail() {
 
   const updatePeriod = useMutation({
     mutationFn: async ({ month, year }: { month: number; year: number }) => {
-      const { error } = await supabase.from("plannings").update({ month, year }).eq("id", id!);
+      const { error } = await supabase.from("plannings").update({ month, year }).eq("id", planningId!);
       if (error) throw error;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["planning", id] });
+    onSuccess: (_, { month: newMonth, year: newYear }) => {
       queryClient.invalidateQueries({ queryKey: ["plannings"] });
       setEditingPeriod(false);
       toast.success("Período atualizado!");
+      const clientName = (planning as any)?.clients?.name ?? "";
+      navigate(`/plannings/${slugify(clientName)}/${MONTH_SLUGS[newMonth - 1]}-${newYear}`);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -240,9 +257,9 @@ export default function PlanningDetail() {
   const deletePlanning = useMutation({
     mutationFn: async () => {
       // Delete all posts first
-      const { error: postsError } = await supabase.from("posts").delete().eq("planning_id", id!);
+      const { error: postsError } = await supabase.from("posts").delete().eq("planning_id", planningId!);
       if (postsError) throw postsError;
-      const { error } = await supabase.from("plannings").delete().eq("id", id!);
+      const { error } = await supabase.from("plannings").delete().eq("id", planningId!);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -263,11 +280,11 @@ export default function PlanningDetail() {
       );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["posts", id] });
+      queryClient.invalidateQueries({ queryKey: ["posts", planningId] });
     },
     onError: (e: any) => {
       toast.error(e.message);
-      queryClient.invalidateQueries({ queryKey: ["posts", id] });
+      queryClient.invalidateQueries({ queryKey: ["posts", planningId] });
     },
   });
 
@@ -278,15 +295,15 @@ export default function PlanningDetail() {
       return { postId, scheduled };
     },
     onMutate: async ({ postId, scheduled }) => {
-      await queryClient.cancelQueries({ queryKey: ["posts", id] });
-      const prev = queryClient.getQueryData<any[]>(["posts", id]);
-      queryClient.setQueryData<any[]>(["posts", id], (old) =>
+      await queryClient.cancelQueries({ queryKey: ["posts", planningId] });
+      const prev = queryClient.getQueryData<any[]>(["posts", planningId]);
+      queryClient.setQueryData<any[]>(["posts", planningId], (old) =>
         old?.map((p) => (p.id === postId ? { ...p, scheduled } : p)) || [],
       );
       return { prev };
     },
     onError: (e: any, _vars, ctx) => {
-      if (ctx?.prev) queryClient.setQueryData(["posts", id], ctx.prev);
+      if (ctx?.prev) queryClient.setQueryData(["posts", planningId], ctx.prev);
       toast.error(e.message);
     },
     onSuccess: ({ scheduled }) => {
@@ -321,7 +338,7 @@ export default function PlanningDetail() {
     });
     const updates = newOrder.map((p: any, i: number) => ({ id: p.id, position: i }));
     // Optimistic update
-    queryClient.setQueryData(["posts", id], newOrder);
+    queryClient.setQueryData(["posts", planningId], newOrder);
     reorderPosts.mutate(updates);
     void reorderedMap;
   };

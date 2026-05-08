@@ -17,6 +17,8 @@ import { ClientDocuments } from "@/components/client/ClientDocuments";
 import { ClientReports } from "@/components/client/ClientReports";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 export default function Clients() {
   const { user } = useAuth();
@@ -161,7 +163,8 @@ export default function Clients() {
       setPlanningOpen(false);
       setPostCount(8); setStoriesCount(0);
       toast.success("Planejamento criado!");
-      navigate(`/plannings/${planning.id}`);
+      const client = clients?.find(c => c.id === planningClientId);
+      navigate(`/plannings/${slugify(client?.name ?? "")}/${MONTH_SLUGS[parseInt(planningMonth) - 1]}-${planningYear}`);
     },
     onError: (e: any) => toast.error(e.message),
   });

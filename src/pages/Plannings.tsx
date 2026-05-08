@@ -16,6 +16,8 @@ import { Link, useParams } from "react-router-dom";
 import { Slider } from "@/components/ui/slider";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 type StatusFilter = "all" | "draft" | "internal_review" | "client_review" | "approved";
 
@@ -246,7 +248,7 @@ export default function Plannings() {
             <Card key={p.id} className="overflow-hidden transition-shadow hover:shadow-md">
               <div className="h-1 w-full" style={{ backgroundColor: accent }} />
               <CardContent className="flex items-center justify-between p-4">
-                <Link to={`/plannings/${p.id}`} className="flex flex-1 items-center gap-4">
+                <Link to={`/plannings/${slugify(p.clients?.name || "")}/${MONTH_SLUGS[p.month - 1]}-${p.year}`} className="flex flex-1 items-center gap-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg text-sm font-bold text-white shadow-sm" style={{ backgroundColor: accent }}>
                     {(p.clients?.name || "?").charAt(0)}
                   </div>
