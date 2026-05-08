@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { CalendarIcon, Image, Video, Layers, Sparkles, Save, Trash2, Send, FileText, ExternalLink, MessageCircle, Check, Copy } from "lucide-react";
+import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, ExternalLink, Copy } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -20,11 +19,6 @@ interface PostEditorProps {
   planningId: string;
   onClose: () => void;
   clientNotes?: string;
-}
-
-interface AiMessage {
-  role: "user" | "assistant";
-  content: string;
 }
 
 export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEditorProps) {
@@ -39,15 +33,7 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
   const [carouselUrlInput, setCarouselUrlInput] = useState("");
   const [status, setStatus] = useState("draft");
   const [blogBody, setBlogBody] = useState("");
-  const [aiModel, setAiModel] = useState("gemini");
   const [managerComment, setManagerComment] = useState("");
-
-  // AI Chat state
-  const [showAiChat, setShowAiChat] = useState(false);
-  const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
-  const [aiInput, setAiInput] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
 
   const { data: post } = useQuery({
     queryKey: ["post", postId],
@@ -84,10 +70,6 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
       setBlogBody((post as any).blog_body || "");
     }
   }, [post]);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [aiMessages]);
 
   const updatePost = useMutation({
     mutationFn: async () => {
@@ -168,14 +150,16 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
     toast.success("Imagem enviada!");
   };
 
+  const isVideo = (url: string) => /\.(mp4|mov|webm|avi|mkv|m4v|ogv)(\?|$)/i.test(url);
+
   const handleUploadCarousel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     const remaining = 20 - mediaUrls.length;
-    if (remaining <= 0) { toast.error("Limite de 20 imagens atingido"); return; }
+    if (remaining <= 0) { toast.error("Limite de 20 arquivos atingido"); return; }
     const toUpload = files.slice(0, remaining);
-    if (files.length > remaining) toast.warning(`Apenas ${remaining} imagens enviadas (limite 20)`);
-    toast.info(`Enviando ${toUpload.length} imagem(ns)...`);
+    if (files.length > remaining) toast.warning(`Apenas ${remaining} arquivo(s) enviados (limite 20)`);
+    toast.info(`Enviando ${toUpload.length} arquivo(s)...`);
     const uploaded: string[] = [];
     for (const file of toUpload) {
       const ext = file.name.split(".").pop();
@@ -186,13 +170,13 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
       uploaded.push(urlData.publicUrl);
     }
     setMediaUrls([...mediaUrls, ...uploaded]);
-    if (uploaded.length) toast.success(`${uploaded.length} imagem(ns) adicionada(s)!`);
+    if (uploaded.length) toast.success(`${uploaded.length} arquivo(s) adicionado(s)!`);
     e.target.value = "";
   };
 
   const addCarouselUrl = () => {
     if (!carouselUrlInput.trim()) return;
-    if (mediaUrls.length >= 20) { toast.error("Limite de 20 imagens"); return; }
+    if (mediaUrls.length >= 20) { toast.error("Limite de 20 arquivos"); return; }
     setMediaUrls([...mediaUrls, carouselUrlInput.trim()]);
     setCarouselUrlInput("");
   };
@@ -207,49 +191,6 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
     const arr = [...mediaUrls];
     [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
     setMediaUrls(arr);
-  };
-
-  const sendAiMessage = async () => {
-    if (!aiInput.trim()) return;
-    const userMsg: AiMessage = { role: "user", content: aiInput };
-    const newMessages = [...aiMessages, userMsg];
-    setAiMessages(newMessages);
-    setAiInput("");
-    setAiLoading(true);
-
-    try {
-      const { data, error } = await supabase.functions.invoke("generate-caption", {
-        body: {
-          contentType,
-          clientNotes: clientNotes || "",
-          model: aiModel,
-          currentCaption: caption || "",
-          imageUrl: coverImageUrl || "",
-          videoUrl: videoUrl || "",
-          topicBrief: "",
-          messages: newMessages,
-        },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-
-      const assistantMsg: AiMessage = {
-        role: "assistant",
-        content: data?.caption || "Sem resposta",
-      };
-      setAiMessages([...newMessages, assistantMsg]);
-      if (data?.hashtags) setHashtags(data.hashtags);
-    } catch (e: any) {
-      toast.error(e.message || "Erro ao gerar legenda");
-      setAiMessages(newMessages);
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
-  const applyAiCaption = (text: string) => {
-    setCaption(text);
-    toast.success("Legenda aplicada!");
   };
 
   return (
@@ -327,15 +268,24 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
           {contentType === "carousel" && (
             <div className="space-y-2 rounded-lg border-2 border-primary/30 bg-primary/5 p-3">
               <div className="flex items-center justify-between">
-                <Label className="flex items-center gap-2"><Layers className="h-4 w-4" /> Imagens do Carrossel</Label>
+                <Label className="flex items-center gap-2"><Layers className="h-4 w-4" /> Mídia do Carrossel</Label>
                 <span className="text-xs text-muted-foreground">{mediaUrls.length}/20</span>
               </div>
               {mediaUrls.length > 0 && (
                 <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                   {mediaUrls.map((url, idx) => (
                     <div key={idx} className="group relative aspect-square overflow-hidden rounded-md border bg-muted">
-                      <img src={url} alt={`Slide ${idx + 1}`} className="h-full w-full object-cover" />
+                      {isVideo(url) ? (
+                        <div className="flex h-full w-full items-center justify-center bg-black">
+                          <Video className="h-6 w-6 text-white/80" />
+                        </div>
+                      ) : (
+                        <img src={url} alt={`Slide ${idx + 1}`} className="h-full w-full object-cover" />
+                      )}
                       <div className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-xs font-bold text-white">{idx + 1}</div>
+                      {isVideo(url) && (
+                        <div className="absolute right-1 top-1 rounded bg-black/70 px-1 py-0.5 text-[10px] text-white">VID</div>
+                      )}
                       <div className="absolute inset-0 flex items-center justify-center gap-1 bg-black/60 opacity-0 transition-opacity group-hover:opacity-100">
                         <Button size="icon" variant="secondary" className="h-7 w-7" disabled={idx === 0} onClick={() => moveCarouselImage(idx, -1)}>‹</Button>
                         <Button size="icon" variant="destructive" className="h-7 w-7" onClick={() => removeCarouselImage(idx)}>
@@ -348,13 +298,13 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
                 </div>
               )}
               <div className="flex flex-col gap-2 sm:flex-row">
-                <Input type="file" accept="image/*" multiple onChange={handleUploadCarousel} className="flex-1" disabled={mediaUrls.length >= 20} />
+                <Input type="file" accept="image/*,video/*" multiple onChange={handleUploadCarousel} className="flex-1" disabled={mediaUrls.length >= 20} />
               </div>
               <div className="flex gap-2">
-                <Input placeholder="ou cole URL da imagem (Canva, etc)" value={carouselUrlInput} onChange={(e) => setCarouselUrlInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCarouselUrl())} disabled={mediaUrls.length >= 20} />
+                <Input placeholder="ou cole URL da imagem/vídeo (Canva, Drive, etc)" value={carouselUrlInput} onChange={(e) => setCarouselUrlInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCarouselUrl())} disabled={mediaUrls.length >= 20} />
                 <Button type="button" variant="outline" onClick={addCarouselUrl} disabled={mediaUrls.length >= 20}>Adicionar</Button>
               </div>
-              <p className="text-xs text-muted-foreground">Selecione várias imagens de uma vez. Arraste o cursor para reordenar ou remover. Até 20 imagens.</p>
+              <p className="text-xs text-muted-foreground">Aceita imagens e vídeos (mp4, mov, webm). Até 20 arquivos por carrossel.</p>
             </div>
           )}
 
@@ -379,72 +329,9 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
             </div>
           )}
 
-          {/* Caption + AI Chat */}
+          {/* Caption */}
           <div className="space-y-2">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <Label>{contentType === "blog" ? "Resumo / Título" : "Legenda"}</Label>
-              <div className="flex items-center gap-2">
-                <Select value={aiModel} onValueChange={setAiModel}>
-                  <SelectTrigger className="h-8 w-32"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="gemini">Gemini</SelectItem>
-                    <SelectItem value="gpt">ChatGPT</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  variant={showAiChat ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setShowAiChat(!showAiChat)}
-                >
-                  <MessageCircle className="mr-1 h-4 w-4" />
-                  {showAiChat ? "Fechar IA" : "Chat com IA"}
-                </Button>
-              </div>
-            </div>
-
-            {/* AI Chat Area - now right next to caption */}
-            {showAiChat && (
-              <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Converse com a IA para criar ou refinar a legenda. Diga o que quer.
-                </p>
-                {aiMessages.length > 0 && (
-                  <ScrollArea className="max-h-60">
-                    <div className="space-y-2 pr-2">
-                      {aiMessages.map((msg, i) => (
-                        <div key={i} className={`rounded-lg p-3 text-sm ${msg.role === "user" ? "bg-primary/10 ml-8" : "bg-background mr-8"}`}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-medium text-muted-foreground">
-                              {msg.role === "user" ? "Você" : "IA"}
-                            </span>
-                            {msg.role === "assistant" && (
-                              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => applyAiCaption(msg.content)}>
-                                <Check className="mr-1 h-3 w-3" /> Usar
-                              </Button>
-                            )}
-                          </div>
-                          <p className="whitespace-pre-wrap">{msg.content}</p>
-                        </div>
-                      ))}
-                      <div ref={chatEndRef} />
-                    </div>
-                  </ScrollArea>
-                )}
-                <div className="flex gap-2">
-                  <Input
-                    value={aiInput}
-                    onChange={(e) => setAiInput(e.target.value)}
-                    placeholder={aiMessages.length === 0 ? "Ex: Crie uma legenda profissional sobre..." : "Ex: Torne mais formal, adicione CTA..."}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendAiMessage()}
-                    disabled={aiLoading}
-                  />
-                  <Button size="icon" onClick={sendAiMessage} disabled={aiLoading || !aiInput.trim()}>
-                    {aiLoading ? <Sparkles className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </Button>
-                </div>
-              </div>
-            )}
-
+            <Label>{contentType === "blog" ? "Resumo / Título" : "Legenda"}</Label>
             <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Escreva a legenda do post..." rows={6} />
             <Input
               value={hashtags}

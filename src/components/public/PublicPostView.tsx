@@ -169,6 +169,8 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
     addComment.mutate({ audioUrl: urlData.publicUrl });
   };
 
+  const isVideo = (url: string) => /\.(mp4|mov|webm|avi|mkv|m4v|ogv)(\?|$)/i.test(url);
+
   const carouselImages: string[] = (post && (post as any).media_urls && (post as any).media_urls.length > 0)
     ? (post as any).media_urls
     : (post && post.content_type === "carousel" && post.cover_image_url ? [post.cover_image_url] : []);
@@ -219,7 +221,17 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
               {carouselImages.map((url, idx) => (
                 <CarouselItem key={idx}>
                   <div className="relative overflow-hidden rounded-xl border bg-muted">
-                    <img src={url} alt={`Slide ${idx + 1}`} className="w-full object-contain" style={{ maxHeight: "600px" }} />
+                    {isVideo(url) ? (
+                      <video
+                        src={url}
+                        controls
+                        playsInline
+                        className="w-full object-contain"
+                        style={{ maxHeight: "600px" }}
+                      />
+                    ) : (
+                      <img src={url} alt={`Slide ${idx + 1}`} className="w-full object-contain" style={{ maxHeight: "600px" }} />
+                    )}
                     <div className="absolute right-3 top-3 rounded-full bg-black/70 px-3 py-1 text-xs font-bold text-white">
                       {idx + 1} / {carouselImages.length}
                     </div>
@@ -244,7 +256,13 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
                     idx === carouselIndex ? "border-primary scale-105" : "border-transparent opacity-60 hover:opacity-100"
                   }`}
                 >
-                  <img src={url} alt={`Thumb ${idx + 1}`} className="h-14 w-14 object-cover sm:h-16 sm:w-16" />
+                  {isVideo(url) ? (
+                    <div className="flex h-14 w-14 items-center justify-center bg-black sm:h-16 sm:w-16">
+                      <Video className="h-5 w-5 text-white/80" />
+                    </div>
+                  ) : (
+                    <img src={url} alt={`Thumb ${idx + 1}`} className="h-14 w-14 object-cover sm:h-16 sm:w-16" />
+                  )}
                   <span className="absolute bottom-0 right-0 bg-black/70 px-1 text-[10px] font-bold text-white">{idx + 1}</span>
                 </button>
               ))}
