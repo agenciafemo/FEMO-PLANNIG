@@ -12,6 +12,8 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const contentTypeIcons: Record<string, any> = {
   static: Image,
@@ -214,7 +216,7 @@ export default function Dashboard() {
 
               return (
                 <Card key={p.id} className="overflow-hidden">
-                  <Link to={`/plannings/${p.id}`}>
+                  <Link to={`/plannings/${slugify(p.clients?.name || "")}/${MONTH_SLUGS[p.month - 1]}-${p.year}`}>
                     <CardContent className="p-0">
                       <div className="flex items-stretch">
                         {/* Color bar */}
@@ -355,8 +357,8 @@ export default function Dashboard() {
                     <div className="shrink-0 text-right">
                       <p className="text-xs text-muted-foreground">{format(new Date(c.created_at), "dd/MM HH:mm")}</p>
                     </div>
-                    {post && (
-                      <Link to={`/plannings/${post.planning_id}`}>
+                    {post && planning && (
+                      <Link to={`/plannings/${slugify((planning as any).clients?.name || "")}/${MONTH_SLUGS[(planning as any).month - 1]}-${(planning as any).year}`}>
                         <Button variant="ghost" size="sm" className="shrink-0"><ChevronRight className="h-4 w-4" /></Button>
                       </Link>
                     )}
