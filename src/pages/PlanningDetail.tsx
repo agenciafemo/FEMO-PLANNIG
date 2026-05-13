@@ -664,10 +664,10 @@ export default function PlanningDetail() {
         )}
       </div>
 
-      {editingPost && (
+      {editingPost && planningId && (
         <PostEditor
           postId={editingPost}
-          planningId={id!}
+          planningId={planningId}
           onClose={() => setEditingPost(null)}
           clientNotes={client?.notes}
         />
