@@ -343,6 +343,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
               <div className="space-y-2">
                 <Textarea value={editedCaption} onChange={(e) => setEditedCaption(e.target.value)} rows={4} />
                 <div className="flex gap-2">
+<<<<<<< HEAD
                   <Button
                     size="sm"
                     disabled={submitEditSuggestion.isPending || editedCaption.trim() === (post.caption || "").trim()}
@@ -351,6 +352,12 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
                     <Check className="mr-1 h-3 w-3" /> {submitEditSuggestion.isPending ? "Enviando..." : "Enviar sugestão"}
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => { setEditingCaption(false); setEditedCaption(""); }} disabled={submitEditSuggestion.isPending}><X className="mr-1 h-3 w-3" /> Cancelar</Button>
+=======
+                  <Button size="sm" onClick={() => submitEditSuggestion.mutate({ field: "caption", original: post.caption || "", suggested: editedCaption })}>
+                    <Check className="mr-1 h-3 w-3" /> Enviar sugestão
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setEditingCaption(false)}><X className="mr-1 h-3 w-3" /> Cancelar</Button>
+>>>>>>> eee8beb9a329f6e8ef4b6c01d4c7858f101f8b33
                 </div>
               </div>
             ) : (
@@ -372,6 +379,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
               <div className="space-y-2">
                 <Input value={editedHashtags} onChange={(e) => setEditedHashtags(e.target.value)} />
                 <div className="flex gap-2">
+<<<<<<< HEAD
                   <Button
                     size="sm"
                     disabled={submitEditSuggestion.isPending || editedHashtags.trim() === (post.hashtags || "").trim()}
@@ -380,6 +388,12 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
                     <Check className="mr-1 h-3 w-3" /> {submitEditSuggestion.isPending ? "Enviando..." : "Enviar"}
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => { setEditingHashtags(false); setEditedHashtags(""); }} disabled={submitEditSuggestion.isPending}><X className="mr-1 h-3 w-3" /> Cancelar</Button>
+=======
+                  <Button size="sm" onClick={() => submitEditSuggestion.mutate({ field: "hashtags", original: post.hashtags || "", suggested: editedHashtags })}>
+                    <Check className="mr-1 h-3 w-3" /> Enviar
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setEditingHashtags(false)}><X className="mr-1 h-3 w-3" /> Cancelar</Button>
+>>>>>>> eee8beb9a329f6e8ef4b6c01d4c7858f101f8b33
                 </div>
               </div>
             ) : (
