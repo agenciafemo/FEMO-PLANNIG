@@ -1,0 +1,2 @@
+ALTER TABLE public.posts
+ADD COLUMN scheduled BOOLEAN NOT NULL DEFAULT false;

@@ -1,0 +1,1 @@
+ALTER TABLE posts ADD COLUMN blog_body TEXT;

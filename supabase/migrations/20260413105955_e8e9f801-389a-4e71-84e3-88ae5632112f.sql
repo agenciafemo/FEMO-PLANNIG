@@ -1,0 +1,1 @@
+ALTER TABLE public.video_scripts ADD COLUMN references_notes text DEFAULT '' NULL;
