@@ -198,7 +198,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
         <Button
           className="flex-1"
           variant={post.status === "approved" ? "default" : "outline"}
-          onClick={() => updatePostStatus.mutate("approved")}
+          onClick={() => updatePostStatus.mutate(post.status === "approved" ? "pending" : "approved")}
           disabled={updatePostStatus.isPending}
           style={post.status === "approved" ? { backgroundColor: "#16a34a", color: "white" } : {}}
         >
@@ -208,7 +208,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
         <Button
           className="flex-1"
           variant={post.status === "needs_revision" ? "default" : "outline"}
-          onClick={() => updatePostStatus.mutate("needs_revision")}
+          onClick={() => updatePostStatus.mutate(post.status === "needs_revision" ? "pending" : "needs_revision")}
           disabled={updatePostStatus.isPending}
           style={post.status === "needs_revision" ? { backgroundColor: "#dc2626", color: "white" } : {}}
         >
