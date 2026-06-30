@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ArrowLeft, Plus, Image, Video, Layers, Circle, FileText, Play, Trash2, ScrollText, CalendarCheck, Pencil, Copy } from "lucide-react";
+import { ArrowLeft, Plus, Image, Video, Layers, Circle, FileText, Play, Trash2, ScrollText, CalendarCheck, Pencil, Copy, Search, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -70,6 +70,8 @@ export default function PlanningDetail() {
   const [editingPeriod, setEditingPeriod] = useState(false);
   const [editMonth, setEditMonth] = useState("");
   const [editYear, setEditYear] = useState("");
+  const [zoomLevel, setZoomLevel] = useState(100);
+  const [fullscreenPost, setFullscreenPost] = useState<string | null>(null);
 
   const parsedMonth = (() => {
     if (!monthYear) return 0;
@@ -217,17 +219,6 @@ export default function PlanningDetail() {
     mutationFn: async (status: string) => {
       const { error } = await supabase.from("plannings").update({ status }).eq("id", planningId!);
       if (error) throw error;
-      if (status === "internal_review" && planning) {
-        const clientName = (planning as any).clients?.name ?? "Cliente";
-        const period = `${MONTHS[(planning.month) - 1]} ${planning.year}`;
-        await supabase.from("notifications").insert({
-          type: "internal_review",
-          title: `Planejamento aguardando aprovação interna`,
-          body: `${clientName} — ${period}`,
-          planning_id: planningId!,
-          read: false,
-        });
-      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["planning", clientSlug, monthYear] });
@@ -367,7 +358,80 @@ export default function PlanningDetail() {
   const accentColor = client?.accent_color || "#ef5a2b";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
+      {/* Zoom Control */}
+      <div className="fixed bottom-6 right-6 z-40 bg-white rounded-full shadow-lg border border-muted">
+        <button
+          onClick={() => setZoomLevel(Math.max(50, zoomLevel - 10))}
+          className="p-3 hover:bg-muted transition-colors rounded-l-full"
+          title="Diminuir zoom"
+        >
+          <ZoomOut className="h-5 w-5" />
+        </button>
+        <span className="inline-flex items-center justify-center w-12 text-sm font-semibold text-muted-foreground">
+          {zoomLevel}%
+        </span>
+        <button
+          onClick={() => setZoomLevel(Math.min(200, zoomLevel + 10))}
+          className="p-3 hover:bg-muted transition-colors rounded-r-full"
+          title="Aumentar zoom"
+        >
+          <ZoomIn className="h-5 w-5" />
+        </button>
+      </div>
+
+      {/* Fullscreen Modal */}
+      {fullscreenPost && posts?.find((p) => p.id === fullscreenPost) && (
+        <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4">
+          <button
+            onClick={() => setFullscreenPost(null)}
+            className="absolute top-4 right-4 text-white hover:bg-white/20 p-2 rounded-full transition-colors z-10"
+            title="Fechar"
+          >
+            <Plus className="h-6 w-6 rotate-45" />
+          </button>
+          {(() => {
+            const post = posts.find((p) => p.id === fullscreenPost);
+            const isVideo = post?.video_url && /\.(mp4|mov|webm|avi|mkv|m4v|ogv)(\?|$)/i.test(post.video_url);
+            return (
+              <div className="max-w-5xl w-full max-h-[90vh] overflow-auto">
+                {post?.cover_image_url && (
+                  <img src={post.cover_image_url} alt="" className="w-full h-auto rounded-lg" />
+                )}
+                {isVideo && post?.video_url && (
+                  <video src={post.video_url} controls className="w-full h-auto rounded-lg mt-4" />
+                )}
+                {post?.media_urls && post.media_urls.length > 0 && (
+                  <div className="grid grid-cols-2 gap-4 mt-4">
+                    {post.media_urls.map((url, idx) => (
+                      <div key={idx}>
+                        {/\.(mp4|mov|webm|avi|mkv|m4v|ogv)(\?|$)/i.test(url) ? (
+                          <video src={url} controls className="w-full h-auto rounded-lg" />
+                        ) : (
+                          <img src={url} alt={`Slide ${idx + 1}`} className="w-full h-auto rounded-lg" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {post?.caption && (
+                  <div className="mt-6 bg-white/10 p-4 rounded-lg text-white">
+                    <h3 className="font-semibold mb-2">Legenda</h3>
+                    <p className="whitespace-pre-wrap text-sm">{post.caption}</p>
+                  </div>
+                )}
+                {post?.hashtags && (
+                  <div className="mt-4 bg-white/10 p-4 rounded-lg text-white">
+                    <h3 className="font-semibold mb-2">Hashtags</h3>
+                    <p className="text-primary text-sm">{post.hashtags}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       {/* Barra colorida do cliente */}
       <div className="h-1 w-full rounded-full" style={{ background: `linear-gradient(90deg, ${accentColor} 0%, ${accentColor}55 100%)` }} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -490,9 +554,9 @@ export default function PlanningDetail() {
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd(feedPosts)}>
             <SortableContext items={feedPosts.map((p) => p.id)} strategy={viewMode === "grid" ? rectSortingStrategy : verticalListSortingStrategy}>
               {viewMode === "grid" ? (
-                <div className="grid grid-cols-3 gap-1">
+                <div className="grid grid-cols-3 gap-1 origin-top transition-transform duration-200" style={{ transform: `scale(${zoomLevel / 100})` }}>
                   {feedPosts.map((post) => (
-                    <SortableFeedTile key={post.id} post={post} onOpen={() => setEditingPost(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
+                    <SortableFeedTile key={post.id} post={post} onOpen={() => setEditingPost(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} onFullscreen={() => setFullscreenPost(post.id)} />
                   ))}
                 </div>
               ) : (
@@ -678,7 +742,7 @@ export default function PlanningDetail() {
 
 // ===== Sortable item components =====
 
-function SortableFeedTile({ post, onOpen, onToggleScheduled }: { post: any; onOpen: () => void; onToggleScheduled: () => void }) {
+function SortableFeedTile({ post, onOpen, onToggleScheduled, onFullscreen }: { post: any; onOpen: () => void; onToggleScheduled: () => void; onFullscreen: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: post.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
   const Icon = contentTypeIcons[post.content_type] || Image;
@@ -725,6 +789,13 @@ function SortableFeedTile({ post, onOpen, onToggleScheduled }: { post: any; onOp
             <CalendarCheck className="h-3 w-3" /> Prog.
           </div>
         )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onFullscreen(); }}
+          className="absolute right-1 top-1 rounded-md bg-black/60 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/80"
+          title="Ver em tela cheia"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
         <button
           onClick={(e) => { e.stopPropagation(); onToggleScheduled(); }}
           className={`absolute right-1 bottom-1 rounded-md p-1 text-white transition-opacity ${post.scheduled ? "bg-blue-500 opacity-100" : "bg-black/60 opacity-0 group-hover:opacity-100"}`}
