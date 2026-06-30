@@ -28,6 +28,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
   const [editedHashtags, setEditedHashtags] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editedCommentText, setEditedCommentText] = useState("");
+  const [sendingAudio, setSendingAudio] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const [carouselApi, setCarouselApi] = useState<CarouselApi | null>(null);
@@ -78,6 +79,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
 
   const addComment = useMutation({
     mutationFn: async ({ text, audioUrl }: { text?: string; audioUrl?: string }) => {
+      if (!text?.trim() && !audioUrl) throw new Error("Comentário vazio");
       const { error } = await supabase.from("post_comments").insert({
         post_id: postId, author_type: "client", text: text || null, audio_url: audioUrl || null,
       });
@@ -85,13 +87,18 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["post-comments", postId] });
-      setCommentText(""); setAudioBlob(null); setAudioUrl(null);
+      setCommentText(""); setAudioBlob(null); setAudioUrl(null); setSendingAudio(false);
       toast.success("Comentário enviado!");
+    },
+    onError: (error: any) => {
+      setSendingAudio(false);
+      toast.error(`Erro ao enviar: ${error.message || "Tente novamente"}`);
     },
   });
 
   const updateComment = useMutation({
     mutationFn: async ({ id, text }: { id: string; text: string }) => {
+      if (!text?.trim()) throw new Error("Comentário não pode ser vazio");
       const { error } = await supabase.from("post_comments").update({ text }).eq("id", id);
       if (error) throw error;
     },
@@ -99,6 +106,9 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
       queryClient.invalidateQueries({ queryKey: ["post-comments", postId] });
       setEditingCommentId(null);
       toast.success("Comentário atualizado!");
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao atualizar: ${error.message || "Tente novamente"}`);
     },
   });
 
@@ -110,6 +120,9 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["post-comments", postId] });
       toast.success("Comentário removido!");
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao remover: ${error.message || "Tente novamente"}`);
     },
   });
 
@@ -164,13 +177,19 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
   const stopRecording = () => { mediaRecorderRef.current?.stop(); setIsRecording(false); };
 
   const sendAudioComment = async () => {
-    if (!audioBlob) return;
-    const ext = audioBlob.type.includes("mp4") || audioBlob.type.includes("aac") ? "mp4" : "webm";
-    const path = `${postId}/${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from("comment-audios").upload(path, audioBlob, { contentType: audioBlob.type });
-    if (error) { toast.error("Erro no upload do áudio"); return; }
-    const { data: urlData } = supabase.storage.from("comment-audios").getPublicUrl(path);
-    addComment.mutate({ audioUrl: urlData.publicUrl });
+    if (!audioBlob || sendingAudio) return;
+    setSendingAudio(true);
+    try {
+      const ext = audioBlob.type.includes("mp4") || audioBlob.type.includes("aac") ? "mp4" : "webm";
+      const path = `${postId}/${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from("comment-audios").upload(path, audioBlob, { contentType: audioBlob.type });
+      if (error) { toast.error("Erro no upload do áudio"); setSendingAudio(false); return; }
+      const { data: urlData } = supabase.storage.from("comment-audios").getPublicUrl(path);
+      addComment.mutate({ audioUrl: urlData.publicUrl });
+    } catch (err: any) {
+      toast.error(`Erro: ${err.message || "Falha ao enviar áudio"}`);
+      setSendingAudio(false);
+    }
   };
 
   const isVideo = (url: string) => /\.(mp4|mov|webm|avi|mkv|m4v|ogv)(\?|$)/i.test(url);
@@ -461,8 +480,10 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
 
           {/* Text comment */}
           <div className="flex gap-2">
-            <Textarea value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Escreva um comentário..." rows={1} className="flex-1" />
-            <Button size="icon" disabled={!commentText.trim()} onClick={() => addComment.mutate({ text: commentText })}><Send className="h-4 w-4" /></Button>
+            <Textarea value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Escreva um comentário..." rows={1} className="flex-1" disabled={addComment.isPending} />
+            <Button size="icon" disabled={!commentText.trim() || addComment.isPending} onClick={() => addComment.mutate({ text: commentText })} title={addComment.isPending ? "Enviando..." : "Enviar"}>
+              {addComment.isPending ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> : <Send className="h-4 w-4" />}
+            </Button>
           </div>
 
           {/* Audio comment */}
@@ -477,8 +498,10 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
               <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                 <audio controls src={audioUrl} className="h-10 w-full sm:w-auto" />
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={sendAudioComment}><Send className="mr-1 h-4 w-4" /> Enviar</Button>
-                  <Button variant="ghost" size="sm" onClick={() => { setAudioBlob(null); setAudioUrl(null); }}><X className="h-4 w-4" /></Button>
+                  <Button size="sm" onClick={sendAudioComment} disabled={sendingAudio} title={sendingAudio ? "Enviando..." : "Enviar áudio"}>
+                    {sendingAudio ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> : <><Send className="mr-1 h-4 w-4" /> Enviar</>}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => { setAudioBlob(null); setAudioUrl(null); }} disabled={sendingAudio}><X className="h-4 w-4" /></Button>
                 </div>
               </div>
             )}

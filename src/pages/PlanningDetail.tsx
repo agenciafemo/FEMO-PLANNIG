@@ -154,13 +154,14 @@ export default function PlanningDetail() {
 
   const saveScript = useMutation({
     mutationFn: async () => {
+      if (!scriptText.trim()) throw new Error("Roteiro não pode estar vazio");
       const finalTitle = scriptTitle.trim() || `Roteiro ${(videoScripts?.length ?? 0) + 1}`;
       if (editingScriptId) {
         const { error } = await supabase.from("video_scripts").update({
           title: finalTitle,
-          spoken_text: scriptText || null,
-          editing_instructions: scriptInstructions || null,
-          references_notes: scriptReferences || null,
+          spoken_text: scriptText.trim(),
+          editing_instructions: scriptInstructions?.trim() || null,
+          references_notes: scriptReferences?.trim() || null,
         }).eq("id", editingScriptId);
         if (error) throw error;
       } else {
@@ -170,9 +171,9 @@ export default function PlanningDetail() {
           planning_id: planningId!,
           position: maxPos,
           title: finalTitle,
-          spoken_text: scriptText || null,
-          editing_instructions: scriptInstructions || null,
-          references_notes: scriptReferences || null,
+          spoken_text: scriptText.trim(),
+          editing_instructions: scriptInstructions?.trim() || null,
+          references_notes: scriptReferences?.trim() || null,
         });
         if (error) throw error;
       }
@@ -180,9 +181,13 @@ export default function PlanningDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["video-scripts", planningId] });
       resetScriptForm();
-      toast.success(editingScriptId ? "Roteiro atualizado!" : "Roteiro adicionado!");
+      toast.success(editingScriptId ? "Roteiro atualizado com sucesso!" : "Roteiro salvo com sucesso!");
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => {
+      const errorMsg = e.message || "Erro ao salvar roteiro. Tente novamente.";
+      toast.error(errorMsg);
+      console.error("Script save error:", e);
+    },
   });
 
   const deleteScript = useMutation({
@@ -192,7 +197,10 @@ export default function PlanningDetail() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["video-scripts", planningId] });
-      toast.success("Roteiro removido");
+      toast.success("Roteiro removido com sucesso!");
+    },
+    onError: (e: any) => {
+      toast.error(`Erro ao remover: ${e.message || "Tente novamente"}`);
     },
   });
 
