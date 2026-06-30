@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ArrowLeft, Plus, Image, Video, Layers, Circle, FileText, Play, Trash2, ScrollText, CalendarCheck, Pencil, Copy } from "lucide-react";
+import { ArrowLeft, Plus, Image, Video, Layers, Circle, FileText, Play, Trash2, ScrollText, CalendarCheck, Pencil, Copy, ZoomIn, ZoomOut } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -70,6 +70,7 @@ export default function PlanningDetail() {
   const [editingPeriod, setEditingPeriod] = useState(false);
   const [editMonth, setEditMonth] = useState("");
   const [editYear, setEditYear] = useState("");
+  const [zoomLevel, setZoomLevel] = useState(100);
 
   const parsedMonth = (() => {
     if (!monthYear) return 0;
@@ -364,7 +365,28 @@ export default function PlanningDetail() {
   const accentColor = client?.accent_color || "#ef5a2b";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
+      {/* Zoom Control */}
+      <div className="fixed bottom-6 right-6 z-40 bg-white rounded-full shadow-lg border border-muted">
+        <button
+          onClick={() => setZoomLevel(Math.max(50, zoomLevel - 10))}
+          className="p-3 hover:bg-muted transition-colors rounded-l-full"
+          title="Diminuir zoom"
+        >
+          <ZoomOut className="h-5 w-5" />
+        </button>
+        <span className="inline-flex items-center justify-center w-12 text-sm font-semibold text-muted-foreground">
+          {zoomLevel}%
+        </span>
+        <button
+          onClick={() => setZoomLevel(Math.min(200, zoomLevel + 10))}
+          className="p-3 hover:bg-muted transition-colors rounded-r-full"
+          title="Aumentar zoom"
+        >
+          <ZoomIn className="h-5 w-5" />
+        </button>
+      </div>
+
       {/* Barra colorida do cliente */}
       <div className="h-1 w-full rounded-full" style={{ background: `linear-gradient(90deg, ${accentColor} 0%, ${accentColor}55 100%)` }} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -487,7 +509,7 @@ export default function PlanningDetail() {
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd(feedPosts)}>
             <SortableContext items={feedPosts.map((p) => p.id)} strategy={viewMode === "grid" ? rectSortingStrategy : verticalListSortingStrategy}>
               {viewMode === "grid" ? (
-                <div className="grid grid-cols-3 gap-1">
+                <div className="grid grid-cols-3 gap-1 origin-top transition-transform duration-200" style={{ transform: `scale(${zoomLevel / 100})` }}>
                   {feedPosts.map((post) => (
                     <SortableFeedTile key={post.id} post={post} onOpen={() => setEditingPost(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
                   ))}
