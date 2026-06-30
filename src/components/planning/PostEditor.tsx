@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, ExternalLink, Copy } from "lucide-react";
+import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, ExternalLink, Copy, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -34,6 +34,7 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
   const [status, setStatus] = useState("draft");
   const [blogBody, setBlogBody] = useState("");
   const [managerComment, setManagerComment] = useState("");
+  const [expandedImageIndex, setExpandedImageIndex] = useState<number | null>(null);
 
   const { data: post } = useQuery({
     queryKey: ["post", postId],
@@ -193,6 +194,25 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
     setMediaUrls(arr);
   };
 
+  const getExpandedImages = () => {
+    if (contentType === "carousel") return mediaUrls;
+    if (contentType === "story") return mediaUrls;
+    return coverImageUrl ? [coverImageUrl] : [];
+  };
+
+  const expandedImages = getExpandedImages();
+  const handlePrevImage = () => {
+    if (expandedImageIndex === null) return;
+    const newIdx = expandedImageIndex === 0 ? expandedImages.length - 1 : expandedImageIndex - 1;
+    setExpandedImageIndex(newIdx);
+  };
+
+  const handleNextImage = () => {
+    if (expandedImageIndex === null) return;
+    const newIdx = expandedImageIndex === expandedImages.length - 1 ? 0 : expandedImageIndex + 1;
+    setExpandedImageIndex(newIdx);
+  };
+
   return (
     <Dialog open onOpenChange={() => onClose()}>
       <DialogContent className="max-h-[90vh] w-[95vw] max-w-2xl overflow-y-auto p-4 sm:p-6">
@@ -253,9 +273,12 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
           <div className="space-y-2">
             <Label>Capa / Imagem</Label>
             {coverImageUrl && (
-              <div className="relative mb-2">
-                <img src={coverImageUrl} alt="Preview" className="max-h-48 w-full rounded-lg object-cover" />
-                <Button variant="destructive" size="sm" className="absolute right-2 top-2" onClick={() => setCoverImageUrl("")}>Remover</Button>
+              <div className="relative mb-2 cursor-pointer group" onClick={() => setExpandedImageIndex(0)}>
+                <img src={coverImageUrl} alt="Preview" className="max-h-48 w-full rounded-lg object-cover group-hover:opacity-75 transition-opacity" />
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
+                  <span className="text-white font-semibold bg-black/40 px-4 py-2 rounded">Clique para ampliar</span>
+                </div>
+                <Button variant="destructive" size="sm" className="absolute right-2 top-2 z-10" onClick={(e) => { e.stopPropagation(); setCoverImageUrl(""); }}>Remover</Button>
               </div>
             )}
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -274,24 +297,24 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
               {mediaUrls.length > 0 && (
                 <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                   {mediaUrls.map((url, idx) => (
-                    <div key={idx} className="group relative aspect-square overflow-hidden rounded-md border bg-muted">
+                    <div key={idx} className="group relative aspect-square overflow-hidden rounded-md border bg-muted cursor-pointer" onClick={() => setExpandedImageIndex(idx)}>
                       {isVideo(url) ? (
-                        <div className="flex h-full w-full items-center justify-center bg-black">
+                        <div className="flex h-full w-full items-center justify-center bg-black group-hover:opacity-75 transition-opacity">
                           <Video className="h-6 w-6 text-white/80" />
                         </div>
                       ) : (
-                        <img src={url} alt={`Slide ${idx + 1}`} className="h-full w-full object-cover" />
+                        <img src={url} alt={`Slide ${idx + 1}`} className="h-full w-full object-cover group-hover:opacity-75 transition-opacity" />
                       )}
                       <div className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-xs font-bold text-white">{idx + 1}</div>
                       {isVideo(url) && (
                         <div className="absolute right-1 top-1 rounded bg-black/70 px-1 py-0.5 text-[10px] text-white">VID</div>
                       )}
-                      <div className="absolute inset-0 flex items-center justify-center gap-1 bg-black/60 opacity-0 transition-opacity group-hover:opacity-100">
-                        <Button size="icon" variant="secondary" className="h-7 w-7" disabled={idx === 0} onClick={() => moveCarouselImage(idx, -1)}>‹</Button>
-                        <Button size="icon" variant="destructive" className="h-7 w-7" onClick={() => removeCarouselImage(idx)}>
+                      <div className="absolute inset-0 flex items-center justify-center gap-1 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button size="icon" variant="secondary" className="h-7 w-7" disabled={idx === 0} onClick={(e) => { e.stopPropagation(); moveCarouselImage(idx, -1); }}>‹</Button>
+                        <Button size="icon" variant="destructive" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); removeCarouselImage(idx); }}>
                           <Trash2 className="h-3 w-3" />
                         </Button>
-                        <Button size="icon" variant="secondary" className="h-7 w-7" disabled={idx === mediaUrls.length - 1} onClick={() => moveCarouselImage(idx, 1)}>›</Button>
+                        <Button size="icon" variant="secondary" className="h-7 w-7" disabled={idx === mediaUrls.length - 1} onClick={(e) => { e.stopPropagation(); moveCarouselImage(idx, 1); }}>›</Button>
                       </div>
                     </div>
                   ))}
@@ -425,6 +448,82 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
             </div>
           </div>
         </div>
+
+        {/* Expanded Image View */}
+        {expandedImageIndex !== null && expandedImages.length > 0 && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+            <div className="relative w-full max-w-4xl">
+              {/* Close button */}
+              <button
+                onClick={() => setExpandedImageIndex(null)}
+                className="absolute -top-10 right-0 text-white hover:text-gray-300 z-10"
+              >
+                <X className="h-6 w-6" />
+              </button>
+
+              {/* Main image display */}
+              <div className="relative bg-black rounded-lg overflow-hidden">
+                {isVideo(expandedImages[expandedImageIndex]) ? (
+                  <video
+                    src={expandedImages[expandedImageIndex]}
+                    controls
+                    className="w-full h-auto max-h-[60vh] object-contain"
+                  />
+                ) : (
+                  <img
+                    src={expandedImages[expandedImageIndex]}
+                    alt={`Imagem ${expandedImageIndex + 1}`}
+                    className="w-full h-auto max-h-[60vh] object-contain"
+                  />
+                )}
+
+                {/* Navigation arrows - only show if multiple images */}
+                {expandedImages.length > 1 && (
+                  <>
+                    <button
+                      onClick={handlePrevImage}
+                      className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/20 hover:bg-white/40 text-white p-2 rounded-full transition-colors"
+                      title="Imagem anterior"
+                    >
+                      <ChevronLeft className="h-6 w-6" />
+                    </button>
+                    <button
+                      onClick={handleNextImage}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/20 hover:bg-white/40 text-white p-2 rounded-full transition-colors"
+                      title="Próxima imagem"
+                    >
+                      <ChevronRight className="h-6 w-6" />
+                    </button>
+
+                    {/* Image counter */}
+                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 text-white px-3 py-1 rounded-full text-sm font-medium">
+                      {expandedImageIndex + 1} / {expandedImages.length}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Image info below */}
+              <div className="mt-4 bg-white/10 rounded-lg p-4 text-white max-h-[20vh] overflow-y-auto">
+                {caption && (
+                  <div className="mb-3">
+                    <h3 className="font-semibold text-sm mb-1">Legenda</h3>
+                    <p className="text-sm whitespace-pre-wrap">{caption}</p>
+                  </div>
+                )}
+                {hashtags && (
+                  <div>
+                    <h3 className="font-semibold text-sm mb-1">Hashtags</h3>
+                    <p className="text-sm text-primary">{hashtags}</p>
+                  </div>
+                )}
+                {!caption && !hashtags && (
+                  <p className="text-sm text-gray-400">Nenhuma informação adicional</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
