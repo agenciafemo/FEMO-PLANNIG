@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +26,7 @@ interface PostEditorProps {
 }
 
 export function PostEditor({ postId, planningId, clientId, onClose, clientNotes }: PostEditorProps) {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [caption, setCaption] = useState("");
   const [hashtags, setHashtags] = useState("");
@@ -39,6 +41,9 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
   const [managerComment, setManagerComment] = useState("");
   const [expandedImageIndex, setExpandedImageIndex] = useState<number | null>(null);
   const [targetPlanningId, setTargetPlanningId] = useState("");
+  const now = new Date();
+  const [newPlanningMonth, setNewPlanningMonth] = useState(String(now.getMonth() + 1));
+  const [newPlanningYear, setNewPlanningYear] = useState(String(now.getFullYear()));
 
   const { data: post } = useQuery({
     queryKey: ["post", postId],
@@ -153,6 +158,26 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
       queryClient.invalidateQueries({ queryKey: ["posts", targetPlanningId] });
       toast.success("Post movido com sucesso!");
       onClose();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const createTargetPlanning = useMutation({
+    mutationFn: async () => {
+      if (!clientId) throw new Error("Cliente não identificado");
+      const { data, error } = await supabase
+        .from("plannings")
+        .insert({ client_id: clientId, created_by: user!.id, month: parseInt(newPlanningMonth), year: parseInt(newPlanningYear) } as any)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["other-plannings", clientId, planningId] });
+      queryClient.invalidateQueries({ queryKey: ["plannings"] });
+      setTargetPlanningId(data.id);
+      toast.success("Planejamento criado! Agora selecione-o para mover o post.");
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -437,9 +462,9 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
           </div>
 
           {/* Move to another planning */}
-          {otherPlannings && otherPlannings.length > 0 && (
-            <div className="space-y-2 rounded-lg border p-4">
-              <Label className="flex items-center gap-2"><FolderInput className="h-4 w-4" /> Mover para outro planejamento</Label>
+          <div className="space-y-2 rounded-lg border p-4">
+            <Label className="flex items-center gap-2"><FolderInput className="h-4 w-4" /> Mover para outro planejamento</Label>
+            {otherPlannings && otherPlannings.length > 0 ? (
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Select value={targetPlanningId} onValueChange={setTargetPlanningId}>
                   <SelectTrigger className="flex-1"><SelectValue placeholder="Selecione o planejamento de destino" /></SelectTrigger>
@@ -458,8 +483,38 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
                   {movePost.isPending ? "Movendo..." : "Mover"}
                 </Button>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Este cliente ainda não tem outro planejamento criado, por isso não é possível mover o post agora. Crie um novo planejamento abaixo para liberar a opção de mover.
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Select value={newPlanningMonth} onValueChange={setNewPlanningMonth}>
+                    <SelectTrigger className="sm:w-[160px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {MONTHS_SHORT.map((m, i) => (<SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number"
+                    value={newPlanningYear}
+                    onChange={(e) => setNewPlanningYear(e.target.value)}
+                    className="sm:w-24"
+                    min={2020}
+                    max={2099}
+                  />
+                  <Button
+                    variant="outline"
+                    disabled={createTargetPlanning.isPending}
+                    onClick={() => createTargetPlanning.mutate()}
+                  >
+                    <FolderInput className="mr-1 h-4 w-4" />
+                    {createTargetPlanning.isPending ? "Criando..." : "Criar planejamento"}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Client Notes */}
           {clientNotes && (
