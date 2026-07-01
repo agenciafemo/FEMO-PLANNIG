@@ -9,19 +9,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, ExternalLink, Copy, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, ExternalLink, Copy, ChevronLeft, ChevronRight, X, FolderInput } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 
+const MONTHS_SHORT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+
 interface PostEditorProps {
   postId: string;
   planningId: string;
+  clientId?: string;
   onClose: () => void;
   clientNotes?: string;
 }
 
-export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEditorProps) {
+export function PostEditor({ postId, planningId, clientId, onClose, clientNotes }: PostEditorProps) {
   const queryClient = useQueryClient();
   const [caption, setCaption] = useState("");
   const [hashtags, setHashtags] = useState("");
@@ -35,6 +38,7 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
   const [blogBody, setBlogBody] = useState("");
   const [managerComment, setManagerComment] = useState("");
   const [expandedImageIndex, setExpandedImageIndex] = useState<number | null>(null);
+  const [targetPlanningId, setTargetPlanningId] = useState("");
 
   const { data: post } = useQuery({
     queryKey: ["post", postId],
@@ -43,6 +47,22 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
       if (error) throw error;
       return data;
     },
+  });
+
+  const { data: otherPlannings } = useQuery({
+    queryKey: ["other-plannings", clientId, planningId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("plannings")
+        .select("id, month, year")
+        .eq("client_id", clientId!)
+        .neq("id", planningId)
+        .order("year", { ascending: false })
+        .order("month", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!clientId,
   });
 
   const { data: comments } = useQuery({
@@ -109,6 +129,32 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
       toast.success("Post removido");
       onClose();
     },
+  });
+
+  const movePost = useMutation({
+    mutationFn: async () => {
+      if (!targetPlanningId) throw new Error("Selecione um planejamento de destino");
+      const { data: targetPosts, error: fetchError } = await supabase
+        .from("posts")
+        .select("position")
+        .eq("planning_id", targetPlanningId)
+        .order("position", { ascending: false })
+        .limit(1);
+      if (fetchError) throw fetchError;
+      const newPosition = targetPosts && targetPosts.length > 0 ? targetPosts[0].position + 1 : 0;
+      const { error } = await supabase
+        .from("posts")
+        .update({ planning_id: targetPlanningId, position: newPosition })
+        .eq("id", postId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["posts", planningId] });
+      queryClient.invalidateQueries({ queryKey: ["posts", targetPlanningId] });
+      toast.success("Post movido com sucesso!");
+      onClose();
+    },
+    onError: (e: any) => toast.error(e.message),
   });
 
   const addManagerComment = useMutation({
@@ -389,6 +435,31 @@ export function PostEditor({ postId, planningId, onClose, clientNotes }: PostEdi
               </SelectContent>
             </Select>
           </div>
+
+          {/* Move to another planning */}
+          {otherPlannings && otherPlannings.length > 0 && (
+            <div className="space-y-2 rounded-lg border p-4">
+              <Label className="flex items-center gap-2"><FolderInput className="h-4 w-4" /> Mover para outro planejamento</Label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Select value={targetPlanningId} onValueChange={setTargetPlanningId}>
+                  <SelectTrigger className="flex-1"><SelectValue placeholder="Selecione o planejamento de destino" /></SelectTrigger>
+                  <SelectContent>
+                    {otherPlannings.map((p: any) => (
+                      <SelectItem key={p.id} value={p.id}>{MONTHS_SHORT[p.month - 1]} {p.year}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  disabled={!targetPlanningId || movePost.isPending}
+                  onClick={() => movePost.mutate()}
+                >
+                  <FolderInput className="mr-1 h-4 w-4" />
+                  {movePost.isPending ? "Movendo..." : "Mover"}
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Client Notes */}
           {clientNotes && (

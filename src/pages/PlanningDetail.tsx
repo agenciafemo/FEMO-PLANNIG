@@ -687,6 +687,7 @@ export default function PlanningDetail() {
         <PostEditor
           postId={editingPost}
           planningId={planningId}
+          clientId={(planning as any).client_id}
           onClose={() => setEditingPost(null)}
           clientNotes={client?.notes}
         />
