@@ -1,3 +1,3 @@
-# Welcome to your Lovable project
+# Norteia
 
-TODO: Document your project here
+Planejamento, aprovação e histórico de conteúdo em um só lugar.

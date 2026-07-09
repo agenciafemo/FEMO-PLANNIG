@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { useIsAdmin } from "@/hooks/useIsAdmin";
+import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,7 +22,7 @@ const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "").to
 
 export default function Clients() {
   const { user } = useAuth();
-  const isAdmin = useIsAdmin();
+  const { organizationId, isLegacy } = useOrganization();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -55,18 +55,22 @@ export default function Clients() {
   const [storiesCount, setStoriesCount] = useState(0);
 
   const { data: clients, isLoading } = useQuery({
-    queryKey: ["clients"],
+    queryKey: ["clients", organizationId],
     queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("*").order("name");
+      // TODO(multi-org-migration): "organization_id" ainda não existe no
+      // schema real; o cast evita quebrar o build antes da migration 3.
+      let query = supabase.from("clients").select("*") as any;
+      if (!isLegacy) query = query.eq("organization_id", organizationId!);
+      const { data, error } = await query.order("name");
       if (error) throw error;
-      return data;
+      return data as any[];
     },
-    enabled: !!user,
+    enabled: !!user && (isLegacy || !!organizationId),
   });
 
   const uploadLogo = async (file: File, clientId: string): Promise<string | null> => {
     const ext = file.name.split(".").pop();
-    const path = `${clientId}.${ext}`;
+    const path = `${clientId}/logo.${ext}`;
     const { error } = await supabase.storage.from("client-logos").upload(path, file, { upsert: true });
     if (error) { toast.error("Erro ao enviar logo: " + error.message); return null; }
     const { data } = supabase.storage.from("client-logos").getPublicUrl(path);
@@ -75,9 +79,17 @@ export default function Clients() {
 
   const createClient = useMutation({
     mutationFn: async () => {
+      const payload: Record<string, unknown> = {
+        created_by: user!.id,
+        name,
+        notes,
+        accent_color: accentColor,
+      };
+      if (!isLegacy) payload.organization_id = organizationId!;
+
       const { data: newClient, error } = await supabase
         .from("clients")
-        .insert({ created_by: user!.id, name, notes, accent_color: accentColor })
+        .insert(payload as any)
         .select()
         .single();
       if (error) throw error;
@@ -115,7 +127,7 @@ export default function Clients() {
         notes: editNotes,
         accent_color: editAccentColor,
         logo_url: logoUrl,
-      }).eq("id", editingClient.id);
+      } as any).eq("id", editingClient.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -139,9 +151,17 @@ export default function Clients() {
 
   const createPlanning = useMutation({
     mutationFn: async () => {
+      const payload: Record<string, unknown> = {
+        client_id: planningClientId,
+        created_by: user!.id,
+        month: parseInt(planningMonth),
+        year: parseInt(planningYear),
+      };
+      if (!isLegacy) payload.organization_id = organizationId!;
+
       const { data: planning, error } = await supabase
         .from("plannings")
-        .insert({ client_id: planningClientId, created_by: user!.id, month: parseInt(planningMonth), year: parseInt(planningYear) })
+        .insert(payload as any)
         .select()
         .single();
       if (error) throw error;

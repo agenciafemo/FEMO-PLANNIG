@@ -13,6 +13,7 @@ import { useAuth } from "@/contexts/AuthContext";
 export default function Auth() {
   const [searchParams] = useSearchParams();
   const inviteEmail = searchParams.get("invite") ?? "";
+  const inviteToken = searchParams.get("invite_token");
   const isInvite = !!inviteEmail;
 
   const [isLogin, setIsLogin] = useState(!isInvite);
@@ -24,8 +25,8 @@ export default function Auth() {
   const { user } = useAuth();
 
   useEffect(() => {
-    if (user) navigate("/dashboard", { replace: true });
-  }, [user, navigate]);
+    if (user) navigate(inviteToken ? `/invite/${inviteToken}` : "/dashboard", { replace: true });
+  }, [user, navigate, inviteToken]);
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,7 +64,7 @@ export default function Auth() {
     setLoading(true);
     try {
       const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin + "/dashboard",
+        redirect_uri: window.location.origin + (inviteToken ? `/invite/${inviteToken}` : "/dashboard"),
       });
       if (result.error) throw result.error;
     } catch (error: any) {
@@ -76,10 +77,12 @@ export default function Auth() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md border-border">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
-            <span className="text-xl font-bold text-primary-foreground">F</span>
-          </div>
-          <CardTitle className="text-2xl">Femo Planning</CardTitle>
+          <img
+            src="/brand/norteia/logo/NOR.png"
+            alt="Norteia"
+            className="mx-auto mb-4 h-14 w-auto object-contain"
+          />
+          <CardTitle className="text-2xl">Norteia</CardTitle>
           <CardDescription>
             {isLogin ? "Entre na sua conta" : "Crie sua conta"}
           </CardDescription>

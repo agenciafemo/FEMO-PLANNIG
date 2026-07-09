@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { Users, LayoutGrid, UserPlus, LogOut, Shield, Bell } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
+import { useOrganization } from "@/hooks/useOrganization";
 import { cn } from "@/lib/utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -18,27 +19,43 @@ const navItems = [
 
 function NotificationBell() {
   const queryClient = useQueryClient();
+  const { organizationId, isLegacy } = useOrganization();
   const [open, setOpen] = useState(false);
 
+  // TODO(pending-schema-check): "notifications" não está confirmada no
+  // schema real (types.ts). Tratamos como tabela não confiável: qualquer
+  // falha (tabela inexistente, coluna organization_id ausente etc.) deve
+  // resultar em sino vazio, nunca em erro visível ou quebra da tela.
   const { data: notifications } = useQuery({
-    queryKey: ["notifications"],
+    queryKey: ["notifications", organizationId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("notifications")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(20);
-      if (error) return [];
-      return data ?? [];
+      try {
+        let query = supabase.from("notifications" as any).select("*") as any;
+        if (!isLegacy) query = query.eq("organization_id", organizationId!);
+        const { data, error } = await query.order("created_at", { ascending: false }).limit(20);
+        if (error) return [];
+        return (data ?? []) as any[];
+      } catch {
+        return [];
+      }
     },
+    enabled: isLegacy || !!organizationId,
     refetchInterval: 30000,
+    retry: false,
   });
 
   const markAllRead = useMutation({
     mutationFn: async () => {
-      await supabase.from("notifications").update({ read: true }).eq("read", false);
+      try {
+        let query = (supabase.from("notifications" as any) as any).update({ read: true }).eq("read", false);
+        if (!isLegacy) query = query.eq("organization_id", organizationId!);
+        await query;
+      } catch {
+        // Silencioso: sino de notificações é best-effort enquanto a tabela
+        // não estiver confirmada no banco real.
+      }
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications", organizationId] }),
   });
 
   const unreadCount = notifications?.filter((n: any) => !n.read).length ?? 0;
@@ -96,12 +113,14 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r bg-sidebar text-sidebar-foreground">
-      {/* Header com identidade FEMO */}
+      {/* Header com identidade Norteia */}
       <div className="flex h-16 items-center justify-between px-5 border-b border-sidebar-border"
-        style={{ background: "linear-gradient(135deg, #ef5a2b 0%, #c94520 100%)" }}>
+        style={{ background: "linear-gradient(135deg, #1B4B4A 0%, #123534 100%)" }}>
         <div className="flex items-center gap-3">
-          <img src="/logo-femo.png" alt="FEMO" className="h-14 w-auto object-contain" />
-          <span className="text-[10px] text-white/50 tracking-widest uppercase">Planning</span>
+          {/* NOR.png (símbolo grafite) não tem contraste suficiente sobre o
+              gradiente petróleo do header — usar wordmark em texto até haver
+              uma variante clara do símbolo. */}
+          <span className="text-lg font-bold tracking-tight text-white">Norteia</span>
         </div>
         <NotificationBell />
       </div>
@@ -121,9 +140,9 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
                   : "text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
               )}
             >
-              <item.icon className={cn("h-4 w-4", isActive && "text-[#ef5a2b]")} />
+              <item.icon className={cn("h-4 w-4", isActive && "text-[#1B4B4A]")} />
               {item.label}
-              {isActive && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-[#ef5a2b]" />}
+              {isActive && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-[#1B4B4A]" />}
             </Link>
           );
         })}
@@ -131,13 +150,13 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
 
       <div className="border-t border-sidebar-border p-4">
         <div className="mb-3 flex items-center gap-3 rounded-lg bg-sidebar-accent px-3 py-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#ef5a2b] text-xs font-bold text-white">
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1B4B4A] text-xs font-bold text-white">
             {user?.email?.charAt(0).toUpperCase()}
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="truncate text-xs font-medium text-sidebar-foreground">{user?.email}</span>
             {isAdmin && (
-              <span className="flex items-center gap-1 text-[10px] text-[#ef5a2b]">
+              <span className="flex items-center gap-1 text-[10px] text-[#1B4B4A]">
                 <Shield className="h-2.5 w-2.5" /> Admin
               </span>
             )}

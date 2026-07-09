@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +14,7 @@ import { toast } from "sonner";
 
 export default function Templates() {
   const { user } = useAuth();
+  const { organizationId, isLegacy } = useOrganization();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [replicateOpen, setReplicateOpen] = useState(false);
@@ -24,40 +26,47 @@ export default function Templates() {
   const [storiesCount, setStoriesCount] = useState(0);
 
   const { data: templates, isLoading } = useQuery({
-    queryKey: ["templates"],
+    queryKey: ["templates", organizationId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("planning_templates")
-        .select("*, template_posts(count)")
-        .eq("user_id", user!.id)
-        .order("name");
+      let query = supabase.from("planning_templates").select("*, template_posts(count)") as any;
+      // Sem a migration, templates continuam isolados por usuário (comportamento
+      // original), não por organização.
+      // TODO(multi-org-migration): "organization_id" ainda não existe no
+      // schema real; o cast evita quebrar o build antes da migration 3.
+      query = isLegacy ? query.eq("user_id", user!.id) : query.eq("organization_id", organizationId!);
+      const { data, error } = await query.order("name");
       if (error) throw error;
-      return data;
+      return data as any[];
     },
-    enabled: !!user,
+    enabled: !!user && (isLegacy || !!organizationId),
   });
 
   const { data: clients } = useQuery({
-    queryKey: ["clients"],
+    queryKey: ["clients", organizationId],
     queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("*").order("name");
+      let query = supabase.from("clients").select("*") as any;
+      if (!isLegacy) query = query.eq("organization_id", organizationId!);
+      const { data, error } = await query.order("name");
       if (error) throw error;
-      return data;
+      return data as any[];
     },
-    enabled: !!user,
+    enabled: !!user && (isLegacy || !!organizationId),
   });
 
   const createTemplate = useMutation({
     mutationFn: async () => {
+      const templatePayload: Record<string, unknown> = {
+        user_id: user!.id,
+        name,
+        description,
+        default_post_count: postCount,
+        default_stories_count: storiesCount,
+      };
+      if (!isLegacy) templatePayload.organization_id = organizationId!;
+
       const { data: template, error } = await supabase
         .from("planning_templates")
-        .insert({
-          user_id: user!.id,
-          name,
-          description,
-          default_post_count: postCount,
-          default_stories_count: storiesCount,
-        } as any)
+        .insert(templatePayload as any)
         .select()
         .single();
       if (error) throw error;
@@ -114,9 +123,12 @@ export default function Templates() {
         .order("position");
 
       for (const clientId of selectedClients) {
+        const replicatePayload: Record<string, unknown> = { client_id: clientId, created_by: user!.id, month: currentMonth, year: currentYear };
+        if (!isLegacy) replicatePayload.organization_id = organizationId!;
+
         const { data: planning, error } = await supabase
           .from("plannings")
-          .insert({ client_id: clientId, created_by: user!.id, month: currentMonth, year: currentYear })
+          .insert(replicatePayload as any)
           .select()
           .single();
         if (error) continue;

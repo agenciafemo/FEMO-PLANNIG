@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +21,7 @@ interface ClientReportsProps {
 
 export function ClientReports({ clientId }: ClientReportsProps) {
   const { user } = useAuth();
+  const { organizationId, isLegacy } = useOrganization();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState(String(new Date().getMonth() + 1));
@@ -65,14 +67,17 @@ export function ClientReports({ clientId }: ClientReportsProps) {
 
       const { data: urlData } = supabase.storage.from("report-pdfs").getPublicUrl(path);
 
-      const { error } = await supabase.from("monthly_reports").insert({
+      const payload: Record<string, unknown> = {
         client_id: clientId,
         user_id: user!.id,
         month: parseInt(month),
         year: parseInt(year),
         pdf_url: urlData.publicUrl,
         summary_text: summaryText || null,
-      });
+      };
+      if (!isLegacy) payload.organization_id = organizationId!;
+
+      const { error } = await supabase.from("monthly_reports").insert(payload as any);
       if (error) throw error;
 
       queryClient.invalidateQueries({ queryKey: ["client-reports", clientId] });

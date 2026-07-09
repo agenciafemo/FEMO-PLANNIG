@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { useIsAdmin } from "@/hooks/useIsAdmin";
+import { useOrganization } from "@/hooks/useOrganization";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,6 +10,7 @@ import { Users, Calendar, MessageSquare, CheckCircle2, Clock, FileEdit, ChevronR
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
@@ -23,37 +24,45 @@ const contentTypeIcons: Record<string, any> = {
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const isAdmin = useIsAdmin();
+  const { organizationId, isLegacy } = useOrganization();
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(String(now.getMonth() + 1));
   const [selectedYear, setSelectedYear] = useState(String(now.getFullYear()));
 
   // All clients
-  const { data: clients } = useQuery({
-    queryKey: ["dashboard-clients"],
+  const { data: allClients } = useQuery({
+    queryKey: ["dashboard-clients", organizationId],
     queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("*").order("name");
+      // TODO(multi-org-migration): "organization_id" ainda não existe no
+      // schema real; o cast evita quebrar o build antes da migration 3.
+      let query = supabase.from("clients").select("*") as any;
+      if (!isLegacy) query = query.eq("organization_id", organizationId!);
+      const { data, error } = await query.order("name");
       if (error) throw error;
-      return data;
+      return data as any[];
     },
-    enabled: !!user,
+    enabled: !!user && (isLegacy || !!organizationId),
   });
 
+  const clients = allClients;
+
   // Plannings for selected month
-  const { data: plannings } = useQuery({
-    queryKey: ["dashboard-plannings", selectedMonth, selectedYear],
+  const { data: allPlannings } = useQuery({
+    queryKey: ["dashboard-plannings", organizationId, selectedMonth, selectedYear],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("plannings")
-        .select("*, clients(name, accent_color)")
+      let query = supabase.from("plannings").select("*, clients(name, accent_color)") as any;
+      if (!isLegacy) query = query.eq("organization_id", organizationId!);
+      const { data, error } = await query
         .eq("month", parseInt(selectedMonth))
         .eq("year", parseInt(selectedYear))
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
     },
-    enabled: !!user,
+    enabled: !!user && (isLegacy || !!organizationId),
   });
+
+  const plannings = allPlannings;
 
   // Posts for those plannings (to check comments)
   const planningIds = plannings?.map((p) => p.id) || [];

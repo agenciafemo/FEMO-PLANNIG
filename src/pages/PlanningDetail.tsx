@@ -3,13 +3,14 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ArrowLeft, Plus, Image, Video, Layers, Circle, FileText, Play, Trash2, ScrollText, CalendarCheck, Pencil, Copy, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowLeft, Plus, Image, Video, Layers, Circle, FileText, Play, Trash2, ScrollText, CalendarCheck, Pencil, Copy, ZoomIn, ZoomOut, Check, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -18,6 +19,11 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import { PostEditor } from "@/components/planning/PostEditor";
+import {
+  listVideoScriptSuggestions,
+  applyVideoScriptSuggestion,
+  rejectVideoScriptSuggestion,
+} from "@/lib/videoScriptSuggestions";
 import {
   DndContext,
   closestCenter,
@@ -63,6 +69,7 @@ const contentTypeLabels: Record<string, string> = {
 export default function PlanningDetail() {
   const { clientSlug, monthYear } = useParams<{ clientSlug: string; monthYear: string }>();
   const { user } = useAuth();
+  const { organizationId, isLegacy } = useOrganization();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [editingPost, setEditingPost] = useState<string | null>(null);
@@ -80,19 +87,19 @@ export default function PlanningDetail() {
   const parsedYear = monthYear ? parseInt(monthYear.split("-").pop()!) : 0;
 
   const { data: planning, isLoading: planningLoading } = useQuery({
-    queryKey: ["planning", clientSlug, monthYear],
+    queryKey: ["planning", organizationId, clientSlug, monthYear],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("plannings")
-        .select("*, clients!inner(id, name, accent_color, notes, logo_url)")
-        .eq("month", parsedMonth)
-        .eq("year", parsedYear);
+      // TODO(multi-org-migration): "organization_id" ainda não existe no
+      // schema real; o cast evita quebrar o build antes da migration 3.
+      let query = supabase.from("plannings").select("*, clients!inner(id, name, accent_color, notes, logo_url)") as any;
+      if (!isLegacy) query = query.eq("organization_id", organizationId!);
+      const { data, error } = await query.eq("month", parsedMonth).eq("year", parsedYear);
       if (error) throw error;
       const match = data?.find(p => slugify((p.clients as any)?.name ?? "") === clientSlug);
       if (!match) throw new Error("Planejamento não encontrado");
       return match;
     },
-    enabled: !!clientSlug && !!monthYear && parsedMonth > 0,
+    enabled: !!clientSlug && !!monthYear && parsedMonth > 0 && (isLegacy || !!organizationId),
   });
 
   const planningId = planning?.id;
@@ -124,6 +131,32 @@ export default function PlanningDetail() {
       return data;
     },
     enabled: !!planningId,
+  });
+
+  // Sugestões de roteiro enviadas pelo cliente no portal público
+  const { data: scriptSuggestions } = useQuery({
+    queryKey: ["video-script-suggestions", planningId],
+    queryFn: () => listVideoScriptSuggestions(planningId!),
+    enabled: !!planningId,
+  });
+
+  const applySuggestion = useMutation({
+    mutationFn: (id: string) => applyVideoScriptSuggestion(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["video-script-suggestions", planningId] });
+      queryClient.invalidateQueries({ queryKey: ["video-scripts", planningId] });
+      toast.success("Sugestão aceita e aplicada ao roteiro!");
+    },
+    onError: (e: any) => toast.error(e.message || "Não foi possível aceitar a sugestão"),
+  });
+
+  const rejectSuggestion = useMutation({
+    mutationFn: (id: string) => rejectVideoScriptSuggestion(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["video-script-suggestions", planningId] });
+      toast.success("Sugestão rejeitada");
+    },
+    onError: (e: any) => toast.error(e.message || "Não foi possível rejeitar a sugestão"),
   });
 
   const [showScriptForm, setShowScriptForm] = useState(false);
@@ -366,27 +399,6 @@ export default function PlanningDetail() {
 
   return (
     <div className="space-y-6 relative">
-      {/* Zoom Control */}
-      <div className="fixed bottom-6 right-6 z-40 bg-white rounded-full shadow-lg border border-muted">
-        <button
-          onClick={() => setZoomLevel(Math.max(50, zoomLevel - 10))}
-          className="p-3 hover:bg-muted transition-colors rounded-l-full"
-          title="Diminuir zoom"
-        >
-          <ZoomOut className="h-5 w-5" />
-        </button>
-        <span className="inline-flex items-center justify-center w-12 text-sm font-semibold text-muted-foreground">
-          {zoomLevel}%
-        </span>
-        <button
-          onClick={() => setZoomLevel(Math.min(200, zoomLevel + 10))}
-          className="p-3 hover:bg-muted transition-colors rounded-r-full"
-          title="Aumentar zoom"
-        >
-          <ZoomIn className="h-5 w-5" />
-        </button>
-      </div>
-
       {/* Barra colorida do cliente */}
       <div className="h-1 w-full rounded-full" style={{ background: `linear-gradient(90deg, ${accentColor} 0%, ${accentColor}55 100%)` }} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -502,10 +514,33 @@ export default function PlanningDetail() {
       {/* Feed Grid */}
       {feedPosts.length > 0 && (
         <div>
-          <h2 className="mb-3 text-sm font-semibold text-muted-foreground flex items-center gap-2">
-            <Image className="h-4 w-4" /> Feed ({feedPosts.length} posts)
-            <span className="ml-2 text-xs font-normal text-muted-foreground/70">— arraste para reordenar</span>
-          </h2>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+              <Image className="h-4 w-4" /> Feed ({feedPosts.length} posts)
+              <span className="ml-2 text-xs font-normal text-muted-foreground/70">— arraste para reordenar</span>
+            </h2>
+            {viewMode === "grid" && (
+              <div className="flex shrink-0 items-center rounded-full border border-muted bg-white shadow-sm">
+                <button
+                  onClick={() => setZoomLevel(Math.max(50, zoomLevel - 10))}
+                  className="p-2 transition-colors hover:bg-muted rounded-l-full"
+                  title="Diminuir zoom"
+                >
+                  <ZoomOut className="h-4 w-4" />
+                </button>
+                <span className="inline-flex w-11 items-center justify-center text-xs font-semibold text-muted-foreground">
+                  {zoomLevel}%
+                </span>
+                <button
+                  onClick={() => setZoomLevel(Math.min(200, zoomLevel + 10))}
+                  className="p-2 transition-colors hover:bg-muted rounded-r-full"
+                  title="Aumentar zoom"
+                >
+                  <ZoomIn className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd(feedPosts)}>
             <SortableContext items={feedPosts.map((p) => p.id)} strategy={viewMode === "grid" ? rectSortingStrategy : verticalListSortingStrategy}>
               {viewMode === "grid" ? (
@@ -682,6 +717,61 @@ export default function PlanningDetail() {
           </div>
         )}
       </div>
+
+      {/* Sugestões de roteiro enviadas pelo cliente (portal público) */}
+      {scriptSuggestions && scriptSuggestions.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+            <ScrollText className="h-4 w-4" /> Sugestões de roteiro do cliente ({scriptSuggestions.length})
+          </h2>
+          {scriptSuggestions.map((sug) => {
+            const scriptTitle = videoScripts?.find((s: any) => s.id === sug.video_script_id)?.title || "Roteiro";
+            const fieldLabels: Record<string, string> = {
+              title: "Título",
+              spoken_text: "Texto falado",
+              references_notes: "Direcionamentos e referências",
+              editing_instructions: "Instruções de edição",
+            };
+            const statusBadge = sug.status === "accepted"
+              ? "bg-green-100 text-green-700"
+              : sug.status === "rejected"
+              ? "bg-red-100 text-red-700"
+              : "bg-yellow-100 text-yellow-700";
+            const statusLabel = sug.status === "accepted" ? "Aceita" : sug.status === "rejected" ? "Rejeitada" : "Pendente";
+            return (
+              <Card key={sug.id}>
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${statusBadge}`}>{statusLabel}</span>
+                      <h4 className="truncate text-sm font-semibold">{scriptTitle}</h4>
+                    </div>
+                    <span className="shrink-0 text-xs text-muted-foreground">{format(new Date(sug.created_at), "dd/MM HH:mm")}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Campo: <span className="font-medium">{fieldLabels[sug.field_name] || sug.field_name}</span>
+                    {sug.created_by_name ? ` · ${sug.created_by_name}` : " · Cliente"}
+                  </p>
+                  {sug.original_value && (
+                    <p className="whitespace-pre-wrap text-sm text-muted-foreground line-through">{sug.original_value}</p>
+                  )}
+                  <p className="whitespace-pre-wrap rounded-lg bg-muted p-3 text-sm">{sug.suggested_value}</p>
+                  {sug.status === "pending" && (
+                    <div className="flex gap-2">
+                      <Button size="sm" disabled={applySuggestion.isPending && applySuggestion.variables === sug.id} onClick={() => applySuggestion.mutate(sug.id)}>
+                        <Check className="mr-1 h-3.5 w-3.5" /> Aceitar
+                      </Button>
+                      <Button variant="outline" size="sm" disabled={rejectSuggestion.isPending && rejectSuggestion.variables === sug.id} onClick={() => rejectSuggestion.mutate(sug.id)}>
+                        <X className="mr-1 h-3.5 w-3.5" /> Rejeitar
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
 
       {editingPost && planningId && (
         <PostEditor
