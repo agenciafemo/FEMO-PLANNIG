@@ -135,3 +135,31 @@
     text-rendering: optimizeLegibility;
   }
 }
+
+@layer components {
+  /* Canvas suave do Dashboard premium: cinza levíssimo + 2 halos discretos. */
+  .nrt-surface {
+    background:
+      radial-gradient(900px 420px at 88% -12%, hsl(var(--brand) / 0.07), transparent 60%),
+      radial-gradient(680px 360px at -5% 112%, hsl(var(--info) / 0.05), transparent 55%),
+      hsl(var(--surface-muted));
+  }
+
+  /* Card translúcido com glass sutil, borda fina e sombra leve. */
+  .nrt-glass {
+    background: hsl(var(--surface) / 0.72);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border: 1px solid hsl(var(--border));
+    box-shadow: var(--shadow-sm), inset 0 1px 0 hsl(0 0% 100% / 0.5);
+  }
+
+  /* Em telas pequenas, trocar o blur por superfície sólida (performance). */
+  @media (max-width: 640px) {
+    .nrt-glass {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      background: hsl(var(--surface));
+    }
+  }
+}

@@ -10,7 +10,8 @@ import { Users, Calendar, MessageSquare, CheckCircle2, Clock, FileEdit, ChevronR
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { PageHeader, SectionHeader, MetricCard, StatusBadge, EmptyState } from "@/components/common";
+import { SectionHeader, StatusBadge, EmptyState } from "@/components/common";
+import { MonthHero, InsightCard } from "@/components/dashboard";
 
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -136,13 +137,42 @@ export default function Dashboard() {
 
   const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
 
+  // Valores derivados apenas para apresentação (hero/cards). Reaproveitam os
+  // cálculos existentes acima — não alteram nenhuma query nem regra.
+  const approvalPct = totalPosts > 0 ? Math.round((approvedPosts.length / totalPosts) * 100) : 0;
+  const monthLabel = MONTHS[parseInt(selectedMonth) - 1];
+  const monthHealth = totalPosts === 0 ? "começando" : approvalPct >= 70 ? "saudável" : approvalPct >= 40 ? "em andamento" : "no início";
+
+  // Recortes de apresentação derivados dos planejamentos já buscados (sem query nova).
+  const planningList = plannings ?? [];
+  const activeClients = new Set(planningList.map((p: any) => p.client_id)).size;
+  const notApprovedCount = planningList.filter((p: any) => p.status !== "approved").length;
+  const draftCount = planningList.filter((p: any) => !p.status || p.status === "draft").length;
+  const internalCount = planningList.filter((p: any) => p.status === "internal_review").length;
+  const clientReviewCount = planningList.filter((p: any) => p.status === "client_review").length;
+
   return (
-    <div className="space-y-6">
-      {/* Header with month filter */}
-      <PageHeader
-        title="Dashboard"
-        subtitle="Visão geral do mês selecionado"
-        actions={
+    <div className="nrt-surface -mx-4 -mt-4 min-h-screen space-y-6 px-4 pb-12 pt-4 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-6">
+      {/* Hero do mês */}
+      <MonthHero
+        title={`${monthLabel} ${selectedYear}`}
+        lead={
+          <>
+            A operação está <span className="font-semibold text-foreground">{monthHealth}</span>.{" "}
+            {plannings?.length || 0} planejamentos ativos
+            {totalPosts > 0 ? <>, {approvalPct}% dos posts aprovados</> : null}
+            {pendingSuggestions > 0 ? (
+              <> e {pendingSuggestions} {pendingSuggestions > 1 ? "correções pendentes" : "correção pendente"}</>
+            ) : null}
+            .
+          </>
+        }
+        chips={[
+          { label: "planejamentos", value: plannings?.length || 0 },
+          { label: totalPosts === 1 ? "post no mês" : "posts no mês", value: totalPosts },
+          { label: activeClients === 1 ? "cliente ativo" : "clientes ativos", value: activeClients },
+        ]}
+        filter={
           <div className="flex gap-2">
             <Select value={selectedMonth} onValueChange={setSelectedMonth}>
               <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
@@ -164,17 +194,41 @@ export default function Dashboard() {
         }
       />
 
-      {/* Stats */}
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-        <MetricCard label="Planejamentos" value={plannings?.length || 0} icon={Calendar} tone="brand" />
-        <MetricCard
-          label="Posts Aprovados"
-          tone="success"
+      {/* Cards analíticos — cada card responde uma pergunta útil */}
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+        {/* Como está o mês? */}
+        <InsightCard
           icon={CheckCircle2}
-          value={<>{approvedPosts.length}<span className="text-h3 font-normal text-muted-foreground">/{totalPosts}</span></>}
+          tone="success"
+          value={`${approvalPct}%`}
+          label="Progresso do mês"
+          context={`${approvedPosts.length} de ${totalPosts} posts aprovados`}
+          progress={approvalPct}
         />
-        <MetricCard label="Posts Revisados" value={reviewedPosts.length} icon={FileEdit} tone="info" />
-        <MetricCard label="Sugestões Pendentes" value={pendingSuggestions} icon={MessageSquare} tone="warning" />
+        {/* O que falta resolver? */}
+        <InsightCard
+          icon={MessageSquare}
+          tone="warning"
+          value={pendingSuggestions}
+          label="Pendências de revisão"
+          context="sugestões aguardando resposta"
+        />
+        {/* O cliente já revisou? */}
+        <InsightCard
+          icon={FileEdit}
+          tone="info"
+          value={reviewedPosts.length}
+          label="Engajamento do cliente"
+          context="posts com comentário do cliente"
+        />
+        {/* Quais planejamentos precisam de atenção? */}
+        <InsightCard
+          icon={Calendar}
+          tone="brand"
+          value={notApprovedCount}
+          label="Planejamentos em andamento"
+          context={`${draftCount} rascunho · ${internalCount} interno · ${clientReviewCount} cliente`}
+        />
       </div>
 
       {/* Plannings per client */}
