@@ -1,7 +1,23 @@
 import { useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import {
+  getPublicClient,
+  getPublicPlannings,
+  getPublicPosts,
+  getPublicReports,
+  getPublicDocuments,
+  getPublicVideoScripts,
+  getPublicAllVideoScripts,
+  getPublicReportComments,
+  getPublicVideoScriptSuggestions,
+  insertReportComment,
+  updatePlanningStatus,
+  notifyPlanningViewed,
+  insertVideoScriptSuggestion,
+  type VideoScriptField,
+} from "@/lib/publicRpc";
+import { PUBLIC_AUDIO_ENABLED } from "@/lib/featureFlags";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,6 +36,42 @@ const contentTypeIcons: Record<string, any> = {
 };
 
 type Tab = "plannings" | "reports" | "documents" | "scripts";
+
+const SCRIPT_FIELD_LABELS: Record<string, string> = {
+  title: "Título",
+  spoken_text: "Texto falado",
+  references_notes: "Direcionamentos e referências",
+  editing_instructions: "Instruções de edição",
+};
+
+// Histórico de sugestões de um roteiro. Carrega por scriptId e aparece sempre
+// no card do roteiro (não depende do formulário "Sugerir correção" estar aberto).
+// Retorna null quando não há sugestões — mantém o card limpo.
+function ScriptSuggestionsHistory({ token, scriptId }: { token: string; scriptId: string }) {
+  const { data: suggestions } = useQuery({
+    queryKey: ["public-script-suggestions", scriptId],
+    queryFn: () => getPublicVideoScriptSuggestions(token, scriptId),
+    enabled: !!token && !!scriptId,
+  });
+  if (!suggestions || suggestions.length === 0) return null;
+  return (
+    <div className="rounded-lg border bg-accent/50 p-3">
+      <p className="mb-2 text-xs font-medium">Sugestões enviadas</p>
+      {suggestions.map((s) => (
+        <div key={s.id} className="mb-2 rounded bg-background p-2 text-xs">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className={`inline-block rounded px-1.5 py-0.5 ${s.status === "accepted" ? "bg-green-100 text-green-700" : s.status === "rejected" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"}`}>
+              {s.status === "accepted" ? "Aceita" : s.status === "rejected" ? "Rejeitada" : "Pendente"}
+            </span>
+            <span className="text-muted-foreground">{format(new Date(s.created_at), "dd/MM HH:mm")}</span>
+          </div>
+          <p className="text-muted-foreground">{SCRIPT_FIELD_LABELS[s.field_name] || s.field_name}</p>
+          <p className="whitespace-pre-wrap">{s.suggested_value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function ClientPublic() {
   const { token } = useParams<{ token: string }>();
@@ -41,125 +93,96 @@ export default function ClientPublic() {
 
   const { data: client, isLoading: clientLoading } = useQuery({
     queryKey: ["public-client", token],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("*").eq("public_link_token", token!).single();
-      if (error) throw error;
-      return data;
-    },
+    queryFn: () => getPublicClient(token!),
     enabled: !!token,
   });
 
   const { data: plannings } = useQuery({
-    queryKey: ["public-plannings", client?.id],
+    queryKey: ["public-plannings", token],
     queryFn: async () => {
-      const { data, error } = await supabase.from("plannings").select("*").eq("client_id", client!.id).order("year", { ascending: false }).order("month", { ascending: false });
-      if (error) throw error;
-      return data;
+      const rows = await getPublicPlannings(token!);
+      // Preserva a ordem atual: ano desc, depois mês desc.
+      return [...rows].sort((a, b) => (b.year - a.year) || (b.month - a.month));
     },
-    enabled: !!client?.id,
+    enabled: !!token,
   });
 
   const { data: posts } = useQuery({
     queryKey: ["public-posts", selectedPlanning],
     queryFn: async () => {
-      const { data, error } = await supabase.from("posts").select("*").eq("planning_id", selectedPlanning!).order("position");
-      if (error) throw error;
-      return data;
+      const rows = await getPublicPosts(token!, selectedPlanning!);
+      return [...rows].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
     },
     enabled: !!selectedPlanning,
   });
 
   const { data: reports } = useQuery({
-    queryKey: ["public-reports", client?.id],
+    queryKey: ["public-reports", token],
     queryFn: async () => {
-      const { data, error } = await supabase.from("monthly_reports").select("*").eq("client_id", client!.id).order("year", { ascending: false }).order("month", { ascending: false });
-      if (error) throw error;
-      return data;
+      const rows = await getPublicReports(token!);
+      return [...rows].sort((a, b) => (b.year - a.year) || (b.month - a.month));
     },
-    enabled: !!client?.id,
+    enabled: !!token,
   });
 
   const { data: documents } = useQuery({
-    queryKey: ["public-documents", client?.id],
+    queryKey: ["public-documents", token],
     queryFn: async () => {
-      const { data, error } = await supabase.from("client_documents").select("*").eq("client_id", client!.id).order("created_at", { ascending: false });
-      if (error) throw error;
-      return data;
+      const rows = await getPublicDocuments(token!);
+      return [...rows].sort((a, b) => (a.created_at > b.created_at ? -1 : 1));
     },
-    enabled: !!client?.id,
+    enabled: !!token,
   });
 
   // Video scripts for the selected planning
   const { data: videoScripts } = useQuery({
     queryKey: ["public-scripts", selectedPlanning],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("video_scripts")
-        .select("*")
-        .eq("planning_id", selectedPlanning!)
-        .order("position");
-      if (error) throw error;
-      return data;
+      const rows = await getPublicVideoScripts(token!, selectedPlanning!);
+      return [...rows].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
     },
     enabled: !!selectedPlanning,
   });
 
   // All video scripts for all plannings (for scripts tab)
-  const planningIds = plannings?.map(p => p.id) || [];
   const { data: allScripts } = useQuery({
-    queryKey: ["public-all-scripts", planningIds],
+    queryKey: ["public-all-scripts", token],
     queryFn: async () => {
-      if (planningIds.length === 0) return [];
-      const { data, error } = await supabase
-        .from("video_scripts")
-        .select("*")
-        .in("planning_id", planningIds)
-        .order("position");
-      if (error) throw error;
-      return data;
+      const rows = await getPublicAllVideoScripts(token!);
+      return [...rows].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
     },
-    enabled: planningIds.length > 0,
+    enabled: !!token,
   });
 
   // Report comments
   const { data: reportComments } = useQuery({
     queryKey: ["report-comments", selectedReport],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("report_comments")
-        .select("*")
-        .eq("report_id", selectedReport!)
-        .order("created_at");
-      if (error) throw error;
-      return data;
+      const rows = await getPublicReportComments(token!, selectedReport!);
+      // Preserva a ordem atual: mais antigos primeiro (created_at asc).
+      return [...rows].sort((a, b) => (a.created_at > b.created_at ? 1 : -1));
     },
     enabled: !!selectedReport,
   });
 
-  const updateScript = useMutation({
-    mutationFn: async ({ id, field, value }: { id: string; field: string; value: string }) => {
-      const { error } = await supabase.from("video_scripts").update({ [field]: value }).eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["public-scripts", selectedPlanning] });
-      queryClient.invalidateQueries({ queryKey: ["public-all-scripts", planningIds] });
+  // Cliente NÃO edita o roteiro direto: envia uma sugestão de correção que a
+  // agência revisa e aplica depois (via apply_video_script_suggestion no painel).
+  // O histórico de sugestões fica no componente ScriptSuggestionsHistory (abaixo),
+  // renderizado por roteiro — aparece sempre no card, independe do formulário aberto.
+  const submitScriptSuggestion = useMutation({
+    mutationFn: ({ scriptId, field, original, suggested }: { scriptId: string; field: VideoScriptField; original: string; suggested: string }) =>
+      insertVideoScriptSuggestion(token!, scriptId, field, original, suggested),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["public-script-suggestions", variables.scriptId] });
       setEditingScriptId(null);
-      toast.success("Roteiro atualizado!");
+      toast.success("Sugestão enviada!");
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(`Erro ao enviar sugestão: ${e.message || "Tente novamente"}`),
   });
 
   const addReportComment = useMutation({
-    mutationFn: async ({ text, audioUrl }: { text?: string; audioUrl?: string }) => {
-      const { error } = await supabase.from("report_comments").insert({
-        report_id: selectedReport!,
-        author_type: "client",
-        text: text || null,
-        audio_url: audioUrl || null,
-      });
-      if (error) throw error;
-    },
+    mutationFn: ({ text, audioUrl }: { text?: string; audioUrl?: string }) =>
+      insertReportComment(token!, selectedReport!, null, text ?? null, audioUrl ?? null),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["report-comments", selectedReport] });
       setReportComment("");
@@ -167,15 +190,13 @@ export default function ClientPublic() {
       setAudioUrl(null);
       toast.success("Comentário enviado!");
     },
+    onError: (e: any) => toast.error(`Erro ao enviar: ${e.message || "Tente novamente"}`),
   });
 
   const approvePlanning = useMutation({
-    mutationFn: async (planningId: string) => {
-      const { error } = await supabase.from("plannings").update({ status: "approved" }).eq("id", planningId);
-      if (error) throw error;
-    },
+    mutationFn: (planningId: string) => updatePlanningStatus(token!, planningId, "approved"),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["public-plannings", client?.id] });
+      queryClient.invalidateQueries({ queryKey: ["public-plannings", token] });
       toast.success("Planejamento aprovado!");
     },
     onError: (e: any) => toast.error(e.message),
@@ -202,13 +223,11 @@ export default function ClientPublic() {
 
   const stopRecording = () => { mediaRecorderRef.current?.stop(); setIsRecording(false); };
 
+  // Áudio no portal público está adiado (PUBLIC_AUDIO_ENABLED = false). Enquanto
+  // não houver Edge Function segura de upload, este caminho fica inativo e a UI
+  // de gravar/enviar áudio permanece oculta. Comentários de texto seguem normais.
   const sendAudioReportComment = async () => {
-    if (!audioBlob) return;
-    const path = `report-${selectedReport}/${Date.now()}.webm`;
-    const { error } = await supabase.storage.from("comment-audios").upload(path, audioBlob);
-    if (error) { toast.error("Erro no upload do áudio"); return; }
-    const { data: urlData } = supabase.storage.from("comment-audios").getPublicUrl(path);
-    addReportComment.mutate({ audioUrl: urlData.publicUrl });
+    // no-op: upload de áudio desativado nesta versão.
   };
 
   if (clientLoading) {
@@ -315,6 +334,8 @@ export default function ClientPublic() {
                 <Button size="icon" disabled={!reportComment.trim()} onClick={() => addReportComment.mutate({ text: reportComment })}><Send className="h-4 w-4" /></Button>
               </div>
 
+              {/* Áudio do relatório — adiado: oculto enquanto PUBLIC_AUDIO_ENABLED = false */}
+              {PUBLIC_AUDIO_ENABLED && (
               <div className="flex flex-wrap items-center gap-2">
                 {!isRecording && !audioBlob && (
                   <Button variant="outline" size="sm" onClick={startRecording}><Mic className="mr-1 h-4 w-4" /> Gravar áudio</Button>
@@ -332,6 +353,7 @@ export default function ClientPublic() {
                   </div>
                 )}
               </div>
+              )}
             </CardContent>
           </Card>
         </main>
@@ -408,12 +430,9 @@ export default function ClientPublic() {
                                 setSelectedPlanning(p.id);
                                 if (!notifiedPlannings.current.has(p.id)) {
                                   notifiedPlannings.current.add(p.id);
-                                  supabase.from("notifications").insert({
-                                    type: "client_viewed",
-                                    title: `${client.name} abriu o planejamento`,
-                                    body: `${MONTHS[p.month - 1]} ${p.year}`,
-                                    planning_id: p.id,
-                                  }).then(() => {});
+                                  // Best-effort: o wrapper trata erro internamente (console.warn),
+                                  // sem promise rejeitada solta e sem toast de sucesso falso.
+                                  void notifyPlanningViewed(token!, p.id);
                                 }
                               }} className={`relative flex w-full items-center justify-between rounded-xl border p-4 text-left transition-all hover:shadow-md ${isActionRequired ? "border-2" : ""}`}
                               style={{ borderColor: isActionRequired ? accentColor : accentColor + "30" }}>
@@ -486,15 +505,15 @@ export default function ClientPublic() {
                                           setEditingScriptField("spoken_text");
                                           setEditingScriptValue(script.spoken_text || "");
                                         }}>
-                                          <Pencil className="mr-1 h-3 w-3" /> Editar
+                                          <Pencil className="mr-1 h-3 w-3" /> Sugerir correção
                                         </Button>
                                       </div>
                                       {editingScriptId === script.id && editingScriptField === "spoken_text" ? (
                                         <div className="space-y-2">
                                           <Textarea value={editingScriptValue} onChange={(e) => setEditingScriptValue(e.target.value)} rows={6} className="text-sm" />
                                           <div className="flex gap-2">
-                                            <Button size="sm" disabled={updateScript.isPending} onClick={() => updateScript.mutate({ id: script.id, field: "spoken_text", value: editingScriptValue })}>
-                                              <Check className="mr-1 h-3 w-3" /> Salvar
+                                            <Button size="sm" disabled={submitScriptSuggestion.isPending} onClick={() => submitScriptSuggestion.mutate({ scriptId: script.id, field: "spoken_text", original: script.spoken_text || "", suggested: editingScriptValue })}>
+                                              <Check className="mr-1 h-3 w-3" /> Enviar sugestão
                                             </Button>
                                             <Button variant="ghost" size="sm" onClick={() => setEditingScriptId(null)}><X className="h-3 w-3" /></Button>
                                           </div>
@@ -513,15 +532,15 @@ export default function ClientPublic() {
                                           setEditingScriptField("references_notes");
                                           setEditingScriptValue(script.references_notes || "");
                                         }}>
-                                          <Pencil className="mr-1 h-3 w-3" /> Editar
+                                          <Pencil className="mr-1 h-3 w-3" /> Sugerir correção
                                         </Button>
                                       </div>
                                       {editingScriptId === script.id && editingScriptField === "references_notes" ? (
                                         <div className="space-y-2">
                                           <Textarea value={editingScriptValue} onChange={(e) => setEditingScriptValue(e.target.value)} rows={3} className="text-sm" />
                                           <div className="flex gap-2">
-                                            <Button size="sm" disabled={updateScript.isPending} onClick={() => updateScript.mutate({ id: script.id, field: "references_notes", value: editingScriptValue })}>
-                                              <Check className="mr-1 h-3 w-3" /> Salvar
+                                            <Button size="sm" disabled={submitScriptSuggestion.isPending} onClick={() => submitScriptSuggestion.mutate({ scriptId: script.id, field: "references_notes", original: script.references_notes || "", suggested: editingScriptValue })}>
+                                              <Check className="mr-1 h-3 w-3" /> Enviar sugestão
                                             </Button>
                                             <Button variant="ghost" size="sm" onClick={() => setEditingScriptId(null)}><X className="h-3 w-3" /></Button>
                                           </div>
@@ -537,6 +556,7 @@ export default function ClientPublic() {
                                       <p className="whitespace-pre-wrap text-sm bg-accent rounded-lg p-3">{script.editing_instructions}</p>
                                     </div>
                                   )}
+                                  <ScriptSuggestionsHistory token={token!} scriptId={script.id} />
                                 </CardContent>
                               </Card>
                             ))}
@@ -795,15 +815,15 @@ export default function ClientPublic() {
                               setEditingScriptField("spoken_text");
                               setEditingScriptValue(script.spoken_text || "");
                             }}>
-                              <Pencil className="mr-1 h-3 w-3" /> Editar
+                              <Pencil className="mr-1 h-3 w-3" /> Sugerir correção
                             </Button>
                           </div>
                           {editingScriptId === script.id && editingScriptField === "spoken_text" ? (
                             <div className="space-y-2">
                               <Textarea value={editingScriptValue} onChange={(e) => setEditingScriptValue(e.target.value)} rows={6} className="text-sm" />
                               <div className="flex gap-2">
-                                <Button size="sm" disabled={updateScript.isPending} onClick={() => updateScript.mutate({ id: script.id, field: "spoken_text", value: editingScriptValue })}>
-                                  <Check className="mr-1 h-3 w-3" /> Salvar
+                                <Button size="sm" disabled={submitScriptSuggestion.isPending} onClick={() => submitScriptSuggestion.mutate({ scriptId: script.id, field: "spoken_text", original: script.spoken_text || "", suggested: editingScriptValue })}>
+                                  <Check className="mr-1 h-3 w-3" /> Enviar sugestão
                                 </Button>
                                 <Button variant="ghost" size="sm" onClick={() => setEditingScriptId(null)}><X className="h-3 w-3" /></Button>
                               </div>
@@ -822,15 +842,15 @@ export default function ClientPublic() {
                               setEditingScriptField("references_notes");
                               setEditingScriptValue(script.references_notes || "");
                             }}>
-                              <Pencil className="mr-1 h-3 w-3" /> Editar
+                              <Pencil className="mr-1 h-3 w-3" /> Sugerir correção
                             </Button>
                           </div>
                           {editingScriptId === script.id && editingScriptField === "references_notes" ? (
                             <div className="space-y-2">
                               <Textarea value={editingScriptValue} onChange={(e) => setEditingScriptValue(e.target.value)} rows={3} className="text-sm" />
                               <div className="flex gap-2">
-                                <Button size="sm" disabled={updateScript.isPending} onClick={() => updateScript.mutate({ id: script.id, field: "references_notes", value: editingScriptValue })}>
-                                  <Check className="mr-1 h-3 w-3" /> Salvar
+                                <Button size="sm" disabled={submitScriptSuggestion.isPending} onClick={() => submitScriptSuggestion.mutate({ scriptId: script.id, field: "references_notes", original: script.references_notes || "", suggested: editingScriptValue })}>
+                                  <Check className="mr-1 h-3 w-3" /> Enviar sugestão
                                 </Button>
                                 <Button variant="ghost" size="sm" onClick={() => setEditingScriptId(null)}><X className="h-3 w-3" /></Button>
                               </div>
@@ -846,6 +866,7 @@ export default function ClientPublic() {
                           <p className="whitespace-pre-wrap text-sm bg-accent rounded-lg p-3">{script.editing_instructions}</p>
                         </div>
                       )}
+                      <ScriptSuggestionsHistory token={token!} scriptId={script.id} />
                     </CardContent>
                   </Card>
                 ))}

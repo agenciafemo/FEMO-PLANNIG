@@ -4,6 +4,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { OrganizationProvider, useOrganizationContext } from "@/contexts/OrganizationContext";
+import { MULTI_ORG_ENABLED } from "@/lib/featureFlags";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
@@ -13,14 +15,48 @@ import Plannings from "./pages/Plannings";
 import PlanningDetail from "./pages/PlanningDetail";
 import Collaborators from "./pages/Collaborators";
 import ClientPublic from "./pages/ClientPublic";
+import CreateOrganization from "./pages/CreateOrganization";
+import SelectOrganization from "./pages/SelectOrganization";
+import AcceptInvite from "./pages/AcceptInvite";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+function Spinner() {
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+    </div>
+  );
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="flex min-h-screen items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>;
+  if (loading) return <Spinner />;
   if (!user) return <Navigate to="/auth" replace />;
+  return <>{children}</>;
+}
+
+// Garante que o usuário tenha uma organização ativa antes de acessar o app.
+// Sem organização -> tela de criação. Mais de uma sem organização ativa
+// resolvida -> tela de seleção. A segurança real está na RLS; este guard é
+// só um roteamento de UX (ver OrganizationContext.tsx).
+//
+// Com VITE_MULTI_ORG_ENABLED=false, o guard nunca redireciona: o app se
+// comporta exatamente como antes da migration multi-org existir.
+function OrganizationGuard({ children }: { children: React.ReactNode }) {
+  const { memberships, organizationId, loading } = useOrganizationContext();
+  if (!MULTI_ORG_ENABLED) return <>{children}</>;
+  if (loading) return <Spinner />;
+  if (memberships.length === 0) return <Navigate to="/organizations/new" replace />;
+  if (!organizationId) return <Navigate to="/organizations/select" replace />;
+  return <>{children}</>;
+}
+
+// Rotas novas de organização só existem de verdade com a flag ligada.
+// Com a flag desligada, nenhuma dessas telas é alcançável.
+function RequireMultiOrgFlag({ children }: { children: React.ReactNode }) {
+  if (!MULTI_ORG_ENABLED) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -31,20 +67,58 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/c/:token" element={<ClientPublic />} />
-            <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/clients" element={<Clients />} />
-              <Route path="/plannings" element={<Plannings />} />
-              <Route path="/clients/:clientId/plannings" element={<Plannings />} />
-              <Route path="/plannings/:clientSlug/:monthYear" element={<PlanningDetail />} />
-              <Route path="/collaborators" element={<Collaborators />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <OrganizationProvider>
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/auth" element={<Auth />} />
+              <Route path="/c/:token" element={<ClientPublic />} />
+              <Route
+                path="/organizations/new"
+                element={
+                  <ProtectedRoute>
+                    <RequireMultiOrgFlag>
+                      <CreateOrganization />
+                    </RequireMultiOrgFlag>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/organizations/select"
+                element={
+                  <ProtectedRoute>
+                    <RequireMultiOrgFlag>
+                      <SelectOrganization />
+                    </RequireMultiOrgFlag>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/invite/:token"
+                element={
+                  <RequireMultiOrgFlag>
+                    <AcceptInvite />
+                  </RequireMultiOrgFlag>
+                }
+              />
+              <Route
+                element={
+                  <ProtectedRoute>
+                    <OrganizationGuard>
+                      <AppLayout />
+                    </OrganizationGuard>
+                  </ProtectedRoute>
+                }
+              >
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/clients" element={<Clients />} />
+                <Route path="/plannings" element={<Plannings />} />
+                <Route path="/clients/:clientId/plannings" element={<Plannings />} />
+                <Route path="/plannings/:clientSlug/:monthYear" element={<PlanningDetail />} />
+                <Route path="/collaborators" element={<Collaborators />} />
+              </Route>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </OrganizationProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

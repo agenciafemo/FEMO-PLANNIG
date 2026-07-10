@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { useIsAdmin } from "@/hooks/useIsAdmin";
+import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +31,7 @@ const STATUS_FILTERS: { key: StatusFilter; label: string; color: string }[] = [
 
 export default function Plannings() {
   const { user } = useAuth();
-  const isAdmin = useIsAdmin();
+  const { organizationId, isLegacy } = useOrganization();
   const { clientId } = useParams();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -46,36 +46,41 @@ export default function Plannings() {
   const [blogCount, setBlogCount] = useState(0);
 
   const { data: clients } = useQuery({
-    queryKey: ["clients"],
+    queryKey: ["clients", organizationId],
     queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("*").order("name");
+      // TODO(multi-org-migration): "organization_id" ainda não existe no
+      // schema real; o cast evita quebrar o build antes da migration 3.
+      let query = supabase.from("clients").select("*") as any;
+      if (!isLegacy) query = query.eq("organization_id", organizationId!);
+      const { data, error } = await query.order("name");
       if (error) throw error;
-      return data;
+      return data as any[];
     },
-    enabled: !!user,
+    enabled: !!user && (isLegacy || !!organizationId),
   });
 
   const { data: plannings, isLoading } = useQuery({
-    queryKey: ["plannings", clientId],
+    queryKey: ["plannings", organizationId, clientId],
     queryFn: async () => {
-      let query = supabase
-        .from("plannings")
-        .select("*, clients(name, accent_color)")
-        .order("year", { ascending: false })
-        .order("month", { ascending: false });
+      let query = supabase.from("plannings").select("*, clients(name, accent_color)") as any;
+      if (!isLegacy) query = query.eq("organization_id", organizationId!);
+      query = query.order("year", { ascending: false }).order("month", { ascending: false });
       if (clientId) query = query.eq("client_id", clientId);
       const { data, error } = await query;
       if (error) throw error;
-      return data;
+      return data as any[];
     },
-    enabled: !!user,
+    enabled: !!user && (isLegacy || !!organizationId),
   });
 
   const createPlanning = useMutation({
     mutationFn: async () => {
+      const payload: Record<string, unknown> = { client_id: selectedClient, created_by: user!.id, month: parseInt(month), year: parseInt(year) };
+      if (!isLegacy) payload.organization_id = organizationId!;
+
       const { data: planning, error } = await supabase
         .from("plannings")
-        .insert({ client_id: selectedClient, created_by: user!.id, month: parseInt(month), year: parseInt(year) })
+        .insert(payload as any)
         .select()
         .single();
       if (error) throw error;
@@ -116,9 +121,18 @@ export default function Plannings() {
       if (!original) throw new Error("Planejamento não encontrado");
       const nextMonth = original.month === 12 ? 1 : original.month + 1;
       const nextYear = original.month === 12 ? original.year + 1 : original.year;
+      const duplicatePayload: Record<string, unknown> = {
+        client_id: original.client_id,
+        created_by: user!.id,
+        month: nextMonth,
+        year: nextYear,
+        notes: original.notes,
+      };
+      if (!isLegacy) duplicatePayload.organization_id = organizationId!;
+
       const { data: newPlanning, error } = await supabase
         .from("plannings")
-        .insert({ client_id: original.client_id, created_by: user!.id, month: nextMonth, year: nextYear, notes: original.notes })
+        .insert(duplicatePayload as any)
         .select().single();
       if (error) throw error;
       const { data: originalPosts } = await supabase.from("posts").select("*").eq("planning_id", planningId).order("position");

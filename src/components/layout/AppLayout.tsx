@@ -17,7 +17,7 @@ export function AppLayout() {
           <Button variant="ghost" size="icon" onClick={() => setOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
-          <span className="font-bold">Femo Planning</span>
+          <span className="font-bold">Norteia</span>
         </header>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetContent side="left" className="w-64 p-0">

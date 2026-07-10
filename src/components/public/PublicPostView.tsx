@@ -1,6 +1,16 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import {
+  getPublicPost,
+  getPublicPostComments,
+  getPublicPostSuggestions,
+  insertPostComment,
+  updatePostComment,
+  deletePostComment,
+  insertEditSuggestion,
+  updatePostStatus as updatePostStatusRpc,
+} from "@/lib/publicRpc";
+import { PUBLIC_AUDIO_ENABLED } from "@/lib/featureFlags";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -38,37 +48,31 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
   const { data: post } = useQuery({
     queryKey: ["public-post", postId],
     queryFn: async () => {
-      const { data, error } = await supabase.from("posts").select("*").eq("id", postId).single();
-      if (error) throw error;
-      return data;
+      const rows = await getPublicPost(clientToken, postId);
+      return rows[0] ?? null;
     },
   });
 
   const { data: comments } = useQuery({
     queryKey: ["post-comments", postId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("post_comments").select("*").eq("post_id", postId).order("created_at");
-      if (error) throw error;
-      return data;
+      const rows = await getPublicPostComments(clientToken, postId);
+      // Preserva a ordem atual: mais antigos primeiro (created_at asc).
+      return [...rows].sort((a, b) => (a.created_at > b.created_at ? 1 : -1));
     },
   });
 
   const { data: suggestions } = useQuery({
     queryKey: ["post-suggestions", postId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("post_edit_suggestions").select("*").eq("post_id", postId).order("created_at", { ascending: false });
-      if (error) throw error;
-      return data;
+      const rows = await getPublicPostSuggestions(clientToken, postId);
+      // Preserva a ordem atual: mais recentes primeiro (created_at desc).
+      return [...rows].sort((a, b) => (a.created_at > b.created_at ? -1 : 1));
     },
   });
 
   const updatePostStatus = useMutation({
-    mutationFn: async (status: string) => {
-      const { error } = await supabase.from("posts").update({ status }).eq("id", postId);
-      if (error) throw error;
-    },
+    mutationFn: (status: string) => updatePostStatusRpc(clientToken, postId, status),
     onSuccess: (_, status) => {
       queryClient.invalidateQueries({ queryKey: ["public-post", postId] });
       queryClient.invalidateQueries({ queryKey: ["public-posts"] });
@@ -80,10 +84,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
   const addComment = useMutation({
     mutationFn: async ({ text, audioUrl }: { text?: string; audioUrl?: string }) => {
       if (!text?.trim() && !audioUrl) throw new Error("Comentário vazio");
-      const { error } = await supabase.from("post_comments").insert({
-        post_id: postId, author_type: "client", text: text || null, audio_url: audioUrl || null,
-      });
-      if (error) throw error;
+      await insertPostComment(clientToken, postId, null, text ?? null, audioUrl ?? null);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["post-comments", postId] });
@@ -99,8 +100,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
   const updateComment = useMutation({
     mutationFn: async ({ id, text }: { id: string; text: string }) => {
       if (!text?.trim()) throw new Error("Comentário não pode ser vazio");
-      const { error } = await supabase.from("post_comments").update({ text }).eq("id", id);
-      if (error) throw error;
+      await updatePostComment(clientToken, id, text);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["post-comments", postId] });
@@ -113,10 +113,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
   });
 
   const deleteComment = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("post_comments").delete().eq("id", id);
-      if (error) throw error;
-    },
+    mutationFn: (id: string) => deletePostComment(clientToken, id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["post-comments", postId] });
       toast.success("Comentário removido!");
@@ -127,12 +124,8 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
   });
 
   const submitEditSuggestion = useMutation({
-    mutationFn: async ({ field, original, suggested }: { field: string; original: string; suggested: string }) => {
-      const { error } = await supabase.from("post_edit_suggestions").insert({
-        post_id: postId, field_name: field, original_value: original, suggested_value: suggested,
-      });
-      if (error) throw error;
-    },
+    mutationFn: ({ field, original, suggested }: { field: string; original: string; suggested: string }) =>
+      insertEditSuggestion(clientToken, postId, field, original, suggested),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["post-suggestions", postId] });
       setEditingCaption(false); setEditingHashtags(false);
@@ -176,20 +169,12 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
 
   const stopRecording = () => { mediaRecorderRef.current?.stop(); setIsRecording(false); };
 
+  // Áudio no portal público está adiado (PUBLIC_AUDIO_ENABLED = false). Enquanto
+  // não houver uma Edge Function segura que valide o token e devolva uma signed
+  // upload URL para o bucket comment-audios, este caminho fica inativo e a UI de
+  // gravar/enviar áudio permanece oculta. Comentários de texto seguem normais.
   const sendAudioComment = async () => {
-    if (!audioBlob || sendingAudio) return;
-    setSendingAudio(true);
-    try {
-      const ext = audioBlob.type.includes("mp4") || audioBlob.type.includes("aac") ? "mp4" : "webm";
-      const path = `${postId}/${Date.now()}.${ext}`;
-      const { error } = await supabase.storage.from("comment-audios").upload(path, audioBlob, { contentType: audioBlob.type });
-      if (error) { toast.error("Erro no upload do áudio"); setSendingAudio(false); return; }
-      const { data: urlData } = supabase.storage.from("comment-audios").getPublicUrl(path);
-      addComment.mutate({ audioUrl: urlData.publicUrl });
-    } catch (err: any) {
-      toast.error(`Erro: ${err.message || "Falha ao enviar áudio"}`);
-      setSendingAudio(false);
-    }
+    // no-op: upload de áudio desativado nesta versão.
   };
 
   const isVideo = (url: string) => /\.(mp4|mov|webm|avi|mkv|m4v|ogv)(\?|$)/i.test(url);
@@ -486,7 +471,8 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
             </Button>
           </div>
 
-          {/* Audio comment */}
+          {/* Audio comment — adiado: oculto enquanto PUBLIC_AUDIO_ENABLED = false */}
+          {PUBLIC_AUDIO_ENABLED && (
           <div className="flex flex-wrap items-center gap-2">
             {!isRecording && !audioBlob && (
               <Button variant="outline" size="sm" onClick={startRecording}><Mic className="mr-1 h-4 w-4" /> Gravar áudio</Button>
@@ -506,6 +492,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
               </div>
             )}
           </div>
+          )}
         </CardContent>
       </Card>
     </div>

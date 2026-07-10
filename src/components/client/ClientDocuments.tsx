@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,7 @@ interface ClientDocumentsProps {
 
 export function ClientDocuments({ clientId }: ClientDocumentsProps) {
   const { user } = useAuth();
+  const { organizationId, isLegacy } = useOrganization();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [docName, setDocName] = useState("");
@@ -64,14 +66,17 @@ export function ClientDocuments({ clientId }: ClientDocumentsProps) {
 
       const { data: urlData } = supabase.storage.from("client-documents").getPublicUrl(path);
 
-      const { error } = await supabase.from("client_documents").insert({
+      const payload: Record<string, unknown> = {
         client_id: clientId,
         user_id: user!.id,
         name: docName,
         description: docDescription || null,
         file_url: urlData.publicUrl,
         category: docCategory,
-      } as any);
+      };
+      if (!isLegacy) payload.organization_id = organizationId!;
+
+      const { error } = await supabase.from("client_documents").insert(payload as any);
       if (error) throw error;
 
       queryClient.invalidateQueries({ queryKey: ["client-documents", clientId] });

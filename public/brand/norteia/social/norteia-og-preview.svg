@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#123534"/>
+  <g transform="translate(90,240)">
+    <path fill="#FAFAFA" transform="scale(0.5)" d="M100,10 L108.42,79.67 L145.96,54.04 L120.33,91.58 L190,100 L120.33,108.42 L145.96,145.96 L108.42,120.33 L100,190 L91.58,120.33 L54.04,145.96 L79.67,108.42 L10,100 L79.67,91.58 L54.04,54.04 L91.58,79.67 Z"/>
+    <text x="110" y="70" font-family="'General Sans','Inter',system-ui,sans-serif" font-weight="600" font-size="46" fill="#FAFAFA">Norteia</text>
+  </g>
+  <text x="90" y="380" font-family="'General Sans','Inter',system-ui,sans-serif" font-weight="500" font-size="34" fill="#FAFAFA">
+    <tspan x="90" dy="0">Planejamento, aprovação e histórico</tspan>
+    <tspan x="90" dy="46">de conteúdo em um só lugar.</tspan>
+  </text>
+</svg>
