@@ -10,6 +10,7 @@ import { Users, Calendar, MessageSquare, CheckCircle2, Clock, FileEdit, ChevronR
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { PageHeader, SectionHeader, MetricCard, StatusBadge, EmptyState } from "@/components/common";
 
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -138,82 +139,47 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Header with month filter */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">Visão geral do mês selecionado</p>
-        </div>
-        <div className="flex gap-2">
-          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-            <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {MONTHS.map((m, i) => (
-                <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={selectedYear} onValueChange={setSelectedYear}>
-            <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {years.map((y) => (
-                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      <PageHeader
+        title="Dashboard"
+        subtitle="Visão geral do mês selecionado"
+        actions={
+          <div className="flex gap-2">
+            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+              <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {MONTHS.map((m, i) => (
+                  <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={selectedYear} onValueChange={setSelectedYear}>
+              <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {years.map((y) => (
+                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        }
+      />
 
       {/* Stats */}
       <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-              <Calendar className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{plannings?.length || 0}</p>
-              <p className="text-xs text-muted-foreground">Planejamentos</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
-              <CheckCircle2 className="h-5 w-5 text-green-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{approvedPosts.length}<span className="text-sm font-normal text-muted-foreground">/{totalPosts}</span></p>
-              <p className="text-xs text-muted-foreground">Posts Aprovados</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-              <FileEdit className="h-5 w-5 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{reviewedPosts.length}</p>
-              <p className="text-xs text-muted-foreground">Posts Revisados</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10">
-              <MessageSquare className="h-5 w-5 text-orange-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{pendingSuggestions}</p>
-              <p className="text-xs text-muted-foreground">Sugestões Pendentes</p>
-            </div>
-          </CardContent>
-        </Card>
+        <MetricCard label="Planejamentos" value={plannings?.length || 0} icon={Calendar} tone="brand" />
+        <MetricCard
+          label="Posts Aprovados"
+          tone="success"
+          icon={CheckCircle2}
+          value={<>{approvedPosts.length}<span className="text-h3 font-normal text-muted-foreground">/{totalPosts}</span></>}
+        />
+        <MetricCard label="Posts Revisados" value={reviewedPosts.length} icon={FileEdit} tone="info" />
+        <MetricCard label="Sugestões Pendentes" value={pendingSuggestions} icon={MessageSquare} tone="warning" />
       </div>
 
       {/* Plannings per client */}
       <div className="space-y-4">
-        <h2 className="text-lg font-semibold">Planejamentos — {MONTHS[parseInt(selectedMonth) - 1]} {selectedYear}</h2>
+        <SectionHeader title={`Planejamentos — ${MONTHS[parseInt(selectedMonth) - 1]} ${selectedYear}`} count={plannings?.length ?? 0} />
         {plannings && plannings.length > 0 ? (
           <div className="space-y-3">
             {plannings.map((p: any) => {
@@ -258,17 +224,15 @@ export default function Dashboard() {
                                   </span>
                                 )}
                               </div>
-                              <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                                p.status === "approved" ? "bg-green-100 text-green-700" :
-                                p.status === "client_review" ? "bg-blue-100 text-blue-700" :
-                                p.status === "internal_review" ? "bg-purple-100 text-purple-700" :
-                                "bg-muted text-muted-foreground"
-                              }`}>
-                                {p.status === "approved" ? "✅ Aprovado" :
-                                 p.status === "client_review" ? "👤 Ag. cliente" :
-                                 p.status === "internal_review" ? "🔍 Ag. interno" :
-                                 "📝 Rascunho"}
-                              </span>
+                              <StatusBadge
+                                size="sm"
+                                status={
+                                  p.status === "approved" ? "approved" :
+                                  p.status === "client_review" ? "client_review" :
+                                  p.status === "internal_review" ? "internal_review" :
+                                  "draft"
+                                }
+                              />
                               <ChevronRight className="h-4 w-4 text-muted-foreground" />
                             </div>
                           </div>
@@ -313,30 +277,23 @@ export default function Dashboard() {
             })}
           </div>
         ) : (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-8">
-              <Calendar className="mb-2 h-8 w-8 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Nenhum planejamento para {MONTHS[parseInt(selectedMonth) - 1]} {selectedYear}</p>
-              <Link to="/plannings" className="mt-3">
+          <EmptyState
+            icon={Calendar}
+            title="Nenhum planejamento neste mês"
+            description={`Não há planejamentos para ${MONTHS[parseInt(selectedMonth) - 1]} ${selectedYear}.`}
+            action={
+              <Link to="/plannings">
                 <Button variant="outline" size="sm">Ver todos os planejamentos</Button>
               </Link>
-            </CardContent>
-          </Card>
+            }
+          />
         )}
       </div>
 
       {/* Recent client activity */}
       {clientComments.length > 0 && (
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <MessageSquare className="h-5 w-5 text-orange-500" />
-            Atividade do Cliente
-            {clientComments.length > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-500 px-1.5 text-xs text-white">
-                {clientComments.length}
-              </span>
-            )}
-          </h2>
+          <SectionHeader title="Atividade do cliente" icon={MessageSquare} count={clientComments.length} />
           <div className="space-y-2">
             {clientComments.slice(0, 10).map((c) => {
               const post = posts?.find((p) => p.id === c.post_id);
@@ -386,10 +343,7 @@ export default function Dashboard() {
         if (missing.length === 0) return null;
         return (
           <div className="space-y-3">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Clock className="h-5 w-5 text-muted-foreground" />
-              Sem planejamento em {MONTHS[parseInt(selectedMonth) - 1]}
-            </h2>
+            <SectionHeader title={`Sem planejamento em ${MONTHS[parseInt(selectedMonth) - 1]}`} icon={Clock} count={missing.length} />
             <div className="flex flex-wrap gap-2">
               {missing.map((c) => (
                 <Link key={c.id} to={`/clients/${c.id}/plannings`}>

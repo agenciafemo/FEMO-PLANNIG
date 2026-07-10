@@ -22,7 +22,7 @@
     --secondary-foreground: 0 0% 9%;
 
     --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 45%;
+    --muted-foreground: 215 14% 42%;
 
     --accent: 0 0% 96%;
     --accent-foreground: 179 30% 15%;
@@ -30,11 +30,30 @@
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
+    --border: 214 15% 91%;
+    --input: 214 15% 91%;
     --ring: 179 47% 20%;
 
     --radius: 0.75rem;
+
+    /* --- Base visual global (Etapa 1) — camada semântica adicional.
+       Não substitui os tokens shadcn acima; complementa. --- */
+    --brand: 179 47% 20%;              /* #1B4B4A petróleo */
+    --brand-foreground: 0 0% 100%;
+    --brand-soft: 179 40% 94%;
+
+    --surface: 0 0% 100%;
+    --surface-muted: 210 20% 98%;
+
+    --success: 142 60% 34%;   --success-soft: 142 55% 94%;
+    --warning: 36 92% 42%;    --warning-soft: 38 92% 94%;
+    --danger: 0 72% 48%;      --danger-soft: 0 80% 96%;
+    --info: 212 80% 46%;      --info-soft: 212 85% 95%;
+    --neutral: 215 14% 42%;   --neutral-soft: 215 16% 95%;
+
+    --shadow-xs: 0 1px 2px 0 hsl(215 25% 15% / .05);
+    --shadow-sm: 0 1px 3px 0 hsl(215 25% 15% / .08), 0 1px 2px -1px hsl(215 25% 15% / .06);
+    --shadow-md: 0 4px 12px -2px hsl(215 25% 15% / .10);
 
     --sidebar-background: 0 0% 4%;
     --sidebar-foreground: 0 0% 95%;
@@ -71,8 +90,8 @@
     --destructive: 0 62% 30%;
     --destructive-foreground: 0 0% 95%;
 
-    --border: 0 0% 15%;
-    --input: 0 0% 15%;
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
     --ring: 179 47% 20%;
 
     --sidebar-background: 0 0% 4%;
@@ -83,6 +102,24 @@
     --sidebar-accent-foreground: 0 0% 95%;
     --sidebar-border: 0 0% 15%;
     --sidebar-ring: 179 47% 20%;
+
+    /* --- Base visual global (Etapa 1) — variantes dark --- */
+    --brand: 179 42% 46%;
+    --brand-foreground: 0 0% 100%;
+    --brand-soft: 179 30% 16%;
+
+    --surface: 0 0% 8%;
+    --surface-muted: 0 0% 11%;
+
+    --success: 142 50% 45%;   --success-soft: 142 30% 15%;
+    --warning: 38 85% 55%;    --warning-soft: 38 40% 15%;
+    --danger: 0 70% 58%;      --danger-soft: 0 45% 17%;
+    --info: 212 75% 60%;      --info-soft: 212 45% 16%;
+    --neutral: 215 12% 65%;   --neutral-soft: 215 12% 18%;
+
+    --shadow-xs: 0 1px 2px 0 hsl(0 0% 0% / .30);
+    --shadow-sm: 0 1px 3px 0 hsl(0 0% 0% / .40), 0 1px 2px -1px hsl(0 0% 0% / .30);
+    --shadow-md: 0 4px 12px -2px hsl(0 0% 0% / .45);
   }
 }
 
@@ -93,6 +130,8 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 }
