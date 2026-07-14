@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { ThemePreferenceProvider } from "@/contexts/ThemePreferenceContext";
 import { OrganizationProvider, useOrganizationContext } from "@/contexts/OrganizationContext";
 import { MULTI_ORG_ENABLED } from "@/lib/featureFlags";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -69,8 +70,9 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
-            <OrganizationProvider>
-              <Routes>
+            <ThemePreferenceProvider>
+              <OrganizationProvider>
+                <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/c/:token" element={<ClientPublic />} />
@@ -119,8 +121,9 @@ const App = () => (
                 <Route path="/collaborators" element={<Collaborators />} />
               </Route>
               <Route path="*" element={<NotFound />} />
-              </Routes>
-            </OrganizationProvider>
+                </Routes>
+              </OrganizationProvider>
+            </ThemePreferenceProvider>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>

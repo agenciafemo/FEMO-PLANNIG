@@ -1,6 +1,6 @@
 import { Monitor, Moon, Sun } from "lucide-react";
-import { useTheme } from "next-themes";
 
+import { isThemePreference, useThemePreference } from "@/contexts/ThemePreferenceContext";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,9 +17,15 @@ const themeOptions = [
 ] as const;
 
 export function ThemeToggle() {
-  const { theme = "system", setTheme } = useTheme();
-  const currentTheme = themeOptions.find((option) => option.value === theme) ?? themeOptions[2];
+  const { preference, setPreference } = useThemePreference();
+  const currentTheme = themeOptions.find((option) => option.value === preference) ?? themeOptions[2];
   const CurrentIcon = currentTheme.icon;
+
+  const handlePreferenceChange = (value: string) => {
+    if (isThemePreference(value)) {
+      void setPreference(value);
+    }
+  };
 
   return (
     <DropdownMenu>
@@ -36,7 +42,7 @@ export function ThemeToggle() {
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-52">
         <DropdownMenuLabel>Escolher tema</DropdownMenuLabel>
-        <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
+        <DropdownMenuRadioGroup value={preference} onValueChange={handlePreferenceChange}>
           {themeOptions.map((option) => (
             <DropdownMenuRadioItem key={option.value} value={option.value}>
               <option.icon className="mr-2 h-4 w-4" />
