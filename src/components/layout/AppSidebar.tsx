@@ -116,11 +116,12 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
       {/* Header com identidade Norteia */}
       <div className="flex h-16 items-center justify-between px-5 border-b border-sidebar-border"
         style={{ background: "linear-gradient(135deg, #1B4B4A 0%, #123534 100%)" }}>
-        <div className="flex items-center gap-3">
-          {/* NOR.png (símbolo grafite) não tem contraste suficiente sobre o
-              gradiente petróleo do header — usar wordmark em texto até haver
-              uma variante clara do símbolo. */}
-          <span className="text-lg font-bold tracking-tight text-white">Norteia</span>
+        <div className="flex items-center">
+          <img
+            src="/brand/norteia/logo/NORTEIA.png"
+            alt="Norteia"
+            className="h-8 w-auto object-contain brightness-0 invert"
+          />
         </div>
         <NotificationBell />
       </div>
