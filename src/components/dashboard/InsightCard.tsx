@@ -42,9 +42,15 @@ interface InsightCardProps {
  */
 export function InsightCard({ icon: Icon, value, label, context, tone = "neutral", progress, trend, className }: InsightCardProps) {
   return (
-    <div className={cn("nrt-glass rounded-2xl p-4", className)}>
-      <div className="flex items-center justify-between">
-        <span className={cn("flex h-9 w-9 items-center justify-center rounded-xl", chipTone[tone])}>
+    <article
+      className={cn(
+        "nrt-glass group relative overflow-hidden rounded-2xl p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-foreground/10 hover:shadow-md sm:p-5",
+        className,
+      )}
+    >
+      <div className={cn("absolute inset-x-0 top-0 h-0.5 opacity-70", barTone[tone])} />
+      <div className="flex items-start justify-between gap-3">
+        <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl transition-transform duration-200 group-hover:scale-105", chipTone[tone])}>
           <Icon className="h-[18px] w-[18px]" />
         </span>
         {trend && (
@@ -65,18 +71,18 @@ export function InsightCard({ icon: Icon, value, label, context, tone = "neutral
         )}
       </div>
 
-      <p className="mt-3 text-display leading-none text-foreground">{value}</p>
-      <p className="mt-1.5 text-sm font-semibold text-foreground">{label}</p>
-      {context && <p className="mt-0.5 text-caption text-muted-foreground">{context}</p>}
+      <p className="mt-4 text-3xl font-semibold leading-none tracking-[-0.035em] text-foreground tabular-nums">{value}</p>
+      <p className="mt-2 text-sm font-semibold text-foreground">{label}</p>
+      {context && <p className="mt-1 min-h-8 text-xs leading-relaxed text-muted-foreground">{context}</p>}
 
       {typeof progress === "number" && (
-        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div
-            className={cn("h-full rounded-full", barTone[tone])}
+            className={cn("h-full rounded-full transition-[width] duration-500", barTone[tone])}
             style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
           />
         </div>
       )}
-    </div>
+    </article>
   );
 }

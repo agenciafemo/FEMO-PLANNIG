@@ -26,38 +26,51 @@ interface MonthHeroProps {
  */
 export function MonthHero({ eyebrow = "Visão do mês", title, lead, chips, filter, className }: MonthHeroProps) {
   return (
-    <div className={cn("nrt-glass rounded-2xl p-5 sm:p-6", className)}>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-brand">{eyebrow}</p>
-          <h1 className="mt-1 text-display tracking-tight text-foreground">{title}</h1>
-          <p className="mt-1.5 max-w-[60ch] text-body text-muted-foreground">{lead}</p>
+    <section className={cn("nrt-glass relative overflow-hidden rounded-3xl", className)}>
+      <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-brand/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 left-1/3 h-48 w-48 rounded-full bg-info/5 blur-3xl" />
 
-          {chips && chips.length > 0 && (
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              {chips.map((c, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-baseline gap-1.5 rounded-full border bg-surface-muted px-3 py-1"
-                >
-                  <b
-                    className={cn(
-                      "text-sm font-bold",
-                      c.tone === "success" && "text-success",
-                      c.tone === "warning" && "text-warning",
-                      (!c.tone || c.tone === "default") && "text-foreground",
-                    )}
-                  >
-                    {c.value}
-                  </b>
-                  <span className="text-caption text-muted-foreground">{c.label}</span>
-                </span>
-              ))}
+      <div className="relative p-5 sm:p-7">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-brand" />
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand">{eyebrow}</p>
+            </div>
+            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.035em] text-foreground sm:text-4xl">{title}</h1>
+            <p className="mt-2 max-w-[64ch] text-sm leading-relaxed text-muted-foreground sm:text-base">{lead}</p>
+          </div>
+
+          {filter && (
+            <div className="shrink-0 rounded-2xl border border-border/70 bg-background/65 p-1.5 shadow-xs backdrop-blur-sm">
+              {filter}
             </div>
           )}
         </div>
-        {filter && <div className="shrink-0">{filter}</div>}
+
+        {chips && chips.length > 0 && (
+          <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
+            {chips.map((c, i) => (
+              <span
+                key={i}
+                className="inline-flex items-baseline gap-2 rounded-full border border-border/70 bg-background/55 px-3 py-1.5 shadow-xs"
+              >
+                <b
+                  className={cn(
+                    "text-sm font-semibold tabular-nums",
+                    c.tone === "success" && "text-success",
+                    c.tone === "warning" && "text-warning",
+                    (!c.tone || c.tone === "default") && "text-foreground",
+                  )}
+                >
+                  {c.value}
+                </b>
+                <span className="text-[11px] text-muted-foreground">{c.label}</span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
-    </div>
+    </section>
   );
 }
