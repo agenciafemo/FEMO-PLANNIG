@@ -20,9 +20,13 @@ const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Jul
 const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
+// Mensagem aprovada (beta) exibida no bloqueio e no erro do banco.
+const CLIENT_LIMIT_MESSAGE =
+  "Limite de clientes atingido. Como o Norteia está em fase beta, novas equipes podem cadastrar até 5 clientes neste momento. Para liberar mais acessos, fale com a equipe responsável.";
+
 export default function Clients() {
   const { user } = useAuth();
-  const { organizationId, isLegacy } = useOrganization();
+  const { organizationId, isLegacy, clientLimit } = useOrganization();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -108,7 +112,10 @@ export default function Clients() {
       setLogoFile(null); setLogoPreview(null);
       toast.success("Cliente criado!");
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => {
+      const isLimit = e?.code === "23514" || (typeof e?.message === "string" && e.message.includes("client_limit_reached"));
+      toast.error(isLimit ? CLIENT_LIMIT_MESSAGE : e.message);
+    },
   });
 
   const updateClient = useMutation({
@@ -249,6 +256,10 @@ export default function Clients() {
     </div>
   );
 
+  const clientCount = clients?.length ?? 0;
+  const hasClientLimit = clientLimit != null; // null = ilimitado (FEMO/antigas)
+  const limitReached = hasClientLimit && clientCount >= (clientLimit as number);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -256,9 +267,15 @@ export default function Clients() {
           <h1 className="text-3xl font-bold">Clientes</h1>
           <p className="text-muted-foreground">Gerencie seus clientes e seus planejamentos</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <div className="flex items-center gap-3">
+          {hasClientLimit && (
+            <span className={limitReached ? "text-xs font-medium text-destructive" : "text-xs text-muted-foreground"}>
+              {clientCount} de {clientLimit} clientes usados
+            </span>
+          )}
+          <Dialog open={open} onOpenChange={(v) => { if (limitReached && v) return; setOpen(v); }}>
           <DialogTrigger asChild>
-            <Button><Plus className="mr-2 h-4 w-4" /> Novo Cliente</Button>
+            <Button disabled={limitReached}><Plus className="mr-2 h-4 w-4" /> Novo Cliente</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader><DialogTitle>Novo Cliente</DialogTitle></DialogHeader>
@@ -289,8 +306,15 @@ export default function Clients() {
               </Button>
             </form>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
+
+      {limitReached && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          {CLIENT_LIMIT_MESSAGE}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

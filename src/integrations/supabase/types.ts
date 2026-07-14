@@ -336,6 +336,7 @@ export type Database = {
       organizations: {
         Row: {
           brand_color: string | null
+          client_limit: number | null
           created_at: string
           created_by: string
           id: string
@@ -346,6 +347,7 @@ export type Database = {
         }
         Insert: {
           brand_color?: string | null
+          client_limit?: number | null
           created_at?: string
           created_by: string
           id?: string
@@ -356,6 +358,7 @@ export type Database = {
         }
         Update: {
           brand_color?: string | null
+          client_limit?: number | null
           created_at?: string
           created_by?: string
           id?: string
