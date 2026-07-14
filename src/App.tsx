@@ -3,7 +3,9 @@ import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { ThemePreferenceProvider } from "@/contexts/ThemePreferenceContext";
 import { OrganizationProvider, useOrganizationContext } from "@/contexts/OrganizationContext";
 import { MULTI_ORG_ENABLED } from "@/lib/featureFlags";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -61,14 +63,16 @@ function RequireMultiOrgFlag({ children }: { children: React.ReactNode }) {
 }
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
-          <OrganizationProvider>
-            <Routes>
+  <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AuthProvider>
+            <ThemePreferenceProvider>
+              <OrganizationProvider>
+                <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/c/:token" element={<ClientPublic />} />
@@ -117,12 +121,14 @@ const App = () => (
                 <Route path="/collaborators" element={<Collaborators />} />
               </Route>
               <Route path="*" element={<NotFound />} />
-            </Routes>
-          </OrganizationProvider>
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
+                </Routes>
+              </OrganizationProvider>
+            </ThemePreferenceProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ThemeProvider>
 );
 
 export default App;
