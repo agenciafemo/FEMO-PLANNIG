@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const navItems = [
   { to: "/dashboard", icon: LayoutGrid, label: "Dashboard" },
@@ -163,6 +164,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
             )}
           </div>
         </div>
+        <ThemeToggle />
         <button
           onClick={signOut}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs text-sidebar-foreground/50 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
