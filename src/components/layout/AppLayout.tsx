@@ -13,11 +13,21 @@ export function AppLayout() {
   if (isMobile) {
     return (
       <div className="min-h-screen">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background px-4">
-          <Button variant="ghost" size="icon" onClick={() => setOpen(true)}>
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border/70 bg-background/85 px-3 shadow-xs backdrop-blur-xl supports-[backdrop-filter]:bg-background/75">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Abrir menu"
+            onClick={() => setOpen(true)}
+          >
             <Menu className="h-5 w-5" />
           </Button>
-          <span className="font-bold">Norteia</span>
+          <img
+            src="/brand/norteia/logo/NORTEIA.png"
+            alt="Norteia"
+            className="h-6 w-auto object-contain dark:brightness-0 dark:invert"
+          />
         </header>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetContent side="left" className="w-64 p-0">
