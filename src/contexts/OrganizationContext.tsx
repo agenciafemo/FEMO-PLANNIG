@@ -13,12 +13,14 @@ export interface Membership {
   organizationName: string;
   organizationSlug: string;
   role: OrganizationRole;
+  clientLimit: number | null;
 }
 
 interface OrganizationContextType {
   organizationId: string | null;
   organizationName: string | null;
   role: OrganizationRole | null;
+  clientLimit: number | null;
   memberships: Membership[];
   isLegacy: boolean;
   loading: boolean;
@@ -35,12 +37,14 @@ const LEGACY_MEMBERSHIP: Membership = {
   organizationName: "FEMO",
   organizationSlug: "femo",
   role: "owner",
+  clientLimit: null,
 };
 
 const OrganizationContext = createContext<OrganizationContextType>({
   organizationId: LEGACY_MEMBERSHIP.organizationId,
   organizationName: LEGACY_MEMBERSHIP.organizationName,
   role: LEGACY_MEMBERSHIP.role,
+  clientLimit: LEGACY_MEMBERSHIP.clientLimit,
   memberships: [LEGACY_MEMBERSHIP],
   isLegacy: true,
   loading: true,
@@ -80,7 +84,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     try {
       const [{ data: memberRows, error: membersError }, { data: profile, error: profileError }] = await Promise.all([
         (supabase.from("organization_members" as any) as any)
-          .select("organization_id, role, organizations(name, slug)")
+          .select("organization_id, role, organizations(name, slug, client_limit)")
           .eq("user_id", user.id)
           .eq("status", "active"),
         (supabase.from("profiles") as any).select("active_organization_id").eq("id", user.id).maybeSingle(),
@@ -94,6 +98,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         organizationName: (row.organizations as { name: string; slug: string } | null)?.name ?? "",
         organizationSlug: (row.organizations as { name: string; slug: string } | null)?.slug ?? "",
         role: row.role,
+        clientLimit: (row.organizations as { client_limit: number | null } | null)?.client_limit ?? null,
       }));
 
       const activeId = (profile as any)?.active_organization_id ?? null;
@@ -136,6 +141,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         organizationId: active?.organizationId ?? null,
         organizationName: active?.organizationName ?? null,
         role: active?.role ?? null,
+        clientLimit: active?.clientLimit ?? null,
         memberships,
         isLegacy,
         loading: authLoading || loading,
