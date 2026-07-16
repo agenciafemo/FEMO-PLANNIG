@@ -1,6 +1,4 @@
 import { useMemo, useState } from "react";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { KeyRound, Lock, LockOpen, Plus, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader, EmptyState, StatusBadge } from "@/components/common";
 import { AddCredentialDialog } from "@/components/vault/AddCredentialDialog";
+import { CredentialCard } from "@/components/vault/CredentialCard";
 import { useVault } from "@/hooks/useVault";
 
 // Cofre: status, criar, desbloquear, bloquear, cadastrar acesso e listagem
@@ -351,25 +350,9 @@ export default function Vault() {
                       {clientNameById.get(clientId) ?? "Cliente removido"}
                     </p>
                     {creds.map((c) => (
-                      <Card key={c.id}>
-                        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-foreground">{c.platform}</p>
-                            <p className="text-caption text-muted-foreground">
-                              {c.username || "sem usuário"}
-                              {c.url ? ` · ${c.url}` : ""}
-                            </p>
-                            {c.notes && (
-                              <p className="mt-1 line-clamp-1 text-caption text-muted-foreground">{c.notes}</p>
-                            )}
-                            <p className="mt-1 text-caption text-muted-foreground/70">
-                              Atualizado em {format(new Date(c.updated_at), "dd/MM/yyyy", { locale: ptBR })}
-                            </p>
-                          </div>
-                          {/* Fase 1: senha e notas de 2FA nunca são exibidas nem carregadas. */}
-                          <StatusBadge variant="neutral" size="sm">Senha protegida</StatusBadge>
-                        </CardContent>
-                      </Card>
+                      // O filtro entra na key de propósito: trocar de cliente
+                      // remonta o card e descarta qualquer senha revelada.
+                      <CredentialCard key={`${clientFilter}:${c.id}`} credential={c} />
                     ))}
                   </div>
                 ))

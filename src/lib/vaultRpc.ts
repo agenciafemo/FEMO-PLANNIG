@@ -57,6 +57,18 @@ export interface SanitizedCredential {
 }
 
 /**
+ * reveal_client_credential — segredos em claro.
+ *
+ * Este é o ÚNICO ponto do frontend onde senha e notas de 2FA existem em claro.
+ * O valor não pode ir para o cache do React Query, localStorage, URL, console
+ * nem log: só para estado local de componente, descartado ao ocultar/desmontar.
+ */
+export interface RevealedSecret {
+  password: string;
+  two_factor_notes: string | null;
+}
+
+/**
  * unlock_organization_vault devolve JSONB e NÃO lança em senha incorreta
  * (para o lockout ser persistido). Só lança em erro de contrato: sem login,
  * cofre inexistente/suspenso, cofre sem senha mestre, sem acesso.
@@ -151,6 +163,22 @@ export async function createClientCredential(params: {
     _two_factor_notes: params.twoFactorNotes ?? null,
     _responsible_user_id: params.responsibleUserId ?? null,
   });
+}
+
+/**
+ * Exige permissão 'reveal' (mais restrita que 'manage') e o cofre desbloqueado.
+ * A própria RPC grava o evento 'revealed' em credential_access_logs — a
+ * auditoria da revelação não depende do frontend.
+ *
+ * Quem chamar precisa manter o retorno apenas em estado local: ver RevealedSecret.
+ */
+export async function revealClientCredential(credentialId: string): Promise<RevealedSecret> {
+  return callWrite<RevealedSecret>("reveal_client_credential", { _id: credentialId });
+}
+
+/** Só registra o evento 'copied'; não devolve segredo algum. Exige 'reveal'. */
+export async function logClientCredentialCopy(credentialId: string): Promise<void> {
+  return callVoidWrite("log_client_credential_copy", { _id: credentialId });
 }
 
 /** Exige permissão 'view' (e desbloqueio, se o cofre pedir senha mestre). */
