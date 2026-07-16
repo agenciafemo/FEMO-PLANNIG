@@ -8,8 +8,9 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader, EmptyState, StatusBadge } from "@/components/common";
 import { AddCredentialDialog } from "@/components/vault/AddCredentialDialog";
-import { CredentialCard } from "@/components/vault/CredentialCard";
+import { ClientVaultGroup } from "@/components/vault/ClientVaultGroup";
 import { useVault } from "@/hooks/useVault";
+import type { SanitizedCredential } from "@/lib/vaultRpc";
 
 // Cofre: status, criar, desbloquear, bloquear, cadastrar acesso e listagem
 // SANITIZADA agrupada por cliente. Sem reveal, sem importação, sem auditoria.
@@ -38,6 +39,21 @@ export default function Vault() {
   const [unlockPassword, setUnlockPassword] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [clientFilter, setClientFilter] = useState<string>("all");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleClient = (clientId: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(clientId) ? next.delete(clientId) : next.add(clientId);
+      return next;
+    });
+
+  // Escolher um cliente abre só ele; voltar para "todos" fecha tudo. Fechar
+  // desmonta os cards e descarta senhas reveladas.
+  const handleFilterChange = (value: string) => {
+    setClientFilter(value);
+    setExpanded(value === "all" ? new Set() : new Set([value]));
+  };
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,16 +84,19 @@ export default function Vault() {
   );
 
   // Agrupa por cliente; a RPC só traz client_id, o nome vem do mapa.
+  // Clientes sem credencial não geram grupo: a lista nasce das credenciais.
   const groups = useMemo(() => {
-    const byClient = new Map<string, typeof visibleCredentials>();
+    const nome = (id: string) => clientNameById.get(id) ?? "Cliente removido";
+    const byClient = new Map<string, SanitizedCredential[]>();
     for (const cred of visibleCredentials) {
       const list = byClient.get(cred.client_id) ?? [];
       list.push(cred);
       byClient.set(cred.client_id, list);
     }
-    return [...byClient.entries()].sort((a, b) =>
-      (clientNameById.get(a[0]) ?? "").localeCompare(clientNameById.get(b[0]) ?? ""),
-    );
+    for (const list of byClient.values()) {
+      list.sort((a, b) => a.platform.localeCompare(b.platform, "pt-BR"));
+    }
+    return [...byClient.entries()].sort((a, b) => nome(a[0]).localeCompare(nome(b[0]), "pt-BR"));
   }, [visibleCredentials, clientNameById]);
 
   // ---- Estados de borda -----------------------------------------------------
@@ -321,7 +340,7 @@ export default function Vault() {
           ) : (
             <>
               <div className="flex items-center gap-2">
-                <Select value={clientFilter} onValueChange={setClientFilter}>
+                <Select value={clientFilter} onValueChange={handleFilterChange}>
                   <SelectTrigger className="w-full sm:w-64">
                     <SelectValue placeholder="Todos os clientes" />
                   </SelectTrigger>
@@ -345,16 +364,14 @@ export default function Vault() {
                 />
               ) : (
                 groups.map(([clientId, creds]) => (
-                  <div key={clientId} className="space-y-2">
-                    <p className="px-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
-                      {clientNameById.get(clientId) ?? "Cliente removido"}
-                    </p>
-                    {creds.map((c) => (
-                      // O filtro entra na key de propósito: trocar de cliente
-                      // remonta o card e descarta qualquer senha revelada.
-                      <CredentialCard key={`${clientFilter}:${c.id}`} credential={c} />
-                    ))}
-                  </div>
+                  <ClientVaultGroup
+                    key={clientId}
+                    clientId={clientId}
+                    clientName={clientNameById.get(clientId) ?? "Cliente removido"}
+                    credentials={creds}
+                    open={expanded.has(clientId)}
+                    onToggle={() => toggleClient(clientId)}
+                  />
                 ))
               )}
             </>
