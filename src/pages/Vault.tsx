@@ -244,10 +244,12 @@ export default function Vault() {
                   {lock.isPending ? "Bloqueando..." : "Bloquear"}
                 </Button>
               )}
-              <Button size="sm" onClick={() => setAddOpen(true)} disabled={clients.length === 0}>
-                <Plus className="mr-2 h-4 w-4" />
-                Adicionar acesso
-              </Button>
+              {canManageVault && (
+                <Button size="sm" onClick={() => setAddOpen(true)} disabled={clients.length === 0}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Adicionar acesso
+                </Button>
+              )}
             </>
           ) : undefined
         }
@@ -341,7 +343,7 @@ export default function Vault() {
                   : "Guarde aqui as senhas dos clientes, cifradas no cofre da equipe."
               }
               action={
-                clients.length > 0 ? (
+                canManageVault && clients.length > 0 ? (
                   <Button size="sm" onClick={() => setAddOpen(true)}>
                     <Plus className="mr-2 h-4 w-4" />
                     Adicionar primeiro acesso
@@ -391,12 +393,14 @@ export default function Vault() {
         </div>
       )}
 
-      <AddCredentialDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        clients={clients}
-        createCredential={createCredential}
-      />
+      {canManageVault && (
+        <AddCredentialDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          clients={clients}
+          createCredential={createCredential}
+        />
+      )}
 
       {canManageVault && (
         <VaultSettingsDialog
