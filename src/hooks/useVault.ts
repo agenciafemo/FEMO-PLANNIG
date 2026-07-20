@@ -9,6 +9,8 @@ import {
   listClientCredentials,
   lockOrganizationVault,
   unlockOrganizationVault,
+  updateVaultUnlockDuration,
+  type UnlockDurationMinutes,
   type VaultStatus,
 } from "@/lib/vaultRpc";
 
@@ -143,6 +145,17 @@ export function useVault() {
     onError: (e: any) => toast.error(e?.message ?? "Não foi possível cadastrar o acesso"),
   });
 
+  // Exige 'manage_settings'. Só o status muda: não mexe nas credenciais, então
+  // basta revalidar o status — invalidar a listagem aqui seria ruído.
+  const updateUnlockDuration = useMutation({
+    mutationFn: (minutes: UnlockDurationMinutes) => updateVaultUnlockDuration(vault!.vault_id, minutes),
+    onSuccess: () => {
+      invalidateStatus();
+      toast.success("Duração do desbloqueio atualizada.");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Não foi possível salvar a duração"),
+  });
+
   const lock = useMutation({
     mutationFn: () => lockOrganizationVault(vault!.vault_id),
     onSuccess: () => {
@@ -164,6 +177,7 @@ export function useVault() {
     clientsQuery,
     createVault,
     createCredential,
+    updateUnlockDuration,
     unlock,
     lock,
   };

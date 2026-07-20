@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { KeyRound, Lock, LockOpen, Plus, ShieldAlert, ShieldCheck } from "lucide-react";
+import { KeyRound, Lock, LockOpen, Plus, Settings, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,11 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PageHeader, EmptyState, StatusBadge } from "@/components/common";
 import { AddCredentialDialog } from "@/components/vault/AddCredentialDialog";
 import { ClientVaultGroup } from "@/components/vault/ClientVaultGroup";
+import { VaultSettingsDialog } from "@/components/vault/VaultSettingsDialog";
 import { useVault } from "@/hooks/useVault";
-import type { SanitizedCredential } from "@/lib/vaultRpc";
+import { unlockDurationLabel, type SanitizedCredential } from "@/lib/vaultRpc";
 
-// Cofre: status, criar, desbloquear, bloquear, cadastrar acesso e listagem
-// SANITIZADA agrupada por cliente. Sem reveal, sem importação, sem auditoria.
+// Cofre: status, configuração, criar, desbloquear, bloquear, cadastrar acesso,
+// listagem SANITIZADA agrupada por cliente e revelar/copiar com auditoria.
 
 const MIN_MASTER_PASSWORD = 12;
 
@@ -29,6 +30,7 @@ export default function Vault() {
     clientsQuery,
     createVault,
     createCredential,
+    updateUnlockDuration,
     unlock,
     lock,
   } = useVault();
@@ -38,6 +40,7 @@ export default function Vault() {
   const [newMasterPassword, setNewMasterPassword] = useState("");
   const [unlockPassword, setUnlockPassword] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [clientFilter, setClientFilter] = useState<string>("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -226,6 +229,15 @@ export default function Vault() {
         actions={
           unlocked ? (
             <>
+              {/* A RPC de configuração exige 'manage_settings' (hoje só
+                  owner/admin) e o cofre destrancado — por isso o botão vive
+                  aqui dentro. Esconder é UX; quem decide é o banco. */}
+              {canManageVault && (
+                <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
+                  <Settings className="mr-2 h-4 w-4" />
+                  Configurações
+                </Button>
+              )}
               {vault.require_master_password && (
                 <Button variant="outline" size="sm" onClick={() => lock.mutate()} disabled={lock.isPending}>
                   <Lock className="mr-2 h-4 w-4" />
@@ -260,7 +272,7 @@ export default function Vault() {
               </p>
               <p className="text-caption text-muted-foreground">
                 {vault.require_master_password
-                  ? `Exige senha mestre · sessão de ${vault.unlock_duration_minutes} min`
+                  ? `Exige senha mestre · sessão de ${unlockDurationLabel(vault.unlock_duration_minutes)}`
                   : "Sem senha mestre · acesso pelo login e permissão"}
               </p>
             </div>
@@ -385,6 +397,15 @@ export default function Vault() {
         clients={clients}
         createCredential={createCredential}
       />
+
+      {canManageVault && (
+        <VaultSettingsDialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          currentMinutes={vault.unlock_duration_minutes}
+          updateUnlockDuration={updateUnlockDuration}
+        />
+      )}
     </div>
   );
 }

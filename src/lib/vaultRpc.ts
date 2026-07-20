@@ -138,6 +138,33 @@ export async function lockOrganizationVault(vaultId: string): Promise<void> {
 }
 
 /**
+ * Durações aceitas pelo banco. Espelha o CHECK
+ * organization_vaults_unlock_duration_allowed e a validação dentro da RPC
+ * (migration 20260716120000). Mudar esta lista sem migration quebra o save.
+ */
+export const UNLOCK_DURATION_OPTIONS = [
+  { minutes: 15, label: "15 minutos" },
+  { minutes: 60, label: "1 hora" },
+  { minutes: 480, label: "8 horas" },
+  { minutes: 10080, label: "1 semana" },
+] as const;
+
+export type UnlockDurationMinutes = (typeof UNLOCK_DURATION_OPTIONS)[number]["minutes"];
+
+/** Rótulo humano; cai no cru se o banco tiver um valor fora da lista. */
+export function unlockDurationLabel(minutes: number): string {
+  return UNLOCK_DURATION_OPTIONS.find((o) => o.minutes === minutes)?.label ?? `${minutes} min`;
+}
+
+/** Exige 'manage_settings' — hoje só owner/admin, por herança de papel. */
+export async function updateVaultUnlockDuration(vaultId: string, minutes: UnlockDurationMinutes): Promise<void> {
+  return callVoidWrite("update_vault_unlock_duration", {
+    _vault_id: vaultId,
+    _unlock_duration_minutes: minutes,
+  });
+}
+
+/**
  * Exige permissão 'manage' (não 'view') e o cofre desbloqueado.
  * A RPC deriva a organização a partir do cliente, cifra a senha e as notas de
  * 2FA com a DEK do cofre e registra o evento em credential_access_logs.
