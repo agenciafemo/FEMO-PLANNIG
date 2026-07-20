@@ -16,6 +16,7 @@ import Clients from "./pages/Clients";
 import Plannings from "./pages/Plannings";
 import PlanningDetail from "./pages/PlanningDetail";
 import Collaborators from "./pages/Collaborators";
+import Vault from "./pages/Vault";
 import ClientPublic from "./pages/ClientPublic";
 import CreateOrganization from "./pages/CreateOrganization";
 import SelectOrganization from "./pages/SelectOrganization";
@@ -119,6 +120,7 @@ const App = () => (
                 <Route path="/clients/:clientId/plannings" element={<Plannings />} />
                 <Route path="/plannings/:clientSlug/:monthYear" element={<PlanningDetail />} />
                 <Route path="/collaborators" element={<Collaborators />} />
+                <Route path="/vault" element={<Vault />} />
               </Route>
               <Route path="*" element={<NotFound />} />
                 </Routes>

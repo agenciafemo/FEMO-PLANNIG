@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Users, LayoutGrid, UserPlus, LogOut, Shield, Bell } from "lucide-react";
+import { Users, LayoutGrid, UserPlus, LogOut, Shield, Bell, KeyRound } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -16,6 +16,7 @@ const navItems = [
   { to: "/dashboard", icon: LayoutGrid, label: "Dashboard" },
   { to: "/clients", icon: Users, label: "Clientes" },
   { to: "/collaborators", icon: UserPlus, label: "Colaboradores" },
+  { to: "/vault", icon: KeyRound, label: "Cofre" },
 ];
 
 function NotificationBell() {
