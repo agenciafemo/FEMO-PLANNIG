@@ -32,12 +32,14 @@ export function ThemeToggle() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          className="mb-0.5 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-xs text-sidebar-foreground/45 transition-all duration-200 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
           aria-label={`Tema: ${currentTheme.label}`}
         >
           <CurrentIcon className="h-3.5 w-3.5" />
           <span>Tema</span>
-          <span className="ml-auto text-[11px] text-sidebar-foreground/40">{currentTheme.label}</span>
+          <span className="ml-auto rounded-md bg-sidebar-accent px-1.5 py-0.5 text-[10px] font-medium text-sidebar-foreground/50">
+            {currentTheme.label}
+          </span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-52">
