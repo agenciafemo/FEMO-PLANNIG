@@ -286,7 +286,7 @@ export default function Reviews() {
     <div className="min-h-full bg-background">
       <div className="mx-auto max-w-[1500px] space-y-8 p-5 sm:p-7 lg:p-8">
         <PageHeader
-          title="Avaliações"
+          title="NPS"
           subtitle="Acompanhe as notas enviadas pelos clientes nos planejamentos públicos."
         />
 

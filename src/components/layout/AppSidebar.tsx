@@ -15,7 +15,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 const navItems = [
   { to: "/dashboard", icon: LayoutGrid, label: "Dashboard" },
   { to: "/clients", icon: Users, label: "Clientes" },
-  { to: "/reviews", icon: MessageSquareHeart, label: "Avaliações" },
+  { to: "/reviews", icon: MessageSquareHeart, label: "NPS" },
   { to: "/collaborators", icon: UserPlus, label: "Colaboradores" },
   { to: "/vault", icon: KeyRound, label: "Cofre" },
 ];
