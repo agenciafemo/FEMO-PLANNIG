@@ -163,3 +163,69 @@
     }
   }
 }
+
+@media print {
+  body.script-lauda-printing {
+    background: #ffffff !important;
+    color: #171717 !important;
+  }
+
+  body.script-lauda-printing * {
+    visibility: hidden !important;
+  }
+
+  body.script-lauda-printing .script-lauda-print-shell,
+  body.script-lauda-printing .script-lauda-print-shell *,
+  body.script-lauda-printing .script-lauda-print-area,
+  body.script-lauda-printing .script-lauda-print-area * {
+    visibility: visible !important;
+  }
+
+  body.script-lauda-printing .script-lauda-dialog-ui,
+  body.script-lauda-printing .script-lauda-print-shell > button {
+    display: none !important;
+  }
+
+  body.script-lauda-printing .script-lauda-print-shell {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    transform: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    background: #ffffff !important;
+    box-sizing: border-box !important;
+    padding: 16mm !important;
+    box-shadow: none !important;
+  }
+
+  body.script-lauda-printing .script-lauda-print-area {
+    width: 100% !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+    color: #171717 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  body.script-lauda-printing .script-lauda-print-area * {
+    border-color: #d4d4d4 !important;
+    background: transparent !important;
+    color: #171717 !important;
+    box-shadow: none !important;
+  }
+
+  body.script-lauda-printing .script-lauda-print-area section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  body.script-lauda-printing .script-lauda-print-area svg {
+    color: #404040 !important;
+  }
+}
