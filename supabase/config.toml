@@ -1,1 +1,18 @@
 project_id = "hhikmczwbgxqlyfjhtxo"
+
+# WARNING: project_id above does not match norteia-staging
+# (hdutqvbnrezwgnledcuv). Do not deploy until the target is explicitly verified.
+[functions.meta-oauth-start]
+verify_jwt = true
+
+[functions.meta-oauth-callback]
+verify_jwt = false
+
+[functions.meta-connection-complete]
+verify_jwt = true
+
+[functions.meta-connection-health]
+verify_jwt = true
+
+[functions.meta-disconnect]
+verify_jwt = true
