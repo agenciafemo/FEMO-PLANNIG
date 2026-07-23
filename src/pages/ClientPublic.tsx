@@ -25,6 +25,7 @@ import { Calendar, FileText, Image, Video, Layers, ChevronRight, ArrowLeft, Fold
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { PublicPostView } from "@/components/public/PublicPostView";
+import { NpsDialog } from "@/components/public/NpsDialog";
 import { toast } from "sonner";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -875,6 +876,13 @@ export default function ClientPublic() {
           </div>
         )}
       </main>
+      {selectedPlanning && token && (
+        <NpsDialog
+          key={selectedPlanning}
+          token={token}
+          planningId={selectedPlanning}
+        />
+      )}
     </div>
   );
 }
