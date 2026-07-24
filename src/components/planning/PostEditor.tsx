@@ -1,7 +1,10 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOrganization } from "@/hooks/useOrganization";
+import { usePostEditorDraft } from "@/hooks/usePostEditorDraft";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,20 +13,80 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, ExternalLink, Copy, ChevronLeft, ChevronRight, X, FolderInput } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 
 const MONTHS_SHORT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+const DRAFT_DEBOUNCE_MS = 500;
+
+interface PostDraftData {
+  caption: string;
+  hashtags: string;
+  contentType: string;
+  publishDate: string | null;
+  videoUrl: string;
+  coverImageUrl: string;
+  mediaUrls: string[];
+  status: string;
+  blogBody: string;
+}
+
+type PostRow = Database["public"]["Tables"]["posts"]["Row"];
+
+function safeDraftUrl(url: string): string {
+  if (!url || url.startsWith("data:") || url.length > 2000) return "";
+  return url;
+}
+
+function postToDraft(post: PostRow): PostDraftData {
+  return {
+    caption: post.caption || "",
+    hashtags: post.hashtags || "",
+    contentType: post.content_type || "static",
+    publishDate: post.publish_date || null,
+    videoUrl: post.video_url || "",
+    coverImageUrl: post.cover_image_url || "",
+    mediaUrls: Array.isArray(post.media_urls)
+      ? post.media_urls.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [],
+    status: post.status || "draft",
+    blogBody: post.blog_body || "",
+  };
+}
+
+function draftsMatch(left: PostDraftData, right: PostDraftData): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 interface PostEditorProps {
   postId: string;
   planningId: string;
   clientId?: string;
-  onClose: () => void;
+  onClose: (reason: PostEditorCloseReason) => void;
   clientNotes?: string;
 }
+
+export type PostEditorCloseReason =
+  | "clean"
+  | "keep-draft"
+  | "discard"
+  | "saved"
+  | "deleted"
+  | "moved";
 
 export function PostEditor({ postId, planningId, clientId, onClose, clientNotes }: PostEditorProps) {
   const { user } = useAuth();
@@ -44,6 +107,103 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
   const now = new Date();
   const [newPlanningMonth, setNewPlanningMonth] = useState(String(now.getMonth() + 1));
   const [newPlanningYear, setNewPlanningYear] = useState(String(now.getFullYear()));
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [hydratedPostId, setHydratedPostId] = useState<string | null>(null);
+  const { organizationId } = useOrganization();
+  const { loadDraft, saveDraft, clearDraft } = usePostEditorDraft<PostDraftData>({
+    organizationId,
+    userId: user?.id ?? null,
+    planningId,
+    postId,
+  });
+  const initialDraftRef = useRef<PostDraftData | null>(null);
+  const latestDraftRef = useRef<PostDraftData | null>(null);
+  const baseUpdatedAtRef = useRef<string | null>(null);
+  const dirtyRef = useRef(false);
+  const discardedRef = useRef(false);
+  const storageWarningShownRef = useRef(false);
+
+  const currentDraft = useMemo<PostDraftData>(
+    () => ({
+      caption,
+      hashtags,
+      contentType,
+      publishDate: publishDate ? format(publishDate, "yyyy-MM-dd") : null,
+      videoUrl,
+      coverImageUrl: safeDraftUrl(coverImageUrl),
+      mediaUrls: mediaUrls.map(safeDraftUrl).filter(Boolean),
+      status,
+      blogBody,
+    }),
+    [
+      blogBody,
+      caption,
+      contentType,
+      coverImageUrl,
+      hashtags,
+      mediaUrls,
+      publishDate,
+      status,
+      videoUrl,
+    ],
+  );
+
+  latestDraftRef.current = currentDraft;
+  dirtyRef.current =
+    hydratedPostId === postId &&
+    initialDraftRef.current != null &&
+    !draftsMatch(currentDraft, initialDraftRef.current);
+
+  const applyDraft = useCallback((draft: PostDraftData) => {
+    setCaption(draft.caption ?? "");
+    setHashtags(draft.hashtags ?? "");
+    setContentType(draft.contentType ?? "static");
+    setPublishDate(
+      draft.publishDate
+        ? new Date(`${draft.publishDate}T12:00:00`)
+        : undefined,
+    );
+    setVideoUrl(draft.videoUrl ?? "");
+    setCoverImageUrl(draft.coverImageUrl ?? "");
+    setMediaUrls(Array.isArray(draft.mediaUrls) ? draft.mediaUrls : []);
+    setStatus(draft.status ?? "draft");
+    setBlogBody(draft.blogBody ?? "");
+  }, []);
+
+  const clearLocalDraft = useCallback(() => {
+    discardedRef.current = true;
+    dirtyRef.current = false;
+    clearDraft();
+  }, [clearDraft]);
+
+  const persistLatestDraft = useCallback(
+    (showStorageWarning: boolean) => {
+      if (
+        discardedRef.current ||
+        !dirtyRef.current ||
+        !latestDraftRef.current
+      ) {
+        return;
+      }
+
+      const saved = saveDraft(
+        latestDraftRef.current,
+        baseUpdatedAtRef.current,
+      );
+
+      if (
+        !saved &&
+        showStorageWarning &&
+        !storageWarningShownRef.current
+      ) {
+        storageWarningShownRef.current = true;
+        toast.warning(
+          "Não foi possível salvar o rascunho neste navegador. Mantenha esta janela aberta.",
+        );
+      }
+    },
+    [saveDraft],
+  );
 
   const { data: post } = useQuery({
     queryKey: ["post", postId],
@@ -52,6 +212,7 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
       if (error) throw error;
       return data;
     },
+    refetchOnWindowFocus: false,
   });
 
   const { data: otherPlannings } = useQuery({
@@ -83,19 +244,92 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
     },
   });
 
+  // Hidrata os dados do banco somente uma vez por post. Refetches posteriores
+  // não substituem uma edição local em andamento.
   useEffect(() => {
-    if (post) {
-      setCaption(post.caption || "");
-      setHashtags(post.hashtags || "");
-      setContentType(post.content_type);
-      setPublishDate(post.publish_date ? new Date(post.publish_date + "T12:00:00") : undefined);
-      setVideoUrl(post.video_url || "");
-      setCoverImageUrl(post.cover_image_url || "");
-      setMediaUrls((post as any).media_urls || []);
-      setStatus(post.status);
-      setBlogBody((post as any).blog_body || "");
+    if (!post || hydratedPostId === postId) return;
+
+    const serverDraft = postToDraft(post);
+    initialDraftRef.current = serverDraft;
+    latestDraftRef.current = serverDraft;
+    baseUpdatedAtRef.current = post.updated_at ?? null;
+    discardedRef.current = false;
+    storageWarningShownRef.current = false;
+    applyDraft(serverDraft);
+
+    const storedDraft = loadDraft();
+    if (storedDraft && !draftsMatch(storedDraft.data, serverDraft)) {
+      applyDraft(storedDraft.data);
+      latestDraftRef.current = storedDraft.data;
+      dirtyRef.current = true;
+
+      const serverUpdatedAt = post.updated_at
+        ? Date.parse(post.updated_at)
+        : 0;
+      const draftBaseUpdatedAt = storedDraft.baseUpdatedAt
+        ? Date.parse(storedDraft.baseUpdatedAt)
+        : 0;
+
+      if (serverUpdatedAt > draftBaseUpdatedAt) {
+        toast.info(
+          "Existe um rascunho local recuperado. Confira antes de salvar.",
+        );
+      } else {
+        toast.success("Rascunho recuperado");
+      }
     }
-  }, [post]);
+
+    setHydratedPostId(postId);
+  }, [
+    applyDraft,
+    hydratedPostId,
+    loadDraft,
+    post,
+    postId,
+  ]);
+
+  // Persiste alterações locais com debounce curto.
+  useEffect(() => {
+    if (hydratedPostId !== postId || !dirtyRef.current) return;
+
+    const timeoutId = window.setTimeout(
+      () => persistLatestDraft(true),
+      DRAFT_DEBOUNCE_MS,
+    );
+
+    return () => window.clearTimeout(timeoutId);
+  }, [currentDraft, hydratedPostId, persistLatestDraft, postId]);
+
+  // Flush síncrono ao ocultar, descarregar ou desmontar o editor.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        persistLatestDraft(false);
+      }
+    };
+    const handlePageHide = () => persistLatestDraft(false);
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      persistLatestDraft(false);
+      if (dirtyRef.current) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange,
+      );
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      persistLatestDraft(false);
+    };
+  }, [persistLatestDraft]);
 
   const updatePost = useMutation({
     mutationFn: async () => {
@@ -116,10 +350,11 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
       if (error) throw error;
     },
     onSuccess: () => {
+      clearLocalDraft();
       queryClient.invalidateQueries({ queryKey: ["posts", planningId] });
       queryClient.invalidateQueries({ queryKey: ["post", postId] });
       toast.success("Post salvo!");
-      onClose();
+      onClose("saved");
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -130,9 +365,10 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
       if (error) throw error;
     },
     onSuccess: () => {
+      clearLocalDraft();
       queryClient.invalidateQueries({ queryKey: ["posts", planningId] });
       toast.success("Post removido");
-      onClose();
+      onClose("deleted");
     },
   });
 
@@ -154,10 +390,11 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
       if (error) throw error;
     },
     onSuccess: () => {
+      clearLocalDraft();
       queryClient.invalidateQueries({ queryKey: ["posts", planningId] });
       queryClient.invalidateQueries({ queryKey: ["posts", targetPlanningId] });
       toast.success("Post movido com sucesso!");
-      onClose();
+      onClose("moved");
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -284,9 +521,38 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
     setExpandedImageIndex(newIdx);
   };
 
+  const requestClose = () => {
+    if (dirtyRef.current) {
+      persistLatestDraft(false);
+      setConfirmCancel(true);
+      return;
+    }
+
+    onClose("clean");
+  };
+
   return (
-    <Dialog open onOpenChange={() => onClose()}>
-      <DialogContent className="max-h-[90vh] w-[95vw] max-w-2xl overflow-y-auto p-4 sm:p-6">
+    <>
+    <Dialog open>
+      <DialogContent
+        hideCloseButton
+        onInteractOutside={(event) => event.preventDefault()}
+        onEscapeKeyDown={(event) => {
+          event.preventDefault();
+          requestClose();
+        }}
+        className="max-h-[90vh] w-[95vw] max-w-2xl overflow-y-auto p-4 sm:p-6"
+      >
+        <div className="absolute right-4 top-4">
+          <button
+            type="button"
+            onClick={requestClose}
+            className="rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            aria-label="Fechar editor"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
         <DialogHeader>
           <DialogTitle>Editar {contentType === "blog" ? "Blog" : "Post"}</DialogTitle>
         </DialogHeader>
@@ -566,7 +832,7 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
               <Trash2 className="mr-1 h-4 w-4" /> Excluir
             </Button>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
+              <Button variant="outline" size="sm" onClick={requestClose}>Cancelar</Button>
               <Button size="sm" onClick={() => updatePost.mutate()} disabled={updatePost.isPending}>
                 <Save className="mr-1 h-4 w-4" />
                 {updatePost.isPending ? "Salvando..." : "Salvar"}
@@ -652,5 +918,38 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
         )}
       </DialogContent>
     </Dialog>
+
+    <AlertDialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Alterações não salvas</AlertDialogTitle>
+          <AlertDialogDescription>
+            Você pode manter este rascunho para continuar depois ou descartar
+            definitivamente as alterações locais.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel
+            onClick={() => {
+              persistLatestDraft(true);
+              setConfirmCancel(false);
+              onClose("keep-draft");
+            }}
+          >
+            Manter rascunho
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              clearLocalDraft();
+              setConfirmCancel(false);
+              onClose("discard");
+            }}
+          >
+            Descartar alterações
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
