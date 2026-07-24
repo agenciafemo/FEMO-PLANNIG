@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -18,7 +18,15 @@ import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
-import { PostEditor } from "@/components/planning/PostEditor";
+import {
+  PostEditor,
+  type PostEditorCloseReason,
+} from "@/components/planning/PostEditor";
+import {
+  clearActivePostEditor,
+  getActivePostEditor,
+  setActivePostEditor,
+} from "@/hooks/usePostEditorDraft";
 import { ScriptLaudaDialog } from "@/components/script/ScriptLaudaDialog";
 import {
   copyScriptSpokenText,
@@ -109,6 +117,19 @@ export default function PlanningDetail() {
   });
 
   const planningId = planning?.id;
+  const restoreSuppressedRef = useRef(false);
+  const restoredScopeRef = useRef<string | null>(null);
+  const activeEditorScope = useMemo(
+    () =>
+      planningId && user?.id
+        ? {
+            organizationId,
+            userId: user.id,
+            planningId,
+          }
+        : null,
+    [organizationId, planningId, user?.id],
+  );
 
   const { data: posts } = useQuery({
     queryKey: ["posts", planningId],
@@ -123,6 +144,78 @@ export default function PlanningDetail() {
     },
     enabled: !!planningId,
   });
+
+  const openPostEditor = useCallback(
+    (postId: string) => {
+      if (activeEditorScope) {
+        setActivePostEditor(activeEditorScope, postId);
+      }
+      restoreSuppressedRef.current = false;
+      setEditingPost(postId);
+    },
+    [activeEditorScope],
+  );
+
+  const closePostEditor = useCallback(
+    (reason: PostEditorCloseReason) => {
+      setEditingPost(null);
+
+      if (reason === "keep-draft") {
+        // Mantém o marcador para recuperar o mesmo post em um remount, mas
+        // respeita o fechamento explícito enquanto esta tela continuar montada.
+        restoreSuppressedRef.current = true;
+        return;
+      }
+
+      restoreSuppressedRef.current = true;
+      if (activeEditorScope) {
+        clearActivePostEditor(activeEditorScope);
+      }
+    },
+    [activeEditorScope],
+  );
+
+  const restoreActiveEditor = useCallback(() => {
+    if (
+      !activeEditorScope ||
+      !posts ||
+      editingPost ||
+      restoreSuppressedRef.current
+    ) {
+      return;
+    }
+
+    const activePostId = getActivePostEditor(activeEditorScope);
+    if (!activePostId) return;
+
+    if (!posts.some((post) => post.id === activePostId)) {
+      clearActivePostEditor(activeEditorScope);
+      return;
+    }
+
+    setEditingPost(activePostId);
+  }, [activeEditorScope, editingPost, posts]);
+
+  useEffect(() => {
+    if (!activeEditorScope || !posts) return;
+
+    const scopeKey = [
+      activeEditorScope.organizationId ?? "legacy",
+      activeEditorScope.userId,
+      activeEditorScope.planningId,
+    ].join(":");
+
+    if (restoredScopeRef.current === scopeKey) return;
+    restoredScopeRef.current = scopeKey;
+    restoreSuppressedRef.current = false;
+    restoreActiveEditor();
+  }, [activeEditorScope, posts, restoreActiveEditor]);
+
+  useEffect(() => {
+    const handleWindowFocus = () => restoreActiveEditor();
+    window.addEventListener("focus", handleWindowFocus);
+    return () => window.removeEventListener("focus", handleWindowFocus);
+  }, [restoreActiveEditor]);
 
   // Video scripts
   const { data: videoScripts } = useQuery({
@@ -561,13 +654,13 @@ export default function PlanningDetail() {
               {viewMode === "grid" ? (
                 <div className="grid grid-cols-3 gap-1 origin-top transition-transform duration-200" style={{ transform: `scale(${zoomLevel / 100})` }}>
                   {feedPosts.map((post) => (
-                    <SortableFeedTile key={post.id} post={post} onOpen={() => setEditingPost(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
+                    <SortableFeedTile key={post.id} post={post} onOpen={() => openPostEditor(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
                   ))}
                 </div>
               ) : (
                 <div className="space-y-2">
                   {feedPosts.map((post) => (
-                    <SortableFeedRow key={post.id} post={post} onOpen={() => setEditingPost(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
+                    <SortableFeedRow key={post.id} post={post} onOpen={() => openPostEditor(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
                   ))}
                 </div>
               )}
@@ -587,7 +680,7 @@ export default function PlanningDetail() {
             <SortableContext items={storyPosts.map((p) => p.id)} strategy={horizontalListSortingStrategy}>
               <div className="flex gap-3 overflow-x-auto pb-2">
                 {storyPosts.map((post, i) => (
-                  <SortableStory key={post.id} post={post} index={i} onOpen={() => setEditingPost(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
+                  <SortableStory key={post.id} post={post} index={i} onOpen={() => openPostEditor(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
                 ))}
               </div>
             </SortableContext>
@@ -606,7 +699,7 @@ export default function PlanningDetail() {
             <SortableContext items={blogPosts.map((p) => p.id)} strategy={rectSortingStrategy}>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {blogPosts.map((post) => (
-                  <SortableBlog key={post.id} post={post} onOpen={() => setEditingPost(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
+                  <SortableBlog key={post.id} post={post} onOpen={() => openPostEditor(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
                 ))}
               </div>
             </SortableContext>
@@ -810,7 +903,7 @@ export default function PlanningDetail() {
           postId={editingPost}
           planningId={planningId}
           clientId={(planning as any).client_id}
-          onClose={() => setEditingPost(null)}
+          onClose={closePostEditor}
           clientNotes={client?.notes}
         />
       )}
