@@ -63,6 +63,12 @@ export interface VideoScriptSuggestion {
   reviewed_at: string | null;
 }
 
+export interface PlanningNpsSubmitResult {
+  response_id: string;
+  accepted: boolean;
+  next_allowed_at: string;
+}
+
 // ----------------------------------------------------------------------------
 // Primitivas
 // ----------------------------------------------------------------------------
@@ -255,6 +261,30 @@ export function insertVideoScriptSuggestion(
     _suggested_value: suggestedValue,
     _author_name: authorName,
   });
+}
+
+export async function submitPlanningNps(
+  token: string,
+  planningId: string,
+  score: number,
+  reason: string | null,
+): Promise<PlanningNpsSubmitResult> {
+  const rows = await callWrite<PlanningNpsSubmitResult[]>(
+    "public_submit_planning_nps",
+    {
+      _token: token,
+      _planning_id: planningId,
+      _score: score,
+      _reason: reason,
+    },
+  );
+
+  const result = rows?.[0];
+  if (!result) {
+    throw new Error("nps_response_missing");
+  }
+
+  return result;
 }
 
 // ----------------------------------------------------------------------------

@@ -25,6 +25,7 @@ import { Calendar, FileText, Image, Video, Layers, ChevronRight, ArrowLeft, Fold
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { PublicPostView } from "@/components/public/PublicPostView";
+import { NpsDialog } from "@/components/public/NpsDialog";
 import { ScriptLaudaDialog } from "@/components/script/ScriptLaudaDialog";
 import { toast } from "sonner";
 import {
@@ -948,6 +949,13 @@ export default function ClientPublic() {
           </div>
         )}
       </main>
+      {selectedPlanning && token && (
+        <NpsDialog
+          key={selectedPlanning}
+          token={token}
+          planningId={selectedPlanning}
+        />
+      )}
 
       <ScriptLaudaDialog
         open={Boolean(laudaPlanningId)}
