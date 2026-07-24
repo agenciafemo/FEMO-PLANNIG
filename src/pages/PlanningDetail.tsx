@@ -19,6 +19,11 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import { PostEditor } from "@/components/planning/PostEditor";
+import { ScriptLaudaDialog } from "@/components/script/ScriptLaudaDialog";
+import {
+  copyScriptSpokenText,
+  type ScriptLaudaSource,
+} from "@/lib/scriptLauda";
 import {
   listVideoScriptSuggestions,
   applyVideoScriptSuggestion,
@@ -78,6 +83,7 @@ export default function PlanningDetail() {
   const [editMonth, setEditMonth] = useState("");
   const [editYear, setEditYear] = useState("");
   const [zoomLevel, setZoomLevel] = useState(100);
+  const [laudaOpen, setLaudaOpen] = useState(false);
 
   const parsedMonth = (() => {
     if (!monthYear) return 0;
@@ -173,6 +179,15 @@ export default function PlanningDetail() {
     setScriptText("");
     setScriptInstructions("");
     setScriptReferences("");
+  };
+
+  const copySingleScriptSpokenText = async (script: ScriptLaudaSource) => {
+    try {
+      await copyScriptSpokenText([script]);
+      toast.success("Fala deste roteiro copiada!");
+    } catch {
+      toast.error("Não foi possível copiar a fala deste roteiro.");
+    }
   };
 
   const startEditScript = (script: any) => {
@@ -635,9 +650,19 @@ export default function PlanningDetail() {
           <h2 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
             <ScrollText className="h-4 w-4" /> Roteiros ({videoScripts?.length || 0})
           </h2>
-          <Button variant="outline" size="sm" onClick={() => setShowScriptForm(!showScriptForm)}>
-            <Plus className="h-4 w-4 mr-1" /> Roteiro
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!videoScripts?.length}
+              onClick={() => setLaudaOpen(true)}
+            >
+              <ScrollText className="mr-1 h-4 w-4" /> Ver lauda
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowScriptForm(!showScriptForm)}>
+              <Plus className="h-4 w-4 mr-1" /> Roteiro
+            </Button>
+          </div>
         </div>
 
         {showScriptForm && (
@@ -682,10 +707,8 @@ export default function PlanningDetail() {
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => {
                         e.stopPropagation();
-                        const parts = [script.title, script.spoken_text, script.references_notes, script.editing_instructions].filter(Boolean).join("\n\n---\n\n");
-                        navigator.clipboard.writeText(parts);
-                        toast.success("Roteiro copiado!");
-                      }}>
+                        void copySingleScriptSpokenText(script);
+                      }} title="Copiar somente a fala deste roteiro" aria-label="Copiar somente a fala deste roteiro">
                         <Copy className="h-3.5 w-3.5" />
                       </Button>
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); deleteScript.mutate(script.id); }}>
@@ -717,6 +740,15 @@ export default function PlanningDetail() {
           </div>
         )}
       </div>
+
+      <ScriptLaudaDialog
+        open={laudaOpen}
+        onOpenChange={setLaudaOpen}
+        clientName={client?.name || "Cliente não informado"}
+        planningName="Planejamento mensal"
+        monthYear={`${MONTHS[planning.month - 1]} de ${planning.year}`}
+        scripts={videoScripts || []}
+      />
 
       {/* Sugestões de roteiro enviadas pelo cliente (portal público) */}
       {scriptSuggestions && scriptSuggestions.length > 0 && (
