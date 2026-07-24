@@ -25,7 +25,12 @@ import { Calendar, FileText, Image, Video, Layers, ChevronRight, ArrowLeft, Fold
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { PublicPostView } from "@/components/public/PublicPostView";
+import { ScriptLaudaDialog } from "@/components/script/ScriptLaudaDialog";
 import { toast } from "sonner";
+import {
+  copyScriptSpokenText,
+  type ScriptLaudaSource,
+} from "@/lib/scriptLauda";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
@@ -85,6 +90,7 @@ export default function ClientPublic() {
   const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
   const [editingScriptField, setEditingScriptField] = useState<string>("");
   const [editingScriptValue, setEditingScriptValue] = useState<string>("");
+  const [laudaPlanningId, setLaudaPlanningId] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -223,6 +229,21 @@ export default function ClientPublic() {
 
   const stopRecording = () => { mediaRecorderRef.current?.stop(); setIsRecording(false); };
 
+  const copyPublicScriptSpokenText = async (
+    scripts: readonly ScriptLaudaSource[],
+  ) => {
+    try {
+      await copyScriptSpokenText(scripts);
+      toast.success(
+        scripts.length === 1
+          ? "Fala copiada com sucesso"
+          : "Falas copiadas com sucesso",
+      );
+    } catch {
+      toast.error("Erro ao copiar");
+    }
+  };
+
   // Áudio no portal público está adiado (PUBLIC_AUDIO_ENABLED = false). Enquanto
   // não houver Edge Function segura de upload, este caminho fica inativo e a UI
   // de gravar/enviar áudio permanece oculta. Comentários de texto seguem normais.
@@ -248,6 +269,12 @@ export default function ClientPublic() {
 
   const accentColor = client.accent_color || "#F97316";
   const currentReport = reports?.find((r) => r.id === selectedReport);
+  const laudaPlanning = plannings?.find((p) => p.id === laudaPlanningId);
+  const scriptsForLauda = laudaPlanningId
+    ? allScripts?.filter((script) => script.planning_id === laudaPlanningId)
+      ?? (selectedPlanning === laudaPlanningId ? videoScripts : undefined)
+      ?? []
+    : [];
 
   // Post detail view
   if (selectedPost) {
@@ -476,7 +503,27 @@ export default function ClientPublic() {
                       const scripts = allScripts.filter(s => s.planning_id === p.id);
                       return (
                         <div key={p.id}>
-                          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{MONTHS[p.month - 1]} {p.year}</h3>
+                          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <h3 className="text-sm font-semibold text-muted-foreground">{MONTHS[p.month - 1]} {p.year}</h3>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setLaudaPlanningId(p.id)}
+                              >
+                                <ScrollText className="mr-1 h-4 w-4" />
+                                Ver lauda
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => void copyPublicScriptSpokenText(scripts)}
+                              >
+                                <Copy className="mr-1 h-4 w-4" />
+                                {scripts.length === 1 ? "Copiar fala" : "Copiar todas as falas"}
+                              </Button>
+                            </div>
+                          </div>
                           <div className="space-y-3">
                             {scripts.map((script: any, i: number) => (
                               <Card key={script.id}>
@@ -488,11 +535,14 @@ export default function ClientPublic() {
                                       </div>
                                       <h4 className="font-semibold">{script.title || `Roteiro ${i + 1}`}</h4>
                                     </div>
-                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => {
-                                      const parts = [script.title, script.spoken_text, script.references_notes, script.editing_instructions].filter(Boolean).join("\n\n---\n\n");
-                                      navigator.clipboard.writeText(parts);
-                                      toast.success("Roteiro copiado!");
-                                    }}>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 w-7 shrink-0 p-0"
+                                      title="Copiar somente a fala deste roteiro"
+                                      aria-label="Copiar somente a fala deste roteiro"
+                                      onClick={() => void copyPublicScriptSpokenText([script])}
+                                    >
                                       <Copy className="h-3.5 w-3.5" />
                                     </Button>
                                   </div>
@@ -785,9 +835,29 @@ export default function ClientPublic() {
             {/* Video Scripts for this planning */}
             {videoScripts && videoScripts.length > 0 && (
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                  <ScrollText className="h-4 w-4" /> Roteiros ({videoScripts.length})
-                </h3>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+                    <ScrollText className="h-4 w-4" /> Roteiros ({videoScripts.length})
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setLaudaPlanningId(selectedPlanning)}
+                    >
+                      <ScrollText className="mr-1 h-4 w-4" />
+                      Ver lauda
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void copyPublicScriptSpokenText(videoScripts)}
+                    >
+                      <Copy className="mr-1 h-4 w-4" />
+                      {videoScripts.length === 1 ? "Copiar fala" : "Copiar todas as falas"}
+                    </Button>
+                  </div>
+                </div>
                 {videoScripts.map((script: any, i: number) => (
                   <Card key={script.id}>
                     <CardContent className="p-4 space-y-3">
@@ -798,11 +868,14 @@ export default function ClientPublic() {
                           </div>
                           <h4 className="font-semibold">{script.title || `Roteiro ${i + 1}`}</h4>
                         </div>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => {
-                          const parts = [script.title, script.spoken_text, script.references_notes, script.editing_instructions].filter(Boolean).join("\n\n---\n\n");
-                          navigator.clipboard.writeText(parts);
-                          toast.success("Roteiro copiado!");
-                        }}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 shrink-0 p-0"
+                          title="Copiar somente a fala deste roteiro"
+                          aria-label="Copiar somente a fala deste roteiro"
+                          onClick={() => void copyPublicScriptSpokenText([script])}
+                        >
                           <Copy className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -875,6 +948,19 @@ export default function ClientPublic() {
           </div>
         )}
       </main>
+
+      <ScriptLaudaDialog
+        open={Boolean(laudaPlanningId)}
+        onOpenChange={(open) => {
+          if (!open) setLaudaPlanningId(null);
+        }}
+        clientName={client.name}
+        planningName="Planejamento mensal"
+        monthYear={laudaPlanning
+          ? `${MONTHS[laudaPlanning.month - 1]} de ${laudaPlanning.year}`
+          : "Período não informado"}
+        scripts={scriptsForLauda}
+      />
     </div>
   );
 }
