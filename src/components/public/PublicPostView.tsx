@@ -193,6 +193,10 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
   if (!post) return null;
 
   const isCarousel = post.content_type === "carousel" && carouselImages.length > 0;
+  // Blog: caption funciona como título e blog_body é o conteúdo real.
+  // Detecção normalizada — tolera variações de caixa/espaço em content_type.
+  const contentType = String(post.content_type ?? "").toLowerCase().trim();
+  const isBlog = contentType === "blog" || contentType.includes("blog");
   const contentTypeLabel = post.content_type === "reels" ? "Reels/Vídeo" : post.content_type === "carousel" ? "Carrossel" : post.content_type === "story" ? "Story" : post.content_type === "blog" ? "Blog" : "Arte Estática";
 
   return (
@@ -336,7 +340,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
           {/* Editable Caption */}
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground">Legenda</span>
+              <span className="text-xs font-medium text-muted-foreground">{isBlog ? "Título" : "Legenda"}</span>
               {!editingCaption && (
                 <Button variant="ghost" size="sm" onClick={() => { setEditingCaption(true); setEditedCaption(post.caption || ""); }}>
                   <Edit2 className="mr-1 h-3 w-3" /> Sugerir edição
@@ -361,6 +365,18 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
               <p className="whitespace-pre-wrap text-sm">{post.caption || "Sem legenda"}</p>
             )}
           </div>
+
+          {/* Blog: conteúdo do artigo (blog_body). Só aparece para content_type "blog". */}
+          {isBlog && (
+            <div>
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">Conteúdo</span>
+              {post.blog_body ? (
+                <p className="whitespace-pre-wrap text-sm">{post.blog_body}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">Nenhum conteúdo informado.</p>
+              )}
+            </div>
+          )}
 
           {/* Editable Hashtags */}
           <div>
