@@ -349,15 +349,25 @@ export default function PlanningDetail() {
       const allPosts = posts || [];
       const maxPos = allPosts.length > 0 ? Math.max(...allPosts.map((p) => p.position)) : -1;
       if (allPosts.length >= 50) throw new Error("Máximo de 50 itens por planejamento");
-      const { error } = await supabase.from("posts").insert({
-        planning_id: planningId!,
-        position: maxPos + 1,
-        content_type: type,
-      });
+      const { data, error } = await supabase
+        .from("posts")
+        .insert({
+          planning_id: planningId!,
+          position: maxPos + 1,
+          content_type: type,
+        })
+        .select("id")
+        .single();
       if (error) throw error;
+      return { postId: data.id, type };
     },
-    onSuccess: () => {
+    onSuccess: ({ postId, type }) => {
       queryClient.invalidateQueries({ queryKey: ["posts", planningId] });
+      if (type === "blog") {
+        openPostEditor(postId);
+        toast.info("Preencha título e conteúdo antes de enviar ao cliente");
+        return;
+      }
       toast.success("Adicionado!");
     },
     onError: (e: any) => toast.error(e.message),
@@ -1090,6 +1100,7 @@ function SortableStory({ post, index, onOpen, onToggleScheduled }: { post: any; 
 function SortableBlog({ post, onOpen, onToggleScheduled }: { post: any; onOpen: () => void; onToggleScheduled: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: post.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
+  const isIncomplete = !post.caption?.trim() || !post.blog_body?.trim();
   return (
     <div ref={setNodeRef} style={style}>
       <Card className="group relative transition-shadow hover:shadow-md">
@@ -1130,6 +1141,11 @@ function SortableBlog({ post, onOpen, onToggleScheduled }: { post: any; onOpen: 
                 <span className="text-xs text-muted-foreground">
                   {post.publish_date ? format(new Date(post.publish_date + "T12:00:00"), "dd/MM/yyyy") : "Sem data"}
                 </span>
+                {isIncomplete && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                    Blog incompleto
+                  </span>
+                )}
               </div>
               <p className="line-clamp-2 text-sm font-medium">{post.caption || "Sem título"}</p>
               <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
