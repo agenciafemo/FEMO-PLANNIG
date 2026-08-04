@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -15,6 +15,8 @@ import { toast } from "sonner";
 import { Link, useNavigate } from "react-router-dom";
 import { ClientDocuments } from "@/components/client/ClientDocuments";
 import { ClientReports } from "@/components/client/ClientReports";
+import { InstagramConnection } from "@/components/client/InstagramConnection";
+import { META_CONNECT_ENABLED } from "@/lib/featureFlags";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
@@ -49,6 +51,14 @@ export default function Clients() {
   const editLogoRef = useRef<HTMLInputElement>(null);
 
   const [expandedClient, setExpandedClient] = useState<string | null>(null);
+
+  // Retorno do OAuth do Meta: expande o cliente para montar a tela de conexão
+  // (que então detecta os parâmetros e abre a seleção de página).
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const cid = p.get("client_id");
+    if (p.get("meta_status") && cid) setExpandedClient(cid);
+  }, []);
 
   // Planning creation state
   const [planningOpen, setPlanningOpen] = useState(false);
@@ -377,6 +387,7 @@ export default function Clients() {
 
                   {expandedClient === client.id && (
                     <div className="space-y-6 border-t pt-4">
+                      {META_CONNECT_ENABLED && <InstagramConnection clientId={client.id} />}
                       <ClientReports clientId={client.id} />
                       <ClientDocuments clientId={client.id} />
                     </div>
