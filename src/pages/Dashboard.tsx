@@ -13,6 +13,7 @@ import {
   Users,
   Users2,
 } from "lucide-react";
+import { PROGRAMACAO_ENABLED } from "@/lib/featureFlags";
 
 // Saudação pelo horário — sem depender de nenhum dado do usuário.
 function greeting(): string {
@@ -35,7 +36,7 @@ type ModuleCard = {
 // página — ficam como "Em breve" (não clicáveis) para não gerar link quebrado.
 const MODULES: ModuleCard[] = [
   { title: "Clientes", subtitle: "Contas e marcas", icon: Users, to: "/clients" },
-  { title: "Programação", subtitle: "Agendar e publicar", icon: CalendarClock, soon: true, isNew: true },
+  { title: "Programação", subtitle: "Agendar e publicar", icon: CalendarClock, isNew: true, ...(PROGRAMACAO_ENABLED ? { to: "/programacao" } : { soon: true }) },
   { title: "Relatórios", subtitle: "Métricas do Instagram", icon: BarChart3, soon: true, isNew: true },
   { title: "NPS", subtitle: "Satisfação dos clientes", icon: Star, to: "/reviews" },
   { title: "Cofre", subtitle: "Acessos e senhas", icon: Lock, to: "/vault" },
