@@ -20,7 +20,7 @@ const navItems = [
   { to: "/vault", icon: KeyRound, label: "Cofre" },
 ];
 
-function NotificationBell() {
+export function NotificationBell() {
   const queryClient = useQueryClient();
   const { organizationId, isLegacy } = useOrganization();
   const [open, setOpen] = useState(false);
@@ -71,16 +71,16 @@ function NotificationBell() {
   return (
     <Popover open={open} onOpenChange={handleOpen}>
       <PopoverTrigger asChild>
-        <button className="relative flex h-9 w-9 items-center justify-center rounded-xl text-sidebar-foreground/55 transition-all duration-200 hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+        <button className="relative flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground ring-2 ring-sidebar">
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground ring-2 ring-background">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent side="right" align="end" className="w-80 p-0">
+      <PopoverContent side="bottom" align="end" className="w-80 p-0">
         <div className="border-b px-4 py-3">
           <p className="text-sm font-semibold">Notificações</p>
         </div>
