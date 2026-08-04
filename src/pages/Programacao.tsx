@@ -25,6 +25,7 @@ import {
   ChevronRight,
   Clock,
   ExternalLink,
+  FileText,
   Instagram,
   Loader2,
   Send,
@@ -69,6 +70,7 @@ export default function Programacao() {
   const [selected, setSelected] = useState<string>("");
   const [weekOffset, setWeekOffset] = useState(0);
   const [scheduling, setScheduling] = useState<ApprovedPost | null>(null);
+  const [receipt, setReceipt] = useState<ScheduledPost | null>(null);
   const [scheduleDate, setScheduleDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [scheduleTime, setScheduleTime] = useState("12:00");
 
@@ -282,6 +284,9 @@ export default function Programacao() {
                         <span className="text-[9px] text-muted-foreground">{format(new Date(it.scheduled_for), "HH:mm")}</span>
                       </div>
                       <div className="mt-1 flex items-center gap-1">
+                        <button onClick={() => setReceipt(it)} className="flex items-center gap-0.5 text-[9px] text-muted-foreground hover:text-foreground" aria-label="Recibo">
+                          <FileText className="h-2.5 w-2.5" /> recibo
+                        </button>
                         {it.status === "published" && it.permalink && (
                           <a href={it.permalink} target="_blank" rel="noreferrer" className="flex items-center gap-0.5 text-[9px] text-info hover:underline">
                             <ExternalLink className="h-2.5 w-2.5" /> ver
@@ -307,6 +312,55 @@ export default function Programacao() {
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <span className="flex items-center gap-1"><Instagram className="h-3.5 w-3.5" /> Publica no Instagram do cliente selecionado.</span>
       </div>
+
+      {/* Comprovante (recibo) do agendamento */}
+      <Dialog open={!!receipt} onOpenChange={(v) => { if (!v) setReceipt(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Comprovante do agendamento</DialogTitle></DialogHeader>
+          {receipt && (
+            <div className="space-y-3 text-sm">
+              <div className="h-40 w-full overflow-hidden rounded-lg bg-muted">
+                <img src={receipt.image_url} alt="" className="h-full w-full object-cover" />
+              </div>
+              <dl className="space-y-1.5">
+                <div className="flex justify-between gap-2">
+                  <dt className="text-muted-foreground">Cliente</dt>
+                  <dd className="font-medium">{clients?.find((c) => c.id === receipt.client_id)?.name ?? "—"}</dd>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <dt className="text-muted-foreground">Status</dt>
+                  <dd>{statusChip(receipt.status).label}</dd>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <dt className="text-muted-foreground">Agendado para</dt>
+                  <dd className="font-medium">{format(new Date(receipt.scheduled_for), "dd/MM/yyyy 'às' HH:mm")}</dd>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <dt className="text-muted-foreground">Criado em</dt>
+                  <dd>{format(new Date(receipt.created_at), "dd/MM/yyyy HH:mm")}</dd>
+                </div>
+                {receipt.error_code && (
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-muted-foreground">Erro</dt>
+                    <dd className="text-destructive">{receipt.error_code}</dd>
+                  </div>
+                )}
+              </dl>
+              {receipt.caption?.trim() && (
+                <div className="rounded-lg bg-muted/50 p-2">
+                  <p className="mb-1 text-xs text-muted-foreground">Legenda</p>
+                  <p className="whitespace-pre-wrap text-xs">{receipt.caption}</p>
+                </div>
+              )}
+              {receipt.status === "published" && receipt.permalink && (
+                <a href={receipt.permalink} target="_blank" rel="noreferrer" className="block">
+                  <Button className="w-full"><ExternalLink className="mr-1.5 h-4 w-4" /> Ver post no Instagram</Button>
+                </a>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog de agendamento */}
       <Dialog open={!!scheduling} onOpenChange={(v) => { if (!v) setScheduling(null); }}>
