@@ -43,6 +43,7 @@ export default function Clients() {
 
   // Edit dialog
   const [editingClient, setEditingClient] = useState<any | null>(null);
+  const [deletingClient, setDeletingClient] = useState<any | null>(null);
   const [editName, setEditName] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [editAccentColor, setEditAccentColor] = useState("#F97316");
@@ -162,7 +163,16 @@ export default function Clients() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
+      setDeletingClient(null);
       toast.success("Cliente removido");
+    },
+    onError: (e: any) => {
+      const fk = e?.code === "23503" || (typeof e?.message === "string" && e.message.includes("foreign key"));
+      toast.error(
+        fk
+          ? "Este cliente tem Instagram conectado ou agendamentos. Desconecte antes de apagar."
+          : (e?.message ?? "Erro ao apagar cliente"),
+      );
     },
   });
 
@@ -358,7 +368,7 @@ export default function Clients() {
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setExpandedClient(expandedClient === client.id ? null : client.id)}>
                         {expandedClient === client.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => deleteClient.mutate(client.id)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Apagar cliente" onClick={() => setDeletingClient(client)}>
                         <Trash2 className="h-3.5 w-3.5 text-destructive" />
                       </Button>
                     </div>
@@ -436,6 +446,28 @@ export default function Clients() {
               {updateClient.isPending ? "Salvando..." : "Salvar alterações"}
             </Button>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmação de exclusão de cliente */}
+      <Dialog open={!!deletingClient} onOpenChange={(v) => { if (!v) setDeletingClient(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Apagar cliente</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Tem certeza que deseja apagar{" "}
+              <span className="font-semibold text-foreground">{deletingClient?.name}</span>? Esta ação{" "}
+              <span className="font-semibold text-destructive">não pode ser desfeita</span> — o cliente vai para a lixeira e não poderá ser recuperado.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeletingClient(null)} disabled={deleteClient.isPending}>
+                Cancelar
+              </Button>
+              <Button variant="destructive" onClick={() => deletingClient && deleteClient.mutate(deletingClient.id)} disabled={deleteClient.isPending}>
+                {deleteClient.isPending ? "Apagando..." : "Apagar cliente"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
