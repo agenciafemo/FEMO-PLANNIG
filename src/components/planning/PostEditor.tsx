@@ -483,6 +483,27 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
     e.target.value = "";
   };
 
+  const handleUploadVideo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("video/")) { toast.error("Selecione um arquivo de vídeo (mp4/mov)"); return; }
+    // Instagram Reels via URL aceita até ~100MB. Avisa antes de gastar upload.
+    const maxMB = 100;
+    if (file.size > maxMB * 1024 * 1024) {
+      toast.error(`Vídeo de ${(file.size / 1024 / 1024).toFixed(0)}MB — o limite é ${maxMB}MB. Comprima antes de enviar.`);
+      return;
+    }
+    toast.info("Enviando vídeo...");
+    const ext = file.name.split(".").pop();
+    const path = `${planningId}/${postId}/reels-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage.from("post-media").upload(path, file);
+    if (error) { toast.error("Erro ao enviar: " + error.message); return; }
+    const { data: urlData } = supabase.storage.from("post-media").getPublicUrl(path);
+    setVideoUrl(urlData.publicUrl);
+    toast.success("Vídeo enviado! Pronto para publicar.");
+    e.target.value = "";
+  };
+
   const addCarouselUrl = () => {
     if (!carouselUrlInput.trim()) return;
     if (mediaUrls.length >= 20) { toast.error("Limite de 20 arquivos"); return; }
@@ -670,8 +691,18 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
 
           {contentType === "reels" && (
             <div className="space-y-2">
-              <Label>Link do vídeo (Google Drive)</Label>
-              <Input placeholder="https://drive.google.com/..." value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} />
+              <Label>Vídeo do Reels</Label>
+              <Input type="file" accept="video/*" onChange={handleUploadVideo} />
+              <p className="text-xs text-muted-foreground">
+                Faça upload do arquivo (mp4/mov, até 100MB) para publicar direto pelo Norteia.
+                Link do Google Drive serve só como referência — não pode ser publicado automaticamente.
+              </p>
+              <Input placeholder="ou cole um link (Drive, etc — só referência)" value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} />
+              {videoUrl && (
+                <p className="text-xs text-muted-foreground truncate">
+                  Atual: {videoUrl.includes("/post-media/") ? "vídeo enviado ✓" : videoUrl}
+                </p>
+              )}
             </div>
           )}
 
