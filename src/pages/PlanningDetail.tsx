@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ArrowLeft, Plus, Image, Video, Layers, Circle, FileText, Play, Trash2, ScrollText, CalendarCheck, Pencil, Copy, ZoomIn, ZoomOut, Check, X } from "lucide-react";
+import { ArrowLeft, Plus, Image, Video, Layers, Circle, FileText, Play, Trash2, ScrollText, CalendarCheck, Pencil, Copy, ZoomIn, ZoomOut, Check, X, Instagram } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -18,6 +18,8 @@ import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
+import { getPostsPublishStatus } from "@/lib/metaScheduleRpc";
+import { PROGRAMACAO_ENABLED } from "@/lib/featureFlags";
 import {
   PostEditor,
   type PostEditorCloseReason,
@@ -503,6 +505,13 @@ export default function PlanningDetail() {
   );
 
   const client = (planning as any).clients;
+  const postIds = (posts ?? []).map((p: any) => p.id);
+  const { data: pubMap } = useQuery({
+    queryKey: ["planning-publish-status", planningId, postIds.length],
+    queryFn: () => getPostsPublishStatus(postIds),
+    enabled: PROGRAMACAO_ENABLED && postIds.length > 0,
+  });
+
   const feedPosts = posts?.filter((p) => !["story", "blog"].includes(p.content_type)) || [];
   const storyPosts = posts?.filter((p) => p.content_type === "story") || [];
   const blogPosts = posts?.filter((p) => p.content_type === "blog") || [];
@@ -664,13 +673,13 @@ export default function PlanningDetail() {
               {viewMode === "grid" ? (
                 <div className="grid grid-cols-3 gap-1 origin-top transition-transform duration-200" style={{ transform: `scale(${zoomLevel / 100})` }}>
                   {feedPosts.map((post) => (
-                    <SortableFeedTile key={post.id} post={post} onOpen={() => openPostEditor(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
+                    <SortableFeedTile key={post.id} post={{ ...post, meta_publish: pubMap?.[post.id] }} onOpen={() => openPostEditor(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
                   ))}
                 </div>
               ) : (
                 <div className="space-y-2">
                   {feedPosts.map((post) => (
-                    <SortableFeedRow key={post.id} post={post} onOpen={() => openPostEditor(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
+                    <SortableFeedRow key={post.id} post={{ ...post, meta_publish: pubMap?.[post.id] }} onOpen={() => openPostEditor(post.id)} onToggleScheduled={() => handleToggleScheduled(post)} />
                   ))}
                 </div>
               )}
@@ -960,6 +969,17 @@ function SortableFeedTile({ post, onOpen, onToggleScheduled }: { post: any; onOp
         {post.status === "needs_revision" && (
           <div className="absolute right-1 top-1 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] text-white pointer-events-none">✗</div>
         )}
+        {post.meta_publish?.status === "published" && (
+          <a
+            href={post.meta_publish.permalink ?? "#"}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="absolute left-1 top-1 z-10 inline-flex items-center gap-0.5 rounded-full bg-pink-600 px-1.5 py-0.5 text-[9px] font-medium text-white"
+          >
+            <Instagram className="h-2.5 w-2.5" /> Pub.
+          </a>
+        )}
         {post.publish_date && (
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent px-1.5 pb-1 pt-3 pointer-events-none">
             <p className="text-[10px] text-white/90">{format(new Date(post.publish_date + "T12:00:00"), "dd/MM", { locale: ptBR })}</p>
@@ -1028,6 +1048,16 @@ function SortableFeedRow({ post, onOpen, onToggleScheduled }: { post: any; onOpe
                 {post.scheduled && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
                     <CalendarCheck className="h-3 w-3" /> Programado
+                  </span>
+                )}
+                {post.meta_publish?.status === "published" && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-pink-100 px-2 py-0.5 text-xs font-medium text-pink-700">
+                    <Instagram className="h-3 w-3" /> Publicado
+                  </span>
+                )}
+                {(post.meta_publish?.status === "queued" || post.meta_publish?.status === "processing") && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                    <CalendarCheck className="h-3 w-3" /> Agendado (Meta)
                   </span>
                 )}
               </div>
@@ -1136,6 +1166,16 @@ function SortableBlog({ post, onOpen, onToggleScheduled }: { post: any; onOpen: 
                 {post.scheduled && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
                     <CalendarCheck className="h-3 w-3" /> Programado
+                  </span>
+                )}
+                {post.meta_publish?.status === "published" && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-pink-100 px-2 py-0.5 text-xs font-medium text-pink-700">
+                    <Instagram className="h-3 w-3" /> Publicado
+                  </span>
+                )}
+                {(post.meta_publish?.status === "queued" || post.meta_publish?.status === "processing") && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                    <CalendarCheck className="h-3 w-3" /> Agendado (Meta)
                   </span>
                 )}
                 <span className="text-xs text-muted-foreground">

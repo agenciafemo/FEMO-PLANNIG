@@ -88,3 +88,24 @@ export async function runPublishWorker(): Promise<{
   if (error) throw error;
   return data as { processed: number; published: number; failed: number };
 }
+
+export interface PostPublishStatus {
+  post_id: string;
+  status: string; // queued | processing | published | failed
+  permalink: string | null;
+  scheduled_for: string;
+}
+
+/** Status de publicação (Programação) de um conjunto de posts, indexado por post_id. */
+export async function getPostsPublishStatus(
+  postIds: string[],
+): Promise<Record<string, PostPublishStatus>> {
+  if (postIds.length === 0) return {};
+  const { data, error } = await (supabase.rpc as any)("get_posts_publish_status", {
+    _post_ids: postIds,
+  });
+  if (error) throw error;
+  const map: Record<string, PostPublishStatus> = {};
+  for (const row of (data ?? []) as PostPublishStatus[]) map[row.post_id] = row;
+  return map;
+}
