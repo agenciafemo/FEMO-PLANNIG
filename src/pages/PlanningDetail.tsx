@@ -492,6 +492,17 @@ export default function PlanningDetail() {
     void reorderedMap;
   };
 
+  // IMPORTANTE: hooks SEMPRE antes de qualquer return antecipado. Este useQuery
+  // ficava depois dos `if (...) return` abaixo, então só era chamado quando o
+  // planejamento já tinha carregado — mudando a contagem de hooks entre renders
+  // (React #310, quebrava a página). postIds não depende de `planning`.
+  const postIds = (posts ?? []).map((p: any) => p.id);
+  const { data: pubMap } = useQuery({
+    queryKey: ["planning-publish-status", planningId, postIds.length],
+    queryFn: () => getPostsPublishStatus(postIds),
+    enabled: PROGRAMACAO_ENABLED && postIds.length > 0,
+  });
+
   if (planningLoading) return (
     <div className="flex min-h-[60vh] items-center justify-center">
       <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
@@ -505,12 +516,6 @@ export default function PlanningDetail() {
   );
 
   const client = (planning as any).clients;
-  const postIds = (posts ?? []).map((p: any) => p.id);
-  const { data: pubMap } = useQuery({
-    queryKey: ["planning-publish-status", planningId, postIds.length],
-    queryFn: () => getPostsPublishStatus(postIds),
-    enabled: PROGRAMACAO_ENABLED && postIds.length > 0,
-  });
 
   const feedPosts = posts?.filter((p) => !["story", "blog"].includes(p.content_type)) || [];
   const storyPosts = posts?.filter((p) => p.content_type === "story") || [];
