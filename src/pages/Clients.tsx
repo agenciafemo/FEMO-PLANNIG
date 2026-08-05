@@ -9,6 +9,16 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Copy, ExternalLink, Trash2, ChevronDown, ChevronUp, Calendar, Image, Layers, Pencil, Upload, X } from "lucide-react";
 import { toast } from "sonner";
@@ -43,6 +53,7 @@ export default function Clients() {
 
   // Edit dialog
   const [editingClient, setEditingClient] = useState<any | null>(null);
+  const [deletingClient, setDeletingClient] = useState<any | null>(null);
   const [editName, setEditName] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [editAccentColor, setEditAccentColor] = useState("#F97316");
@@ -163,6 +174,17 @@ export default function Clients() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       toast.success("Cliente removido");
+      setDeletingClient(null);
+    },
+    onError: (err: any) => {
+      // 23503 = violação de chave estrangeira (cliente com dados vinculados).
+      const isFk = err?.code === "23503" || /foreign key|violates|constraint/i.test(err?.message ?? "");
+      toast.error(
+        isFk
+          ? "Este cliente tem dados vinculados (planejamentos, conexões). Remova-os antes de excluir."
+          : (err?.message ?? "Erro ao remover cliente"),
+      );
+      setDeletingClient(null);
     },
   });
 
@@ -358,7 +380,7 @@ export default function Clients() {
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setExpandedClient(expandedClient === client.id ? null : client.id)}>
                         {expandedClient === client.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => deleteClient.mutate(client.id)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Excluir cliente" onClick={() => setDeletingClient(client)}>
                         <Trash2 className="h-3.5 w-3.5 text-destructive" />
                       </Button>
                     </div>
@@ -405,6 +427,29 @@ export default function Clients() {
           </CardContent>
         </Card>
       )}
+
+      {/* Confirmação de exclusão de cliente (ação destrutiva e irreversível) */}
+      <AlertDialog open={!!deletingClient} onOpenChange={(v) => { if (!v) setDeletingClient(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir cliente?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O cliente <strong>{deletingClient?.name}</strong> vai para a lixeira e{" "}
+              <strong>não poderá ser recuperado</strong>. Planejamentos e dados vinculados
+              podem ser perdidos junto. Tem certeza?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deletingClient && deleteClient.mutate(deletingClient.id)}
+            >
+              Excluir definitivamente
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Edit Client Dialog */}
       <Dialog open={!!editingClient} onOpenChange={(v) => { if (!v) setEditingClient(null); }}>
