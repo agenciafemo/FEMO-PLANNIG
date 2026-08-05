@@ -15,8 +15,10 @@ export interface ScheduledPost {
   client_id: string;
   connection_id: string;
   post_id: string | null;
-  media_type: string; // image (v1)
-  image_url: string;
+  media_type: string; // image | reels
+  image_url: string | null;
+  video_url: string | null;
+  cover_url: string | null;
   caption: string;
   scheduled_for: string; // ISO
   status: string; // queued | processing | published | failed | canceled
@@ -52,7 +54,10 @@ export async function getScheduledPosts(
 export async function createScheduledPost(input: {
   clientId: string;
   connectionId: string;
-  imageUrl: string;
+  mediaType?: "image" | "reels";
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+  coverUrl?: string | null;
   caption?: string;
   scheduledFor?: string; // ISO; default agora (no servidor)
   postId?: string | null;
@@ -60,7 +65,10 @@ export async function createScheduledPost(input: {
   const { data, error } = await (supabase.rpc as any)("create_scheduled_post", {
     _client_id: input.clientId,
     _connection_id: input.connectionId,
-    _image_url: input.imageUrl,
+    _media_type: input.mediaType ?? "image",
+    _image_url: input.imageUrl ?? null,
+    _video_url: input.videoUrl ?? null,
+    _cover_url: input.coverUrl ?? null,
     _caption: input.caption ?? "",
     _scheduled_for: input.scheduledFor ?? new Date().toISOString(),
     _post_id: input.postId ?? null,

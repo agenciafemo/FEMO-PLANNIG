@@ -46,7 +46,32 @@ interface ApprovedPost {
   id: string;
   caption: string | null;
   cover_image_url: string | null;
+  video_url: string | null;
   content_type: string | null;
+}
+
+/**
+ * Monta o payload de publicação a partir do post, conforme o tipo.
+ * Reels exige um arquivo de vídeo DIRETO e público (a Meta baixa a URL);
+ * link do Drive não serve — bloqueia com mensagem clara.
+ */
+function buildScheduleInput(post: ApprovedPost) {
+  if (post.content_type === "reels") {
+    const v = post.video_url ?? "";
+    const isDirectVideo = /\.(mp4|mov|m4v)(\?|$)/i.test(v) && !v.includes("drive.google.com");
+    if (!isDirectVideo) {
+      throw new Error(
+        "Reels sem vídeo válido. Abra o post e faça upload do arquivo (mp4/mov) — link do Google Drive não pode ser publicado.",
+      );
+    }
+    return {
+      mediaType: "reels" as const,
+      videoUrl: v,
+      coverUrl: post.cover_image_url ?? undefined,
+    };
+  }
+  if (!post.cover_image_url) throw new Error("Post sem imagem de capa.");
+  return { mediaType: "image" as const, imageUrl: post.cover_image_url };
 }
 
 const WEEKDAYS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
@@ -102,11 +127,13 @@ export default function Programacao() {
     queryFn: async () => {
       const { data, error } = await (supabase
         .from("posts")
-        .select("id, caption, cover_image_url, content_type, plannings!inner(client_id)") as any)
+        .select("id, caption, cover_image_url, video_url, content_type, plannings!inner(client_id)") as any)
         .eq("status", "approved")
         .eq("plannings.client_id", clientId);
       if (error) throw error;
-      return ((data ?? []) as ApprovedPost[]).filter((p) => p.cover_image_url);
+      return ((data ?? []) as ApprovedPost[]).filter(
+        (p) => p.cover_image_url || (p.content_type === "reels" && p.video_url),
+      );
     },
     enabled: !!clientId,
   });
@@ -142,7 +169,7 @@ export default function Programacao() {
       await createScheduledPost({
         clientId,
         connectionId,
-        imageUrl: post.cover_image_url!,
+        ...buildScheduleInput(post),
         caption: post.caption ?? "",
         postId: post.id,
       });
@@ -163,7 +190,7 @@ export default function Programacao() {
       await createScheduledPost({
         clientId,
         connectionId,
-        imageUrl: scheduling.cover_image_url!,
+        ...buildScheduleInput(scheduling),
         caption: scheduling.caption ?? "",
         scheduledFor: when.toISOString(),
         postId: scheduling.id,
@@ -322,7 +349,7 @@ export default function Programacao() {
           {receipt && (
             <div className="space-y-3 text-sm">
               <div className="h-40 w-full overflow-hidden rounded-lg bg-muted">
-                <img src={receipt.image_url} alt="" className="h-full w-full object-cover" />
+                <img src={receipt.image_url ?? receipt.cover_url ?? undefined} alt="" className="h-full w-full object-cover" />
               </div>
               <dl className="space-y-1.5">
                 <div className="flex justify-between gap-2">
