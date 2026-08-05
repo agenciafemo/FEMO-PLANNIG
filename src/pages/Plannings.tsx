@@ -13,6 +13,7 @@ import { Plus, Calendar, Copy, Image, Layers, Trash2, Film, LayoutGrid, FileText
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Link, useParams } from "react-router-dom";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { Slider } from "@/components/ui/slider";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -36,6 +37,8 @@ export default function Plannings() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [filterClient, setFilterClient] = usePersistedState<string>("plannings-filter-client", "all");
+  const [filterMonth, setFilterMonth] = usePersistedState<string>("plannings-filter-month", "all");
   const [selectedClient, setSelectedClient] = useState(clientId || "");
   const [month, setMonth] = useState(String(new Date().getMonth() + 1));
   const [year, setYear] = useState(String(new Date().getFullYear()));
@@ -250,13 +253,43 @@ export default function Plannings() {
         ))}
       </div>
 
+      {/* Filtros de cliente e mês */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={filterClient} onValueChange={setFilterClient}>
+          <SelectTrigger className="w-52"><SelectValue placeholder="Cliente" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os clientes</SelectItem>
+            {clients?.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+          </SelectContent>
+        </Select>
+        <Select value={filterMonth} onValueChange={setFilterMonth}>
+          <SelectTrigger className="w-40"><SelectValue placeholder="Mês" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os meses</SelectItem>
+            {MONTHS.map((m, i) => (<SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>))}
+          </SelectContent>
+        </Select>
+        {(filterClient !== "all" || filterMonth !== "all") && (
+          <button
+            onClick={() => { setFilterClient("all"); setFilterMonth("all"); }}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Limpar filtros
+          </button>
+        )}
+      </div>
+
       {isLoading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => <Card key={i} className="animate-pulse"><CardContent className="h-20" /></Card>)}
         </div>
       ) : plannings && plannings.length > 0 ? (
         <div className="space-y-3">
-          {plannings.filter((p: any) => statusFilter === "all" || p.status === statusFilter).map((p: any) => {
+          {plannings.filter((p: any) =>
+            (statusFilter === "all" || p.status === statusFilter) &&
+            (filterClient === "all" || p.client_id === filterClient) &&
+            (filterMonth === "all" || String(p.month) === filterMonth)
+          ).map((p: any) => {
             const accent = (p.clients as any)?.accent_color || "#ef5a2b";
             return (
             <Card key={p.id} className="overflow-hidden transition-shadow hover:shadow-md">
