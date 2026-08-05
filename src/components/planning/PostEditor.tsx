@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { uploadVideoResumable } from "@/lib/uploadVideo";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -96,6 +97,7 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
   const [contentType, setContentType] = useState("static");
   const [publishDate, setPublishDate] = useState<Date | undefined>();
   const [videoUrl, setVideoUrl] = useState("");
+  const [videoPct, setVideoPct] = useState<number | null>(null);
   const [coverImageUrl, setCoverImageUrl] = useState("");
   const [mediaUrls, setMediaUrls] = useState<string[]>([]);
   const [carouselUrlInput, setCarouselUrlInput] = useState("");
@@ -484,24 +486,30 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
   };
 
   const handleUploadVideo = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("video/")) { toast.error("Selecione um arquivo de vídeo (mp4/mov)"); return; }
-    // Instagram Reels via URL aceita até ~100MB. Avisa antes de gastar upload.
-    const maxMB = 100;
+    // Instagram Reels aceita até ~1GB (o limite global do Storage também é 1GB).
+    const maxMB = 1024;
     if (file.size > maxMB * 1024 * 1024) {
-      toast.error(`Vídeo de ${(file.size / 1024 / 1024).toFixed(0)}MB — o limite é ${maxMB}MB. Comprima antes de enviar.`);
+      toast.error(`Vídeo de ${(file.size / 1024 / 1024).toFixed(0)}MB — o limite é 1GB. Comprima antes de enviar.`);
+      input.value = "";
       return;
     }
-    toast.info("Enviando vídeo...");
     const ext = file.name.split(".").pop();
     const path = `${planningId}/${postId}/reels-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    const { error } = await supabase.storage.from("post-media").upload(path, file);
-    if (error) { toast.error("Erro ao enviar: " + error.message); return; }
-    const { data: urlData } = supabase.storage.from("post-media").getPublicUrl(path);
-    setVideoUrl(urlData.publicUrl);
-    toast.success("Vídeo enviado! Pronto para publicar.");
-    e.target.value = "";
+    setVideoPct(0);
+    try {
+      const publicUrl = await uploadVideoResumable(file, path, (pct) => setVideoPct(pct));
+      setVideoUrl(publicUrl);
+      toast.success("Vídeo enviado! Pronto para publicar.");
+    } catch (err) {
+      toast.error("Erro ao enviar vídeo: " + ((err as Error).message || "tente novamente"));
+    } finally {
+      setVideoPct(null);
+      input.value = "";
+    }
   };
 
   const addCarouselUrl = () => {
@@ -692,13 +700,21 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
           {contentType === "reels" && (
             <div className="space-y-2">
               <Label>Vídeo do Reels</Label>
-              <Input type="file" accept="video/*" onChange={handleUploadVideo} />
+              <Input type="file" accept="video/*" onChange={handleUploadVideo} disabled={videoPct !== null} />
               <p className="text-xs text-muted-foreground">
-                Faça upload do arquivo (mp4/mov, até 100MB) para publicar direto pelo Norteia.
+                Faça upload do arquivo (mp4/mov, até 1GB) para publicar direto pelo Norteia.
                 Link do Google Drive serve só como referência — não pode ser publicado automaticamente.
               </p>
+              {videoPct !== null && (
+                <div className="space-y-1">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div className="h-full bg-primary transition-all" style={{ width: `${videoPct}%` }} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Enviando vídeo… {videoPct}% (não feche esta janela)</p>
+                </div>
+              )}
               <Input placeholder="ou cole um link (Drive, etc — só referência)" value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} />
-              {videoUrl && (
+              {videoUrl && videoPct === null && (
                 <p className="text-xs text-muted-foreground truncate">
                   Atual: {videoUrl.includes("/post-media/") ? "vídeo enviado ✓" : videoUrl}
                 </p>
