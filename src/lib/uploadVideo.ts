@@ -11,6 +11,11 @@ import * as tus from "tus-js-client";
 import { supabase } from "@/integrations/supabase/client";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+// Hostname DIRETO de storage (<ref>.storage.supabase.co). A Supabase recomenda
+// usá-lo em uploads grandes — tem otimizações que melhoram a velocidade. Se a
+// URL for um domínio custom (não *.supabase.co), o replace não faz nada e cai
+// no endpoint normal, que também funciona.
+const STORAGE_HOST = SUPABASE_URL.replace(".supabase.co", ".storage.supabase.co");
 
 export async function uploadVideoResumable(
   file: File,
@@ -24,7 +29,7 @@ export async function uploadVideoResumable(
 
   await new Promise<void>((resolve, reject) => {
     const upload = new tus.Upload(file, {
-      endpoint: `${SUPABASE_URL}/storage/v1/upload/resumable`,
+      endpoint: `${STORAGE_HOST}/storage/v1/upload/resumable`,
       // Retomada progressiva em caso de instabilidade de rede.
       retryDelays: [0, 3000, 5000, 10000, 20000],
       headers: {
