@@ -485,6 +485,18 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
     e.target.value = "";
   };
 
+  // Lê a resolução do vídeo no navegador (sem enviar nada) para barrar arquivos
+  // acima de 1080p — o Instagram recusa Reels acima disso (o 4K falha).
+  const readVideoSize = (file: File): Promise<{ width: number; height: number } | null> =>
+    new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.onloadedmetadata = () => { URL.revokeObjectURL(url); resolve({ width: v.videoWidth, height: v.videoHeight }); };
+      v.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+      v.src = url;
+    });
+
   const handleUploadVideo = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.target;
     const file = input.files?.[0];
@@ -494,6 +506,14 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
     const maxMB = 1024;
     if (file.size > maxMB * 1024 * 1024) {
       toast.error(`Vídeo de ${(file.size / 1024 / 1024).toFixed(0)}MB — o limite é 1GB. Comprima antes de enviar.`);
+      input.value = "";
+      return;
+    }
+    // Trava de resolução: o Instagram recusa Reels acima de 1080p (foi o que
+    // derrubou o teste em 4K). Só barra quando dá pra ler as dimensões.
+    const dims = await readVideoSize(file);
+    if (dims && Math.max(dims.width, dims.height) > 1920) {
+      toast.error(`Vídeo em ${dims.width}×${dims.height} (acima de 1080p). O Instagram recusa Reels acima de 1080p — reexporte em 1080×1920.`);
       input.value = "";
       return;
     }

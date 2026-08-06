@@ -45,9 +45,16 @@ import { usePersistedState } from "@/hooks/usePersistedState";
 interface ApprovedPost {
   id: string;
   caption: string | null;
+  hashtags: string | null;
   cover_image_url: string | null;
   video_url: string | null;
   content_type: string | null;
+}
+
+// A legenda publicada no Instagram = legenda + hashtags (que ficam num campo
+// separado no editor). Sem isso, o post sai sem as #.
+function buildCaption(post: { caption: string | null; hashtags: string | null }): string {
+  return [post.caption?.trim(), post.hashtags?.trim()].filter(Boolean).join("\n\n");
 }
 
 /**
@@ -127,7 +134,7 @@ export default function Programacao() {
     queryFn: async () => {
       const { data, error } = await (supabase
         .from("posts")
-        .select("id, caption, cover_image_url, video_url, content_type, plannings!inner(client_id)") as any)
+        .select("id, caption, hashtags, cover_image_url, video_url, content_type, plannings!inner(client_id)") as any)
         .eq("status", "approved")
         .eq("plannings.client_id", clientId);
       if (error) throw error;
@@ -170,7 +177,7 @@ export default function Programacao() {
         clientId,
         connectionId,
         ...buildScheduleInput(post),
-        caption: post.caption ?? "",
+        caption: buildCaption(post),
         postId: post.id,
       });
       return runPublishWorker();
@@ -191,7 +198,7 @@ export default function Programacao() {
         clientId,
         connectionId,
         ...buildScheduleInput(scheduling),
-        caption: scheduling.caption ?? "",
+        caption: buildCaption(scheduling),
         scheduledFor: when.toISOString(),
         postId: scheduling.id,
       });
