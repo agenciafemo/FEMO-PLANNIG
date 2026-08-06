@@ -68,7 +68,8 @@ export interface MetaInsights {
   media: MediaItem[] | { error: string };
   insights_available: boolean;
   insights_note: string;
-  reach_total: number | null; // alcance total do período (número correto)
+  reach_total: number | null; // alcance total do período (contas únicas)
+  views_total: number | null; // visualizações totais (sem deduplicar)
   account_insights: Array<{ name: string; values?: Array<{ value: number; end_time?: string }> }> | null;
 }
 
