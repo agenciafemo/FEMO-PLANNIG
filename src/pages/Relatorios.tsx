@@ -26,6 +26,8 @@ import { usePersistedState } from "@/hooks/usePersistedState";
 const chartConfig = {
   alcance: { label: "Alcance", color: "hsl(173 58% 39%)" },
   engajamento: { label: "Engajamento", color: "hsl(173 58% 39%)" },
+  novos: { label: "Novos seguidores", color: "hsl(173 58% 39%)" },
+  idade: { label: "Seguidores", color: "hsl(173 58% 39%)" },
 } satisfies ChartConfig;
 
 export default function Relatorios() {
@@ -129,6 +131,14 @@ export default function Relatorios() {
           label: `#${i + 1}`,
           engajamento: (m.like_count || 0) + (m.comments_count || 0),
         }));
+        const newFollowersSeries = (insights.new_followers ?? [])
+          .map((v) => ({ dia: v.end_time ? v.end_time.slice(5, 10) : "", novos: v.value || 0 }));
+        const demo = insights.demographics;
+        const idadeBars = (demo?.idade ?? []).map((d) => ({ label: d.chave, valor: d.valor }));
+        const generoList = demo?.genero ?? [];
+        const cidadeList = (demo?.cidade ?? []).slice(0, 6);
+        const generoTotal = generoList.reduce((a, d) => a + d.valor, 0) || 1;
+        const cidadeMax = Math.max(1, ...cidadeList.map((d) => d.valor));
         return (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -176,6 +186,81 @@ export default function Relatorios() {
               </div>
             )}
 
+            {newFollowersSeries.length > 0 && (
+              <div className="rounded-xl border bg-card p-5">
+                <h2 className="mb-3 text-sm font-medium text-muted-foreground">Novos seguidores por dia</h2>
+                <ChartContainer config={chartConfig} className="h-[200px] w-full">
+                  <LineChart data={newFollowersSeries} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis dataKey="dia" tickLine={false} axisLine={false} minTickGap={24} />
+                    <YAxis tickLine={false} axisLine={false} width={40} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Line dataKey="novos" type="monotone" stroke="var(--color-novos)" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ChartContainer>
+              </div>
+            )}
+
+            {(generoList.length > 0 || cidadeList.length > 0) && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {generoList.length > 0 && (
+                  <div className="rounded-xl border bg-card p-5">
+                    <h2 className="mb-3 text-sm font-medium text-muted-foreground">Seguidores por gênero</h2>
+                    <div className="space-y-2.5">
+                      {generoList.map((d) => {
+                        const pct = Math.round((d.valor / generoTotal) * 100);
+                        const nome = d.chave === "F" ? "Feminino" : d.chave === "M" ? "Masculino" : d.chave;
+                        return (
+                          <div key={d.chave}>
+                            <div className="flex justify-between text-xs">
+                              <span>{nome}</span>
+                              <span className="text-muted-foreground">{pct}%</span>
+                            </div>
+                            <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-muted">
+                              <div className="h-full bg-brand" style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {cidadeList.length > 0 && (
+                  <div className="rounded-xl border bg-card p-5">
+                    <h2 className="mb-3 text-sm font-medium text-muted-foreground">Principais cidades</h2>
+                    <div className="space-y-2.5">
+                      {cidadeList.map((d) => (
+                        <div key={d.chave}>
+                          <div className="flex justify-between gap-2 text-xs">
+                            <span className="truncate">{d.chave}</span>
+                            <span className="shrink-0 text-muted-foreground">{d.valor.toLocaleString("pt-BR")}</span>
+                          </div>
+                          <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-muted">
+                            <div className="h-full bg-brand" style={{ width: `${Math.round((d.valor / cidadeMax) * 100)}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {idadeBars.length > 0 && (
+              <div className="rounded-xl border bg-card p-5">
+                <h2 className="mb-3 text-sm font-medium text-muted-foreground">Seguidores por faixa etária</h2>
+                <ChartContainer config={chartConfig} className="h-[220px] w-full">
+                  <BarChart data={idadeBars} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                    <YAxis tickLine={false} axisLine={false} width={40} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Bar dataKey="valor" fill="var(--color-idade)" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ChartContainer>
+              </div>
+            )}
+
             <div className="rounded-xl border bg-card p-5">
               <h2 className="mb-3 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
                 <Instagram className="h-4 w-4" /> Posts com mais engajamento — @{p.username ?? insights.client}
@@ -190,8 +275,15 @@ export default function Relatorios() {
                     href={m.permalink}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-between gap-3 rounded-lg border p-2.5 text-sm hover:bg-muted/50"
+                    className="flex items-center gap-3 rounded-lg border p-2 text-sm hover:bg-muted/50"
                   >
+                    {(m.thumbnail_url || m.media_url) ? (
+                      <img src={m.thumbnail_url || m.media_url} alt="" className="h-11 w-11 shrink-0 rounded-md object-cover" />
+                    ) : (
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-muted">
+                        <Instagram className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    )}
                     <span className="min-w-0 flex-1 truncate">
                       {m.caption?.slice(0, 60) || (m.media_product_type ?? m.media_type ?? "Post")}
                     </span>

@@ -51,6 +51,13 @@ export interface MediaItem {
   permalink?: string;
   like_count?: number;
   comments_count?: number;
+  media_url?: string;
+  thumbnail_url?: string;
+}
+
+export interface DemoEntry {
+  chave: string;
+  valor: number;
 }
 
 export interface MetaInsights {
@@ -71,6 +78,8 @@ export interface MetaInsights {
   reach_total: number | null; // alcance total do período (contas únicas)
   views_total: number | null; // visualizações totais (sem deduplicar)
   account_insights: Array<{ name: string; values?: Array<{ value: number; end_time?: string }> }> | null;
+  new_followers: Array<{ value: number; end_time?: string }> | null;
+  demographics: { genero: DemoEntry[]; idade: DemoEntry[]; cidade: DemoEntry[] } | null;
 }
 
 /** Puxa métricas reais do Instagram do cliente (perfil, posts, alcance). */
