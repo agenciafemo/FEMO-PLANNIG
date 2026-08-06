@@ -38,7 +38,12 @@ export default function Relatorios() {
   const clientId = selected || clients?.[0]?.id || "";
 
   const gen = useMutation({
-    mutationFn: () => generateReport({ clientId }),
+    mutationFn: async () => {
+      // Garante as métricas reais antes de gerar (puxa se ainda não tiver).
+      let ins = insights;
+      if (!ins) { ins = await getMetaInsights({ clientId }); setInsights(ins); }
+      return generateReport({ clientId, insights: ins });
+    },
     onSuccess: (r) => setResult(r),
     onError: (e: unknown) => toast.error("Erro ao gerar: " + (e as Error).message),
   });
@@ -100,9 +105,7 @@ export default function Relatorios() {
         const p = insights.profile ?? {};
         const mediaList = Array.isArray(insights.media) ? insights.media : [];
         const engTotal = mediaList.reduce((a, m) => a + (m.like_count || 0) + (m.comments_count || 0), 0);
-        const reachTotal = (insights.account_insights ?? [])
-          .flatMap((m) => m.values ?? [])
-          .reduce((a, v) => a + (v.value || 0), 0);
+        const reachTotal = insights.reach_total;
         const topPosts = [...mediaList].sort(
           (a, b) => ((b.like_count || 0) + (b.comments_count || 0)) - ((a.like_count || 0) + (a.comments_count || 0)),
         ).slice(0, 8);
@@ -111,7 +114,7 @@ export default function Relatorios() {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Metric label="Seguidores" value={p.followers_count ?? "—"} />
               <Metric label="Posts (total)" value={p.media_count ?? "—"} />
-              <Metric label="Alcance (30d)" value={insights.insights_available ? reachTotal.toLocaleString("pt-BR") : "—"} />
+              <Metric label="Alcance (30d)" value={reachTotal != null ? reachTotal.toLocaleString("pt-BR") : "—"} />
               <Metric label="Engajamento (posts)" value={engTotal.toLocaleString("pt-BR")} />
             </div>
 
