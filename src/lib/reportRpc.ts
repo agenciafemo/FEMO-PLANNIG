@@ -14,15 +14,29 @@ export interface ReportResult {
     posts_por_formato: Record<string, number>;
     publicados_no_instagram_via_norteia: number;
   };
+  // Métricas reais do Instagram que a IA usou (quando enviadas). null se não.
+  metricas?: {
+    seguidores: number | null;
+    total_de_posts_na_conta: number | null;
+    alcance_no_periodo: number | null;
+    engajamento_total_dos_posts_recentes: number;
+    posts_recentes_analisados: number;
+  } | null;
 }
 
 export async function generateReport(input: {
   clientId: string;
   from?: string; // ISO; default: últimos 30 dias (no servidor)
   to?: string; // ISO
+  insights?: MetaInsights | null; // métricas já buscadas, para a IA analisar
 }): Promise<ReportResult> {
   const { data, error } = await supabase.functions.invoke("generate-report", {
-    body: { client_id: input.clientId, from: input.from, to: input.to },
+    body: {
+      client_id: input.clientId,
+      from: input.from,
+      to: input.to,
+      insights: input.insights ?? undefined,
+    },
   });
   if (error) throw error;
   return data as ReportResult;
@@ -54,6 +68,7 @@ export interface MetaInsights {
   media: MediaItem[] | { error: string };
   insights_available: boolean;
   insights_note: string;
+  reach_total: number | null; // alcance total do período (número correto)
   account_insights: Array<{ name: string; values?: Array<{ value: number; end_time?: string }> }> | null;
 }
 
