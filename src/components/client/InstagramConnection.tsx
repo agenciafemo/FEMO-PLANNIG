@@ -162,10 +162,12 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
         </div>
       )}
 
-      {status === "not_connected" && canManage && (
+      {(status === "not_connected" || status === "disconnected") && canManage && (
         <div>
           <p className="mb-2 text-xs text-muted-foreground">
-            Conecte o Instagram deste cliente para publicar pelo Norteia.
+            {status === "disconnected"
+              ? "Instagram desconectado. Conecte novamente para publicar e ler métricas."
+              : "Conecte o Instagram deste cliente para publicar pelo Norteia."}
           </p>
           <Button size="sm" disabled={connect.isPending} onClick={() => connect.mutate()}>
             {connect.isPending
