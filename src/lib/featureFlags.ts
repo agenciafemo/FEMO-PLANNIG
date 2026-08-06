@@ -12,6 +12,11 @@ export const META_CONNECT_ENABLED = import.meta.env.VITE_META_CONNECT_ENABLED ==
 // Desligada por padrão; aparece com VITE_PROGRAMACAO_ENABLED === "true".
 export const PROGRAMACAO_ENABLED = import.meta.env.VITE_PROGRAMACAO_ENABLED === "true";
 
+// Relatórios com IA (análise escrita pelo Gemini a partir dos dados do cliente).
+// Desligada por padrão; aparece com VITE_RELATORIOS_ENABLED === "true". Só ligue
+// depois que o secret GEMINI_API_KEY estiver configurado e a função deployada.
+export const RELATORIOS_ENABLED = import.meta.env.VITE_RELATORIOS_ENABLED === "true";
+
 // Áudio no portal público adiado: enquanto não houver uma Edge Function segura
 // que valide o token público e devolva uma signed upload URL para o bucket
 // `comment-audios`, os botões de gravar/enviar áudio ficam ocultos no portal
