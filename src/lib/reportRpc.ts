@@ -27,3 +27,45 @@ export async function generateReport(input: {
   if (error) throw error;
   return data as ReportResult;
 }
+
+export interface MediaItem {
+  id: string;
+  caption?: string;
+  media_type?: string;
+  media_product_type?: string;
+  timestamp?: string;
+  permalink?: string;
+  like_count?: number;
+  comments_count?: number;
+}
+
+export interface MetaInsights {
+  client: string;
+  instagram_id: string;
+  period: { from: string; to: string };
+  profile: {
+    username?: string;
+    name?: string;
+    followers_count?: number;
+    media_count?: number;
+    profile_picture_url?: string;
+    error?: string;
+  };
+  media: MediaItem[] | { error: string };
+  insights_available: boolean;
+  insights_note: string;
+  account_insights: Array<{ name: string; values?: Array<{ value: number; end_time?: string }> }> | null;
+}
+
+/** Puxa métricas reais do Instagram do cliente (perfil, posts, alcance). */
+export async function getMetaInsights(input: {
+  clientId: string;
+  from?: string;
+  to?: string;
+}): Promise<MetaInsights> {
+  const { data, error } = await supabase.functions.invoke("meta-insights", {
+    body: { client_id: input.clientId, from: input.from, to: input.to },
+  });
+  if (error) throw error;
+  return data as MetaInsights;
+}

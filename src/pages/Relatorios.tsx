@@ -12,8 +12,8 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { FileText, Sparkles, Loader2, Copy } from "lucide-react";
-import { generateReport, type ReportResult } from "@/lib/reportRpc";
+import { FileText, Sparkles, Loader2, Copy, Instagram, Heart, MessageCircle } from "lucide-react";
+import { generateReport, getMetaInsights, type ReportResult, type MetaInsights } from "@/lib/reportRpc";
 import { usePersistedState } from "@/hooks/usePersistedState";
 
 export default function Relatorios() {
@@ -21,6 +21,7 @@ export default function Relatorios() {
   const { organizationId, isLegacy } = useOrganization();
   const [selected, setSelected] = usePersistedState<string>("report-client", "");
   const [result, setResult] = useState<ReportResult | null>(null);
+  const [insights, setInsights] = useState<MetaInsights | null>(null);
 
   const { data: clients } = useQuery({
     queryKey: ["report-clients", organizationId],
@@ -42,6 +43,12 @@ export default function Relatorios() {
     onError: (e: unknown) => toast.error("Erro ao gerar: " + (e as Error).message),
   });
 
+  const pull = useMutation({
+    mutationFn: () => getMetaInsights({ clientId }),
+    onSuccess: (r) => setInsights(r),
+    onError: (e: unknown) => toast.error("Erro ao puxar métricas: " + (e as Error).message),
+  });
+
   return (
     <div className="mx-auto max-w-[900px] space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -61,23 +68,89 @@ export default function Relatorios() {
 
       <div className="rounded-xl border bg-card p-5">
         <p className="text-sm text-muted-foreground">
-          A IA analisa a atividade dos últimos 30 dias deste cliente (produção, formatos,
-          status do fluxo e publicações feitas pelo Norteia) e escreve uma análise pronta
-          para apresentar. Métricas de engajamento (curtidas, alcance) ainda não entram —
-          virão numa próxima etapa.
+          Puxe as métricas reais do Instagram (seguidores, alcance, curtidas e comentários
+          por post) dos últimos 30 dias, e gere uma análise escrita por IA pronta para o cliente.
         </p>
-        <Button
-          className="mt-4"
-          disabled={!clientId || gen.isPending}
-          onClick={() => { setResult(null); gen.mutate(); }}
-        >
-          {gen.isPending ? (
-            <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Gerando análise…</>
-          ) : (
-            <><Sparkles className="mr-1.5 h-4 w-4" /> Gerar análise com IA</>
-          )}
-        </Button>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            disabled={!clientId || pull.isPending}
+            onClick={() => { setInsights(null); pull.mutate(); }}
+          >
+            {pull.isPending ? (
+              <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Puxando métricas…</>
+            ) : (
+              <><Instagram className="mr-1.5 h-4 w-4" /> Puxar métricas do Instagram</>
+            )}
+          </Button>
+          <Button
+            disabled={!clientId || gen.isPending}
+            onClick={() => { setResult(null); gen.mutate(); }}
+          >
+            {gen.isPending ? (
+              <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Gerando análise…</>
+            ) : (
+              <><Sparkles className="mr-1.5 h-4 w-4" /> Gerar análise com IA</>
+            )}
+          </Button>
+        </div>
       </div>
+
+      {insights && (() => {
+        const p = insights.profile ?? {};
+        const mediaList = Array.isArray(insights.media) ? insights.media : [];
+        const engTotal = mediaList.reduce((a, m) => a + (m.like_count || 0) + (m.comments_count || 0), 0);
+        const reachTotal = (insights.account_insights ?? [])
+          .flatMap((m) => m.values ?? [])
+          .reduce((a, v) => a + (v.value || 0), 0);
+        const topPosts = [...mediaList].sort(
+          (a, b) => ((b.like_count || 0) + (b.comments_count || 0)) - ((a.like_count || 0) + (a.comments_count || 0)),
+        ).slice(0, 8);
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Metric label="Seguidores" value={p.followers_count ?? "—"} />
+              <Metric label="Posts (total)" value={p.media_count ?? "—"} />
+              <Metric label="Alcance (30d)" value={insights.insights_available ? reachTotal.toLocaleString("pt-BR") : "—"} />
+              <Metric label="Engajamento (posts)" value={engTotal.toLocaleString("pt-BR")} />
+            </div>
+
+            {!insights.insights_available && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-600">
+                {insights.insights_note}
+              </div>
+            )}
+
+            <div className="rounded-xl border bg-card p-5">
+              <h2 className="mb-3 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                <Instagram className="h-4 w-4" /> Posts com mais engajamento — @{p.username ?? insights.client}
+              </h2>
+              <div className="space-y-2">
+                {topPosts.length === 0 && (
+                  <p className="text-sm text-muted-foreground">Nenhum post encontrado.</p>
+                )}
+                {topPosts.map((m) => (
+                  <a
+                    key={m.id}
+                    href={m.permalink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between gap-3 rounded-lg border p-2.5 text-sm hover:bg-muted/50"
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {m.caption?.slice(0, 60) || (m.media_product_type ?? m.media_type ?? "Post")}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1"><Heart className="h-3.5 w-3.5" /> {m.like_count ?? 0}</span>
+                      <span className="flex items-center gap-1"><MessageCircle className="h-3.5 w-3.5" /> {m.comments_count ?? 0}</span>
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {result && (
         <div className="space-y-4">
