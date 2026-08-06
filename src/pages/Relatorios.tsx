@@ -13,8 +13,20 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { FileText, Sparkles, Loader2, Copy, Instagram, Heart, MessageCircle } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
 import { generateReport, getMetaInsights, type ReportResult, type MetaInsights } from "@/lib/reportRpc";
 import { usePersistedState } from "@/hooks/usePersistedState";
+
+const chartConfig = {
+  alcance: { label: "Alcance", color: "hsl(173 58% 39%)" },
+  engajamento: { label: "Engajamento", color: "hsl(173 58% 39%)" },
+} satisfies ChartConfig;
 
 export default function Relatorios() {
   const { user } = useAuth();
@@ -106,17 +118,57 @@ export default function Relatorios() {
         const mediaList = Array.isArray(insights.media) ? insights.media : [];
         const engTotal = mediaList.reduce((a, m) => a + (m.like_count || 0) + (m.comments_count || 0), 0);
         const reachTotal = insights.reach_total;
+        const viewsTotal = insights.views_total;
         const topPosts = [...mediaList].sort(
           (a, b) => ((b.like_count || 0) + (b.comments_count || 0)) - ((a.like_count || 0) + (a.comments_count || 0)),
         ).slice(0, 8);
+        const reachSeries = (insights.account_insights ?? [])
+          .flatMap((m) => m.values ?? [])
+          .map((v) => ({ dia: v.end_time ? v.end_time.slice(5, 10) : "", alcance: v.value || 0 }));
+        const engBars = topPosts.map((m, i) => ({
+          label: `#${i + 1}`,
+          engajamento: (m.like_count || 0) + (m.comments_count || 0),
+        }));
         return (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Metric label="Seguidores" value={p.followers_count ?? "—"} />
-              <Metric label="Posts (total)" value={p.media_count ?? "—"} />
+              <Metric label="Seguidores" value={p.followers_count?.toLocaleString("pt-BR") ?? "—"} />
               <Metric label="Alcance (30d)" value={reachTotal != null ? reachTotal.toLocaleString("pt-BR") : "—"} />
-              <Metric label="Engajamento (posts)" value={engTotal.toLocaleString("pt-BR")} />
+              <Metric label="Visualizações (30d)" value={viewsTotal != null ? viewsTotal.toLocaleString("pt-BR") : "—"} />
+              <Metric label="Engajamento" value={engTotal.toLocaleString("pt-BR")} />
             </div>
+
+            {reachSeries.length > 0 && (
+              <div className="rounded-xl border bg-card p-5">
+                <h2 className="mb-3 text-sm font-medium text-muted-foreground">Alcance por dia</h2>
+                <ChartContainer config={chartConfig} className="h-[220px] w-full">
+                  <LineChart data={reachSeries} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis dataKey="dia" tickLine={false} axisLine={false} minTickGap={24} />
+                    <YAxis tickLine={false} axisLine={false} width={40} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Line dataKey="alcance" type="monotone" stroke="var(--color-alcance)" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ChartContainer>
+              </div>
+            )}
+
+            {engBars.length > 0 && (
+              <div className="rounded-xl border bg-card p-5">
+                <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+                  Engajamento por post (top {engBars.length})
+                </h2>
+                <ChartContainer config={chartConfig} className="h-[220px] w-full">
+                  <BarChart data={engBars} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                    <YAxis tickLine={false} axisLine={false} width={40} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Bar dataKey="engajamento" fill="var(--color-engajamento)" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ChartContainer>
+              </div>
+            )}
 
             {!insights.insights_available && (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-600">
@@ -157,14 +209,6 @@ export default function Relatorios() {
 
       {result && (
         <div className="space-y-4">
-          {/* Números que alimentaram a análise */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Metric label="Posts no período" value={result.dados.total_posts_no_periodo} />
-            <Metric label="Publicados (IG)" value={result.dados.publicados_no_instagram_via_norteia} />
-            <Metric label="Formatos" value={Object.keys(result.dados.posts_por_formato).length} />
-            <Metric label="Período" value={`${result.dados.periodo.de} → ${result.dados.periodo.ate}`} small />
-          </div>
-
           {/* Análise da IA */}
           <div className="rounded-xl border bg-card p-5">
             <div className="mb-3 flex items-center justify-between">
