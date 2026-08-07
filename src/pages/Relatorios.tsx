@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { FileText, Sparkles, Loader2, Copy, Instagram, Heart, MessageCircle, Facebook, ArrowLeft } from "lucide-react";
+import { FileText, Sparkles, Loader2, Copy, Instagram, Heart, MessageCircle, Facebook, ArrowLeft, Download, Send } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import {
   ChartContainer,
@@ -24,6 +24,8 @@ import {
 import { generateReport, getMetaInsights, type ReportResult, type MetaInsights } from "@/lib/reportRpc";
 import { getClientMetaStatus } from "@/lib/metaRpc";
 import { usePersistedState } from "@/hooks/usePersistedState";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
 const chartConfig = {
   alcance: { label: "Alcance", color: "hsl(173 58% 39%)" },
@@ -149,6 +151,65 @@ export default function Relatorios() {
     }
   }, [reportQuery.error]);
 
+  // PDF: captura o conteúdo do relatório (reportRef) como imagem e monta um PDF
+  // A4, quebrando em páginas. Reflete o tema atual (deixe claro p/ PDF branco).
+  const reportRef = useRef<HTMLDivElement>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const exportPdf = async () => {
+    const el = reportRef.current;
+    if (!el) return;
+    setPdfBusy(true);
+    try {
+      const canvas = await html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: getComputedStyle(document.body).backgroundColor || "#ffffff",
+      });
+      const img = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ unit: "pt", format: "a4" });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const imgH = (canvas.height * pageW) / canvas.width;
+      let heightLeft = imgH;
+      let position = 0;
+      pdf.addImage(img, "PNG", 0, position, pageW, imgH);
+      heightLeft -= pageH;
+      while (heightLeft > 0) {
+        position -= pageH;
+        pdf.addPage();
+        pdf.addImage(img, "PNG", 0, position, pageW, imgH);
+        heightLeft -= pageH;
+      }
+      const nome = insights?.profile?.username || insights?.client || "cliente";
+      pdf.save(`relatorio-${nome}-${range.from}.pdf`);
+    } catch (e) {
+      toast.error("Erro ao gerar PDF: " + (e as Error).message);
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const copyMessage = () => {
+    if (!insights) return;
+    const p = insights.profile ?? {};
+    const media = Array.isArray(insights.media) ? insights.media : [];
+    const eng = media.reduce((a, m) => a + (m.like_count || 0) + (m.comments_count || 0), 0);
+    const num = (n: number | null | undefined) => (n != null ? n.toLocaleString("pt-BR") : "—");
+    const msg = [
+      `Olá! 👋 Segue o resumo do desempenho do Instagram${p.username ? ` (@${p.username})` : ""} — período ${range.from} a ${range.to}:`,
+      ``,
+      `📊 Destaques:`,
+      `• Alcance: ${num(insights.reach_total)}`,
+      `• Visualizações: ${num(insights.views_total)}`,
+      `• Engajamento: ${num(eng)} interações`,
+      `• Seguidores: ${num(p.followers_count)}`,
+      ``,
+      `O relatório completo está em anexo. Qualquer dúvida, estou à disposição! 🚀`,
+    ].join("\n");
+    navigator.clipboard.writeText(msg);
+    toast.success("Mensagem copiada! Cole no WhatsApp/e-mail do cliente.");
+  };
+
   return (
     <div className="mx-auto max-w-[900px] space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -256,6 +317,22 @@ export default function Relatorios() {
         </div>
       </div>
 
+      {insights && (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" disabled={pdfBusy} onClick={exportPdf}>
+            {pdfBusy ? (
+              <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Gerando PDF…</>
+            ) : (
+              <><Download className="mr-1.5 h-3.5 w-3.5" /> Baixar PDF</>
+            )}
+          </Button>
+          <Button variant="outline" size="sm" onClick={copyMessage}>
+            <Send className="mr-1.5 h-3.5 w-3.5" /> Copiar mensagem pro cliente
+          </Button>
+        </div>
+      )}
+
+      <div ref={reportRef} className="space-y-4">
       {insights && (() => {
         const p = insights.profile ?? {};
         const mediaList = Array.isArray(insights.media) ? insights.media : [];
@@ -468,6 +545,7 @@ export default function Relatorios() {
           </div>
         </div>
       )}
+      </div>
         </>
       )}
     </div>
