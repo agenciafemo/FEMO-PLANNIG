@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { FileText, Sparkles, Loader2, Copy, Instagram, Heart, MessageCircle } from "lucide-react";
+import { FileText, Sparkles, Loader2, Copy, Instagram, Heart, MessageCircle, Facebook, ArrowLeft } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import {
   ChartContainer,
@@ -22,6 +22,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { generateReport, getMetaInsights, type ReportResult, type MetaInsights } from "@/lib/reportRpc";
+import { getClientMetaStatus } from "@/lib/metaRpc";
 import { usePersistedState } from "@/hooks/usePersistedState";
 
 const chartConfig = {
@@ -75,16 +76,37 @@ export default function Relatorios() {
   const { data: clients } = useQuery({
     queryKey: ["report-clients", organizationId],
     queryFn: async () => {
-      let q = supabase.from("clients").select("id, name") as any;
+      let q = supabase.from("clients").select("id, name, logo_url") as any;
       if (!isLegacy) q = q.eq("organization_id", organizationId!);
       const { data, error } = await q.order("name");
       if (error) throw error;
-      return (data ?? []) as { id: string; name: string }[];
+      return (data ?? []) as { id: string; name: string; logo_url: string | null }[];
     },
     enabled: !!user && (isLegacy || !!organizationId),
   });
 
-  const clientId = selected || clients?.[0]?.id || "";
+  // Quais canais cada cliente tem conectado (para os ícones do grid).
+  // As tabelas Meta são fechadas (só via RPC), então consulto o status por
+  // cliente em paralelo. Fica em cache (staleTime 5min) — uma leva por vez.
+  const clientIds = (clients ?? []).map((c) => c.id);
+  const { data: connMap } = useQuery({
+    queryKey: ["report-connections", clientIds.join(",")],
+    queryFn: async () => {
+      const results = await Promise.all(
+        clientIds.map(async (id) => {
+          const rows = await getClientMetaStatus(id).catch(() => []);
+          const chans = rows
+            .filter((r) => r.connection_status === "active" && r.channel_type)
+            .map((r) => r.channel_type as string);
+          return [id, chans] as const;
+        }),
+      );
+      return Object.fromEntries(results) as Record<string, string[]>;
+    },
+    enabled: clientIds.length > 0,
+  });
+
+  const clientId = selected;
 
   // Métricas e análise ficam no CACHE do React Query (keyed por cliente), não
   // no estado do componente — assim sobrevivem a sair e voltar da página.
@@ -134,17 +156,49 @@ export default function Relatorios() {
           <FileText className="h-5 w-5 text-brand" />
           <h1 className="text-2xl font-semibold tracking-tight">Relatórios</h1>
         </div>
-        <Select value={clientId} onValueChange={setSelected}>
-          <SelectTrigger className="w-56"><SelectValue placeholder="Cliente" /></SelectTrigger>
-          <SelectContent>
-            {(clients ?? []).map((c) => (
-              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
-      <div className="rounded-xl border bg-card p-5">
+      {!selected ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {(clients ?? []).map((c) => {
+            const chans = connMap?.[c.id] ?? [];
+            return (
+              <button
+                key={c.id}
+                onClick={() => setSelected(c.id)}
+                className="flex items-center gap-3 rounded-xl border bg-card p-4 text-left transition-colors hover:bg-muted/40"
+              >
+                {c.logo_url ? (
+                  <img src={c.logo_url} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover" />
+                ) : (
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground">
+                    {c.name.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium">{c.name}</p>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <Instagram className={`h-4 w-4 ${chans.includes("instagram") ? "text-brand" : "text-muted-foreground/30"}`} />
+                    <Facebook className={`h-4 w-4 ${chans.includes("facebook_page") ? "text-brand" : "text-muted-foreground/30"}`} />
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      {chans.length > 0 ? "Conectado" : "Sem conexão"}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <>
+          <button
+            onClick={() => setSelected("")}
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" /> Voltar para clientes
+          </button>
+
+          <div className="rounded-xl border bg-card p-5">
         <p className="text-sm text-muted-foreground">
           Escolha o período, puxe as métricas reais do Instagram e gere uma análise escrita
           por IA pronta para o cliente.
@@ -413,6 +467,8 @@ export default function Relatorios() {
             </p>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );
