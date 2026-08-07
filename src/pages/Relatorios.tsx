@@ -498,10 +498,10 @@ export default function Relatorios() {
                     className="flex items-center gap-3 rounded-lg border p-2 text-sm hover:bg-muted/50"
                   >
                     {(m.thumbnail_url || m.media_url) ? (
-                      <img src={m.thumbnail_url || m.media_url} alt="" className="h-11 w-11 shrink-0 rounded-md object-cover" />
+                      <img src={m.thumbnail_url || m.media_url} alt="" className="h-16 w-16 shrink-0 rounded-lg object-cover" />
                     ) : (
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-muted">
-                        <Instagram className="h-4 w-4 text-muted-foreground" />
+                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-muted">
+                        <Instagram className="h-5 w-5 text-muted-foreground" />
                       </div>
                     )}
                     <span className="min-w-0 flex-1 truncate">
@@ -563,6 +563,19 @@ export default function Relatorios() {
             </p>
           </div>
         </div>
+      )}
+
+      {insights && (
+        <footer className="mt-8 flex flex-col items-center gap-2 border-t py-8 text-center">
+          <img
+            src="/brand/norteia/logo/NORTEIA.png"
+            alt="Norteia"
+            className="h-7 w-auto opacity-80 dark:brightness-0 dark:invert"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Relatório gerado com Norteia
+          </p>
+        </footer>
       )}
       </div>
         </>
