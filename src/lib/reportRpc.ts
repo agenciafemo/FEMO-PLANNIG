@@ -77,6 +77,8 @@ export interface MetaInsights {
   insights_note: string;
   reach_total: number | null; // alcance total do período (contas únicas)
   views_total: number | null; // visualizações totais (sem deduplicar)
+  previous_reach_total: number | null; // alcance do período de comparação
+  previous_views_total: number | null; // visualizações do período de comparação
   account_insights: Array<{ name: string; values?: Array<{ value: number; end_time?: string }> }> | null;
   new_followers: Array<{ value: number; end_time?: string }> | null;
   demographics: { genero: DemoEntry[]; idade: DemoEntry[]; cidade: DemoEntry[] } | null;
@@ -87,9 +89,17 @@ export async function getMetaInsights(input: {
   clientId: string;
   from?: string;
   to?: string;
+  compareFrom?: string;
+  compareTo?: string;
 }): Promise<MetaInsights> {
   const { data, error } = await supabase.functions.invoke("meta-insights", {
-    body: { client_id: input.clientId, from: input.from, to: input.to },
+    body: {
+      client_id: input.clientId,
+      from: input.from,
+      to: input.to,
+      compare_from: input.compareFrom,
+      compare_to: input.compareTo,
+    },
   });
   if (error) throw error;
   return data as MetaInsights;
