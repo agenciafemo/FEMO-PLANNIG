@@ -1,1 +1,35 @@
 project_id = "hhikmczwbgxqlyfjhtxo"
+
+# WARNING: project_id above does not match norteia-staging
+# (hdutqvbnrezwgnledcuv). Do not deploy until the target is explicitly verified.
+[functions.meta-oauth-start]
+verify_jwt = true
+
+[functions.meta-oauth-callback]
+verify_jwt = false
+
+[functions.meta-connection-complete]
+verify_jwt = true
+
+[functions.meta-connection-health]
+verify_jwt = true
+
+[functions.meta-disconnect]
+verify_jwt = true
+
+# Worker de publicação: chamado pelo cron (pg_cron) e pelo "publicar agora".
+# verify_jwt=false porque ele só processa a fila interna (nenhum input do
+# chamador é usado); publicar exige a permissão na criação do agendamento.
+[functions.meta-publish]
+verify_jwt = false
+
+# Gera a análise de relatório com IA (Gemini). Exige login: usa o token do
+# usuário para ler os dados via RLS (só a própria org). A chave do Gemini vem
+# do secret GEMINI_API_KEY (nunca do código/frontend).
+[functions.generate-report]
+verify_jwt = true
+
+# Puxa métricas do Instagram (Insights) para os relatórios estilo Reportei.
+# Exige login: valida acesso do usuário ao cliente e usa o token da conexão.
+[functions.meta-insights]
+verify_jwt = true
