@@ -41,17 +41,9 @@ const queryClient = new QueryClient({
   },
 });
 
-function Spinner() {
-  return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-    </div>
-  );
-}
-
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  if (loading) return <Spinner />;
+  if (loading) return null;
   if (!user) return <Navigate to="/auth" replace />;
   return <>{children}</>;
 }
@@ -66,7 +58,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function OrganizationGuard({ children }: { children: React.ReactNode }) {
   const { memberships, organizationId, loading } = useOrganizationContext();
   if (!MULTI_ORG_ENABLED) return <>{children}</>;
-  if (loading) return <Spinner />;
+  if (loading) return null;
   if (memberships.length === 0) return <Navigate to="/organizations/new" replace />;
   if (!organizationId) return <Navigate to="/organizations/select" replace />;
   return <>{children}</>;
