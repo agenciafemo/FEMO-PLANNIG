@@ -29,3 +29,8 @@ dist-ssr
 # Dumps/backups de banco — nunca versionar dados reais de clientes
 *.dump
 *.sql.backup
+
+# Scratch e temporarios (ferramentas locais)
+.claude/
+scratchpad/
+supabase/.temp/
