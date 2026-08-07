@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -33,9 +33,8 @@ const chartConfig = {
 export default function Relatorios() {
   const { user } = useAuth();
   const { organizationId, isLegacy } = useOrganization();
+  const queryClient = useQueryClient();
   const [selected, setSelected] = usePersistedState<string>("report-client", "");
-  const [result, setResult] = useState<ReportResult | null>(null);
-  const [insights, setInsights] = useState<MetaInsights | null>(null);
 
   const { data: clients } = useQuery({
     queryKey: ["report-clients", organizationId],
@@ -51,22 +50,41 @@ export default function Relatorios() {
 
   const clientId = selected || clients?.[0]?.id || "";
 
-  const gen = useMutation({
-    mutationFn: async () => {
-      // Garante as métricas reais antes de gerar (puxa se ainda não tiver).
-      let ins = insights;
-      if (!ins) { ins = await getMetaInsights({ clientId }); setInsights(ins); }
+  // Métricas e análise ficam no CACHE do React Query (keyed por cliente), não
+  // no estado do componente — assim sobrevivem a sair e voltar da página.
+  // enabled:false: só buscam quando o usuário clica (refetch).
+  const insightsQuery = useQuery({
+    queryKey: ["meta-insights", clientId],
+    queryFn: () => getMetaInsights({ clientId }),
+    enabled: false,
+  });
+  const insights = insightsQuery.data ?? null;
+
+  const reportQuery = useQuery({
+    queryKey: ["report-analysis", clientId],
+    queryFn: async () => {
+      let ins = queryClient.getQueryData<MetaInsights>(["meta-insights", clientId]) ?? null;
+      if (!ins) {
+        ins = await getMetaInsights({ clientId });
+        queryClient.setQueryData(["meta-insights", clientId], ins);
+      }
       return generateReport({ clientId, insights: ins });
     },
-    onSuccess: (r) => setResult(r),
-    onError: (e: unknown) => toast.error("Erro ao gerar: " + (e as Error).message),
+    enabled: false,
   });
+  const result = reportQuery.data ?? null;
 
-  const pull = useMutation({
-    mutationFn: () => getMetaInsights({ clientId }),
-    onSuccess: (r) => setInsights(r),
-    onError: (e: unknown) => toast.error("Erro ao puxar métricas: " + (e as Error).message),
-  });
+  // Erros → toast (o useQuery do v5 não tem onError).
+  useEffect(() => {
+    if (insightsQuery.error) {
+      toast.error("Erro ao puxar métricas: " + (insightsQuery.error as Error).message);
+    }
+  }, [insightsQuery.error]);
+  useEffect(() => {
+    if (reportQuery.error) {
+      toast.error("Erro ao gerar: " + (reportQuery.error as Error).message);
+    }
+  }, [reportQuery.error]);
 
   return (
     <div className="mx-auto max-w-[900px] space-y-6">
@@ -93,20 +111,20 @@ export default function Relatorios() {
         <div className="mt-4 flex flex-wrap gap-2">
           <Button
             variant="outline"
-            disabled={!clientId || pull.isPending}
-            onClick={() => { setInsights(null); pull.mutate(); }}
+            disabled={!clientId || insightsQuery.isFetching}
+            onClick={() => insightsQuery.refetch()}
           >
-            {pull.isPending ? (
+            {insightsQuery.isFetching ? (
               <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Puxando métricas…</>
             ) : (
               <><Instagram className="mr-1.5 h-4 w-4" /> Puxar métricas do Instagram</>
             )}
           </Button>
           <Button
-            disabled={!clientId || gen.isPending}
-            onClick={() => { setResult(null); gen.mutate(); }}
+            disabled={!clientId || reportQuery.isFetching}
+            onClick={() => reportQuery.refetch()}
           >
-            {gen.isPending ? (
+            {reportQuery.isFetching ? (
               <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Gerando análise…</>
             ) : (
               <><Sparkles className="mr-1.5 h-4 w-4" /> Gerar análise com IA</>
