@@ -82,6 +82,15 @@ export interface MetaInsights {
   account_insights: Array<{ name: string; values?: Array<{ value: number; end_time?: string }> }> | null;
   new_followers: Array<{ value: number; end_time?: string }> | null;
   demographics: { genero: DemoEntry[]; idade: DemoEntry[]; cidade: DemoEntry[] } | null;
+  facebook: {
+    page_id?: string;
+    name?: string | null;
+    followers?: number | null;
+    engagement?: number | null;
+    reach?: number | null;
+    views?: number | null;
+    note?: string;
+  } | null;
 }
 
 /** Puxa métricas reais do Instagram do cliente (perfil, posts, alcance). */

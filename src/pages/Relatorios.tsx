@@ -519,6 +519,25 @@ export default function Relatorios() {
         );
       })()}
 
+      {insights?.facebook && (
+        <div className="rounded-xl border bg-card p-5">
+          <h2 className="mb-3 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+            <Facebook className="h-4 w-4 text-brand" /> Facebook{insights.facebook.name ? ` — ${insights.facebook.name}` : ""}
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Metric label="Seguidores" value={insights.facebook.followers != null ? insights.facebook.followers.toLocaleString("pt-BR") : "—"} />
+            <Metric label="Alcance" value={insights.facebook.reach != null ? insights.facebook.reach.toLocaleString("pt-BR") : "—"} />
+            <Metric label="Visualizações" value={insights.facebook.views != null ? insights.facebook.views.toLocaleString("pt-BR") : "—"} />
+            <Metric label="Engajamento" value={insights.facebook.engagement != null ? insights.facebook.engagement.toLocaleString("pt-BR") : "—"} />
+          </div>
+          {insights.facebook.note && insights.facebook.note !== "ok" && (
+            <p className="mt-3 text-xs text-amber-600">
+              Algumas métricas do Facebook não vieram (a Meta aposentou várias em jun/2026). Detalhe: {insights.facebook.note}
+            </p>
+          )}
+        </div>
+      )}
+
       {result && (
         <div className="space-y-4">
           {/* Análise da IA */}
