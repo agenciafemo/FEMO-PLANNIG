@@ -9,12 +9,30 @@ import {
   finalizeMetaConnection,
   getClientMetaStatus,
   listMetaPages,
+  MetaFunctionError,
   startMetaOAuth,
 } from "@/lib/metaRpc";
 
 // Onde o Facebook devolve o navegador após o OAuth. O callback anexa
 // ?meta_status=pending&connection_id=...&client_id=... a esta rota.
 const RETURN_PATH = "/clients";
+
+function pagesErrorMessage(error: unknown): string {
+  const reason = error instanceof MetaFunctionError ? error.reasonCode : "";
+  if (
+    reason === "connection_token_unavailable" ||
+    /^meta_4\d\d_(102|190)(_|$)/.test(reason)
+  ) {
+    return "A autorização da Meta expirou. Refaça a conexão para continuar.";
+  }
+  if (/^meta_4\d\d_(10|200)(_|$)/.test(reason)) {
+    return "A Meta não liberou as permissões necessárias. Refaça a conexão e autorize todas as opções solicitadas.";
+  }
+  if (reason === "meta_request_timeout" || reason === "meta_network_error") {
+    return "A Meta demorou para responder. Tente buscar as páginas novamente.";
+  }
+  return "Não foi possível buscar as páginas. Tente novamente ou refaça a conexão.";
+}
 
 export function InstagramConnection({ clientId }: { clientId: string }) {
   const queryClient = useQueryClient();
@@ -69,6 +87,18 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
       window.location.href = url; // navega para o Facebook
     },
     onError: (e: unknown) => toast.error("Erro ao iniciar conexão: " + (e as Error).message),
+  });
+
+  // Uma conexão pendente ocupa o único slot permitido por cliente. Para
+  // refazer o OAuth, primeiro a encerramos pela Edge Function (que valida a
+  // permissão do usuário) e só então iniciamos uma autorização nova.
+  const reconnectPending = useMutation({
+    mutationFn: async () => {
+      if (effectivePendingId) await disconnectMeta(effectivePendingId);
+      const url = await startMetaOAuth(clientId, RETURN_PATH);
+      window.location.href = url;
+    },
+    onError: (e: unknown) => toast.error("Erro ao reconectar: " + (e as Error).message),
   });
 
   const finalize = useMutation({
@@ -194,9 +224,32 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
               <Loader2 className="h-4 w-4 animate-spin" /> Buscando páginas…
             </div>
           ) : pagesQuery.isError ? (
-            <p className="py-6 text-sm text-destructive">
-              Erro ao buscar páginas. Tente reconectar.
-            </p>
+            <div className="space-y-3 py-4">
+              <p className="text-sm text-destructive">
+                {pagesErrorMessage(pagesQuery.error)}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={pagesQuery.isFetching || reconnectPending.isPending}
+                  onClick={() => pagesQuery.refetch()}
+                >
+                  {pagesQuery.isFetching && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                  Tentar novamente
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={reconnectPending.isPending}
+                  onClick={() => reconnectPending.mutate()}
+                >
+                  {reconnectPending.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                  Refazer conexão
+                </Button>
+              </div>
+            </div>
           ) : (
             <div className="max-h-80 space-y-1.5 overflow-y-auto">
               {(pagesQuery.data ?? []).map((page) => (

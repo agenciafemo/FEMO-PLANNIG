@@ -53,6 +53,13 @@ export interface MetaDiscoveredPage {
 // Helpers
 // ---------------------------------------------------------------------------
 
+export class MetaFunctionError extends Error {
+  constructor(public readonly reasonCode: string) {
+    super(reasonCode);
+    this.name = "MetaFunctionError";
+  }
+}
+
 /**
  * Invoca uma Edge Function e, em erro HTTP, tenta extrair o `reason_code`
  * sanitizado do corpo (as funções devolvem { ok:false, reason_code }).
@@ -63,14 +70,15 @@ async function invokeFn<T>(name: string, body: Record<string, unknown>): Promise
     let reason: string | undefined;
     try {
       const ctx = (error as { context?: unknown }).context;
-      if (ctx instanceof Response) {
-        const j = await ctx.clone().json();
-        reason = j?.reason_code;
+      if (ctx && typeof (ctx as { json?: unknown }).json === "function") {
+        const response = ctx as Response;
+        const payload = await (typeof response.clone === "function" ? response.clone() : response).json();
+        if (typeof payload?.reason_code === "string") reason = payload.reason_code;
       }
     } catch {
       /* mantém a mensagem genérica abaixo */
     }
-    throw new Error(reason ?? error.message ?? "meta_request_failed");
+    throw new MetaFunctionError(reason ?? error.message ?? "meta_request_failed");
   }
   return data as T;
 }
