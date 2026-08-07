@@ -26,7 +26,20 @@ import SelectOrganization from "./pages/SelectOrganization";
 import AcceptInvite from "./pages/AcceptInvite";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
+// Defaults que evitam o "recarregar tudo ao trocar de guia": os dados ficam
+// frescos por 5 min (sem refetch em navegação rápida) e NÃO são refeitos só
+// por voltar o foco na aba. As atualizações continuam certas porque as
+// mutations invalidam as queries afetadas (invalidateQueries) após cada escrita.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 min: considera o dado fresco
+      gcTime: 30 * 60 * 1000, // 30 min em cache antes de descartar
+      refetchOnWindowFocus: false, // não refaz ao voltar pra aba
+      retry: 1, // 1 tentativa extra (o padrão 3 atrasa demais o estado de erro)
+    },
+  },
+});
 
 function Spinner() {
   return (
