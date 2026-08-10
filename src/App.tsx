@@ -20,6 +20,7 @@ import Vault from "./pages/Vault";
 import Reviews from "./pages/Reviews";
 import Programacao from "./pages/Programacao";
 import Relatorios from "./pages/Relatorios";
+import Tasks from "./pages/Tasks";
 import ClientPublic from "./pages/ClientPublic";
 import CreateOrganization from "./pages/CreateOrganization";
 import SelectOrganization from "./pages/SelectOrganization";
@@ -132,6 +133,7 @@ const App = () => (
                 <Route path="/reviews" element={<Reviews />} />
                 <Route path="/programacao" element={<Programacao />} />
                 <Route path="/relatorios" element={<Relatorios />} />
+                <Route path="/tasks" element={<Tasks />} />
               </Route>
               <Route path="*" element={<NotFound />} />
                 </Routes>
