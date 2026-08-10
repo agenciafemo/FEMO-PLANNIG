@@ -124,7 +124,15 @@ type ClientOption = { id: string; name: string };
 type MemberOption = {
   userId: string;
   name: string;
+  jobTitle: string | null;
   avatarUrl: string | null;
+};
+
+type TaskAssigneeRow = {
+  user_id: string;
+  display_name: string;
+  job_title: string | null;
+  avatar_url: string | null;
 };
 
 type QueryError = { message: string; code?: string };
@@ -145,6 +153,7 @@ interface UntypedFilterBuilder<T> extends PromiseLike<QueryResult<T>> {
 
 const taskSupabase = supabase as unknown as {
   from<T>(relation: string): UntypedFilterBuilder<T>;
+  rpc<T>(functionName: string, params: Record<string, unknown>): PromiseLike<QueryResult<T>>;
 };
 
 const COLUMNS: Array<{
@@ -178,6 +187,10 @@ function initials(name: string) {
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join("") || "?";
+}
+
+function memberLabel(member: MemberOption) {
+  return member.jobTitle ? `${member.name} — ${member.jobTitle}` : member.name;
 }
 
 function elapsedSeconds(entry: TaskTimeEntry, nowMs: number) {
@@ -326,7 +339,10 @@ function TaskCardContent({
           </div>
         )}
 
-        <Avatar className="h-7 w-7 border-2 border-background" title={assignee?.name ?? "Responsável"}>
+        <Avatar
+          className="h-7 w-7 border-2 border-background"
+          title={assignee ? memberLabel(assignee) : "Responsável"}
+        >
           {assignee?.avatarUrl && <AvatarImage src={assignee.avatarUrl} alt={assignee.name} />}
           <AvatarFallback className="bg-primary/10 text-[9px] font-semibold text-primary">
             {initials(assignee?.name ?? "Responsável")}
@@ -535,7 +551,7 @@ export default function Tasks() {
   const boardQuery = useQuery({
     queryKey: ["tasks-board", organizationId],
     queryFn: async () => {
-      const [tasksResult, clientsResult, membersResult] = await Promise.all([
+      const [tasksResult, clientsResult, assigneesResult] = await Promise.all([
         taskSupabase
           .from<TaskRecord[]>("tasks")
           .select("*")
@@ -546,16 +562,14 @@ export default function Tasks() {
           .select("id, name")
           .eq("organization_id", organizationId!)
           .order("name", { ascending: true }),
-        taskSupabase
-          .from<Array<{ user_id: string }>>("organization_members")
-          .select("user_id")
-          .eq("organization_id", organizationId!)
-          .eq("status", "active"),
+        taskSupabase.rpc<TaskAssigneeRow[]>("get_task_assignees", {
+          _organization_id: organizationId!,
+        }),
       ]);
 
       if (tasksResult.error) throw tasksResult.error;
       if (clientsResult.error) throw clientsResult.error;
-      if (membersResult.error) throw membersResult.error;
+      if (assigneesResult.error) throw assigneesResult.error;
 
       const taskRows = (tasksResult.data ?? []) as TaskRecord[];
       let subtasks: TaskSubtask[] = [];
@@ -580,32 +594,17 @@ export default function Tasks() {
         timeEntries = timeEntriesResult.data ?? [];
       }
 
-      const memberRows = (membersResult.data ?? []) as Array<{ user_id: string }>;
-      const memberIds = memberRows.map((member) => member.user_id);
-      let profiles: Array<{ id: string; full_name: string | null; avatar_url: string | null }> = [];
-
-      if (memberIds.length > 0) {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("id, full_name, avatar_url")
-          .in("id", memberIds);
-        if (error) throw error;
-        profiles = data ?? [];
-      }
-
       return {
         tasks: taskRows,
         subtasks,
         timeEntries,
         clients: (clientsResult.data ?? []) as ClientOption[],
-        members: memberRows.map((member) => {
-          const profile = profiles.find((item) => item.id === member.user_id);
-          return {
-            userId: member.user_id,
-            name: profile?.full_name?.trim() || "Usuário",
-            avatarUrl: profile?.avatar_url ?? null,
-          } satisfies MemberOption;
-        }),
+        members: (assigneesResult.data ?? []).map((member) => ({
+          userId: member.user_id,
+          name: member.display_name,
+          jobTitle: member.job_title,
+          avatarUrl: member.avatar_url,
+        } satisfies MemberOption)),
       };
     },
     enabled: !!user && !!organizationId && !isLegacy,
@@ -1100,7 +1099,9 @@ export default function Tasks() {
                         <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                         <SelectContent>
                           {(boardQuery.data?.members ?? []).map((member) => (
-                            <SelectItem key={member.userId} value={member.userId}>{member.name}</SelectItem>
+                            <SelectItem key={member.userId} value={member.userId}>
+                              {memberLabel(member)}
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -1280,7 +1281,9 @@ export default function Tasks() {
                   <SelectContent>
                     <SelectItem value="all">Todos os responsáveis</SelectItem>
                     {(boardQuery.data?.members ?? []).map((member) => (
-                      <SelectItem key={member.userId} value={member.userId}>{member.name}</SelectItem>
+                      <SelectItem key={member.userId} value={member.userId}>
+                        {memberLabel(member)}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
