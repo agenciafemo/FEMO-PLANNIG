@@ -609,9 +609,11 @@ export default function Tasks() {
       if (clientsResult.error) throw clientsResult.error;
 
       let assigneeRows = assigneesResult.data ?? [];
+      let hasConfiguredDirectory = true;
       if (assigneesResult.error) {
         if (!isMissingTaskAssigneeRpc(assigneesResult.error)) throw assigneesResult.error;
         assigneeRows = await loadLegacyTaskAssignees(organizationId!);
+        hasConfiguredDirectory = false;
       }
 
       const taskRows = (tasksResult.data ?? []) as TaskRecord[];
@@ -642,12 +644,14 @@ export default function Tasks() {
         subtasks,
         timeEntries,
         clients: (clientsResult.data ?? []) as ClientOption[],
-        members: assigneeRows.map((member) => ({
-          userId: member.user_id,
-          name: member.display_name,
-          jobTitle: member.job_title,
-          avatarUrl: member.avatar_url,
-        } satisfies MemberOption)),
+        members: assigneeRows
+          .filter((member) => !hasConfiguredDirectory || Boolean(member.job_title?.trim()))
+          .map((member) => ({
+            userId: member.user_id,
+            name: member.display_name,
+            jobTitle: member.job_title,
+            avatarUrl: member.avatar_url,
+          } satisfies MemberOption)),
       };
     },
     enabled: !!user && !!organizationId && !isLegacy,
