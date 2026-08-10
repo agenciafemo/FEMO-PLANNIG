@@ -8,6 +8,7 @@ import {
   BarChart3,
   CalendarClock,
   LayoutGrid,
+  ListTodo,
   Lock,
   Star,
   Users,
@@ -36,6 +37,7 @@ type ModuleCard = {
 // página — ficam como "Em breve" (não clicáveis) para não gerar link quebrado.
 const MODULES: ModuleCard[] = [
   { title: "Clientes", subtitle: "Contas e marcas", icon: Users, to: "/clients" },
+  { title: "Tarefas", subtitle: "Quadro da equipe", icon: ListTodo, to: "/tasks", isNew: true },
   { title: "Programação", subtitle: "Agendar e publicar", icon: CalendarClock, isNew: true, ...(PROGRAMACAO_ENABLED ? { to: "/programacao" } : { soon: true }) },
   { title: "Relatórios", subtitle: "Análise com IA", icon: BarChart3, isNew: true, ...(RELATORIOS_ENABLED ? { to: "/relatorios" } : { soon: true }) },
   { title: "NPS", subtitle: "Satisfação dos clientes", icon: Star, to: "/reviews" },
