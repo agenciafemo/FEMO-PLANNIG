@@ -95,6 +95,18 @@ Deno.serve(async (request) => {
           _id: item.id,
           _error_code: code,
         });
+        // Erro 190 = token/sessão da Meta invalidada. Sinaliza a conexão para
+        // reconexão (a tela mostra "Reconectar") e notifica quem conectou, em
+        // vez de deixar o time descobrir pelo post que não saiu.
+        if (/^meta_190(_|$)/.test(code)) {
+          try {
+            await admin.rpc("meta_server_flag_connection_reauth", {
+              _connection_id: item.connection_id,
+            });
+          } catch {
+            // best-effort
+          }
+        }
         failed++;
       }
     }
