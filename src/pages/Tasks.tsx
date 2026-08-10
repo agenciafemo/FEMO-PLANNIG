@@ -156,6 +156,44 @@ const taskSupabase = supabase as unknown as {
   rpc<T>(functionName: string, params: Record<string, unknown>): PromiseLike<QueryResult<T>>;
 };
 
+function isMissingTaskAssigneeRpc(error: QueryError) {
+  if (error.code === "PGRST202" || error.code === "42883") return true;
+
+  return /get_task_assignees/i.test(error.message)
+    && /(schema cache|does not exist|could not find)/i.test(error.message);
+}
+
+async function loadLegacyTaskAssignees(organizationId: string): Promise<TaskAssigneeRow[]> {
+  const membersResult = await taskSupabase
+    .from<Array<{ user_id: string }>>("organization_members")
+    .select("user_id")
+    .eq("organization_id", organizationId)
+    .eq("status", "active");
+
+  if (membersResult.error) throw membersResult.error;
+
+  const memberRows = membersResult.data ?? [];
+  const memberIds = memberRows.map((member) => member.user_id);
+  if (memberIds.length === 0) return [];
+
+  const profilesResult = await supabase
+    .from("profiles")
+    .select("id, full_name, avatar_url")
+    .in("id", memberIds);
+
+  if (profilesResult.error) throw profilesResult.error;
+
+  return memberRows.map((member) => {
+    const profile = profilesResult.data?.find((item) => item.id === member.user_id);
+    return {
+      user_id: member.user_id,
+      display_name: profile?.full_name?.trim() || "Usuário",
+      job_title: null,
+      avatar_url: profile?.avatar_url ?? null,
+    };
+  });
+}
+
 const COLUMNS: Array<{
   id: TaskStatus;
   label: string;
@@ -569,7 +607,12 @@ export default function Tasks() {
 
       if (tasksResult.error) throw tasksResult.error;
       if (clientsResult.error) throw clientsResult.error;
-      if (assigneesResult.error) throw assigneesResult.error;
+
+      let assigneeRows = assigneesResult.data ?? [];
+      if (assigneesResult.error) {
+        if (!isMissingTaskAssigneeRpc(assigneesResult.error)) throw assigneesResult.error;
+        assigneeRows = await loadLegacyTaskAssignees(organizationId!);
+      }
 
       const taskRows = (tasksResult.data ?? []) as TaskRecord[];
       let subtasks: TaskSubtask[] = [];
@@ -599,7 +642,7 @@ export default function Tasks() {
         subtasks,
         timeEntries,
         clients: (clientsResult.data ?? []) as ClientOption[],
-        members: (assigneesResult.data ?? []).map((member) => ({
+        members: assigneeRows.map((member) => ({
           userId: member.user_id,
           name: member.display_name,
           jobTitle: member.job_title,
