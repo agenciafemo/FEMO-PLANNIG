@@ -18,7 +18,7 @@ const navItems = [
   { to: "/tasks", icon: ListTodo, label: "Tarefas" },
   { to: "/ponto", icon: Clock3, label: "Ponto" },
   { to: "/reviews", icon: MessageSquareHeart, label: "NPS" },
-  { to: "/collaborators", icon: UserPlus, label: "Colaboradores" },
+  { to: "/team/collaborators", icon: UserPlus, label: "Equipe / Colaboradores", managerOnly: true },
   { to: "/vault", icon: KeyRound, label: "Cofre" },
 ];
 
@@ -115,6 +115,8 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const location = useLocation();
   const { signOut, user } = useAuth();
   const isAdmin = useIsAdmin();
+  const { role } = useOrganization();
+  const canManageTeam = role === "owner" || role === "admin" || role === "manager";
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-sidebar-border/70 bg-sidebar/95 text-sidebar-foreground shadow-sm backdrop-blur-xl supports-[backdrop-filter]:bg-sidebar/90">
@@ -135,7 +137,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
           Navegação
         </p>
         <div className="space-y-1">
-        {navItems.map((item) => {
+        {navItems.filter((item) => !("managerOnly" in item) || !item.managerOnly || canManageTeam).map((item) => {
           const isActive = location.pathname.startsWith(item.to);
           return (
             <Link

@@ -84,6 +84,7 @@ type TaskFilters = {
   assigneeId: string;
   clientId: string;
   priority: "all" | TaskPriority;
+  functionId: string;
 };
 
 type TaskRecord = {
@@ -133,6 +134,17 @@ type TaskAssigneeRow = {
   display_name: string;
   job_title: string | null;
   avatar_url: string | null;
+};
+
+type FunctionOption = {
+  id: string;
+  name: string;
+  color: string;
+};
+
+type MemberFunctionAssignment = {
+  user_id: string;
+  tag_id: string;
 };
 
 type QueryError = { message: string; code?: string };
@@ -216,6 +228,7 @@ const DEFAULT_FILTERS: TaskFilters = {
   assigneeId: "all",
   clientId: "all",
   priority: "all",
+  functionId: "all",
 };
 
 function initials(name: string) {
@@ -589,7 +602,7 @@ export default function Tasks() {
   const boardQuery = useQuery({
     queryKey: ["tasks-board", organizationId],
     queryFn: async () => {
-      const [tasksResult, clientsResult, assigneesResult] = await Promise.all([
+      const [tasksResult, clientsResult, assigneesResult, functionsResult, memberFunctionsResult] = await Promise.all([
         taskSupabase
           .from<TaskRecord[]>("tasks")
           .select("*")
@@ -603,10 +616,21 @@ export default function Tasks() {
         taskSupabase.rpc<TaskAssigneeRow[]>("get_task_assignees", {
           _organization_id: organizationId!,
         }),
+        taskSupabase
+          .from<FunctionOption[]>("team_function_tags")
+          .select("id, name, color")
+          .eq("organization_id", organizationId!)
+          .order("name", { ascending: true }),
+        taskSupabase
+          .from<MemberFunctionAssignment[]>("team_member_functions")
+          .select("user_id, tag_id")
+          .eq("organization_id", organizationId!),
       ]);
 
       if (tasksResult.error) throw tasksResult.error;
       if (clientsResult.error) throw clientsResult.error;
+      if (functionsResult.error) throw functionsResult.error;
+      if (memberFunctionsResult.error) throw memberFunctionsResult.error;
 
       let assigneeRows = assigneesResult.data ?? [];
       let hasConfiguredDirectory = true;
@@ -644,6 +668,8 @@ export default function Tasks() {
         subtasks,
         timeEntries,
         clients: (clientsResult.data ?? []) as ClientOption[],
+        functions: functionsResult.data ?? [],
+        memberFunctions: memberFunctionsResult.data ?? [],
         members: assigneeRows
           .filter((member) => !hasConfiguredDirectory || Boolean(member.job_title?.trim()))
           .map((member) => ({
@@ -676,6 +702,19 @@ export default function Tasks() {
     () => new Map((boardQuery.data?.members ?? []).map((member) => [member.userId, member])),
     [boardQuery.data?.members]
   );
+  const functionIds = useMemo(
+    () => new Set((boardQuery.data?.functions ?? []).map((item) => item.id)),
+    [boardQuery.data?.functions]
+  );
+  const functionMembersByTagId = useMemo(() => {
+    const grouped = new Map<string, Set<string>>();
+    for (const assignment of boardQuery.data?.memberFunctions ?? []) {
+      const members = grouped.get(assignment.tag_id) ?? new Set<string>();
+      members.add(assignment.user_id);
+      grouped.set(assignment.tag_id, members);
+    }
+    return grouped;
+  }, [boardQuery.data?.memberFunctions]);
   const subtasksByTaskId = useMemo(() => {
     const grouped = new Map<string, TaskSubtask[]>();
     for (const subtask of boardQuery.data?.subtasks ?? []) {
@@ -712,7 +751,17 @@ export default function Tasks() {
   // Valores antigos ou pertencentes a outra equipe nunca devem produzir um
   // quadro vazio sem explicação. Como a persistência é por organização, a
   // seleção original continua intacta ao alternar entre organizações.
-  const assigneeFilter = storedFilters.assigneeId === "all" || membersById.has(storedFilters.assigneeId)
+  const functionFilter = storedFilters.functionId === "all" || functionIds.has(storedFilters.functionId)
+    ? storedFilters.functionId
+    : "all";
+  const membersForFunction = useMemo(
+    () => functionFilter === "all"
+      ? null
+      : functionMembersByTagId.get(functionFilter) ?? new Set<string>(),
+    [functionFilter, functionMembersByTagId]
+  );
+  const assigneeFilter = storedFilters.assigneeId === "all"
+    || (membersById.has(storedFilters.assigneeId) && (!membersForFunction || membersForFunction.has(storedFilters.assigneeId)))
     ? storedFilters.assigneeId
     : "all";
   const clientFilter = storedFilters.clientId === "all"
@@ -724,18 +773,22 @@ export default function Tasks() {
     ? storedFilters.priority
     : "all";
 
-  const hasActiveFilters = assigneeFilter !== "all" || clientFilter !== "all" || priorityFilter !== "all";
+  const hasActiveFilters = assigneeFilter !== "all"
+    || clientFilter !== "all"
+    || priorityFilter !== "all"
+    || functionFilter !== "all";
   const onlyMineActive = !!user && assigneeFilter === user.id;
 
   const filteredTasks = useMemo(
     () => localTasks.filter((task) => {
       if (assigneeFilter !== "all" && task.assignee_id !== assigneeFilter) return false;
+      if (membersForFunction && !membersForFunction.has(task.assignee_id)) return false;
       if (clientFilter === "none" && task.client_id !== null) return false;
       if (clientFilter !== "all" && clientFilter !== "none" && task.client_id !== clientFilter) return false;
       if (priorityFilter !== "all" && task.priority !== priorityFilter) return false;
       return true;
     }),
-    [assigneeFilter, clientFilter, localTasks, priorityFilter]
+    [assigneeFilter, clientFilter, localTasks, membersForFunction, priorityFilter]
   );
 
   const moveTask = useMutation({
@@ -1322,12 +1375,32 @@ export default function Tasks() {
               </Button>
 
               <div className="min-w-[190px] flex-1 space-y-1 sm:max-w-[240px]">
+                <Label className="text-[11px] text-muted-foreground">Função</Label>
+                <Select value={functionFilter} onValueChange={(value) => updateFilters({ functionId: value })}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as funções</SelectItem>
+                    {(boardQuery.data?.functions ?? []).map((teamFunction) => (
+                      <SelectItem key={teamFunction.id} value={teamFunction.id}>
+                        <span className="flex items-center gap-2">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: teamFunction.color }} />
+                          {teamFunction.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="min-w-[190px] flex-1 space-y-1 sm:max-w-[240px]">
                 <Label className="text-[11px] text-muted-foreground">Responsável</Label>
                 <Select value={assigneeFilter} onValueChange={(value) => updateFilters({ assigneeId: value })}>
                   <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos os responsáveis</SelectItem>
-                    {(boardQuery.data?.members ?? []).map((member) => (
+                    {(boardQuery.data?.members ?? [])
+                      .filter((member) => !membersForFunction || membersForFunction.has(member.userId))
+                      .map((member) => (
                       <SelectItem key={member.userId} value={member.userId}>
                         {memberLabel(member)}
                       </SelectItem>

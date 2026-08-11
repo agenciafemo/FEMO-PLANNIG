@@ -31,6 +31,7 @@ type ModuleCard = {
   to?: string;
   soon?: boolean;
   isNew?: boolean;
+  managerOnly?: boolean;
 };
 
 // Só aponta para rotas que existem. Programação e Relatórios ainda não têm
@@ -42,12 +43,14 @@ const MODULES: ModuleCard[] = [
   { title: "Relatórios", subtitle: "Análise com IA", icon: BarChart3, isNew: true, ...(RELATORIOS_ENABLED ? { to: "/relatorios" } : { soon: true }) },
   { title: "NPS", subtitle: "Satisfação dos clientes", icon: Star, to: "/reviews" },
   { title: "Cofre", subtitle: "Acessos e senhas", icon: Lock, to: "/vault" },
-  { title: "Colaboradores", subtitle: "Equipe e permissões", icon: Users2, to: "/collaborators" },
+  { title: "Equipe / Colaboradores", subtitle: "Funções da equipe", icon: Users2, to: "/team/collaborators", managerOnly: true },
 ];
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { organizationId, isLegacy } = useOrganization();
+  const { organizationId, isLegacy, role } = useOrganization();
+  const canManageTeam = role === "owner" || role === "admin" || role === "manager";
+  const visibleModules = MODULES.filter((module) => !module.managerOnly || canManageTeam);
 
   // Contagem leve só para a linha de subtítulo. Não guarda nem altera nada.
   const { data: clientsCount } = useQuery({
@@ -103,7 +106,7 @@ export default function Dashboard() {
 
         {/* Grade de módulos */}
         <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-4">
-          {MODULES.map((m) => {
+          {visibleModules.map((m) => {
             const Icon = m.icon;
             const inner = (
               <div
