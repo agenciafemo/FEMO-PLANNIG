@@ -8,6 +8,7 @@ import {
   BarChart3,
   CalendarClock,
   CalendarDays,
+  Clock3,
   LayoutGrid,
   ListTodo,
   Lock,
@@ -40,6 +41,7 @@ type ModuleCard = {
 const MODULES: ModuleCard[] = [
   { title: "Clientes", subtitle: "Contas e marcas", icon: Users, to: "/clients" },
   { title: "Tarefas", subtitle: "Quadro da equipe", icon: ListTodo, to: "/tasks", isNew: true },
+  { title: "Ponto", subtitle: "Registro de horário", icon: Clock3, to: "/ponto", isNew: true },
   { title: "Calendário", subtitle: "Datas e campanhas", icon: CalendarDays, to: "/calendario", isNew: true },
   { title: "Programação", subtitle: "Agendar e publicar", icon: CalendarClock, isNew: true, ...(PROGRAMACAO_ENABLED ? { to: "/programacao" } : { soon: true }) },
   { title: "Relatórios", subtitle: "Análise com IA", icon: BarChart3, isNew: true, ...(RELATORIOS_ENABLED ? { to: "/relatorios" } : { soon: true }) },
