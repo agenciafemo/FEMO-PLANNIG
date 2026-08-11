@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Users, LayoutGrid, UserPlus, LogOut, Shield, Bell, KeyRound, ListTodo, MessageSquareHeart, Clock3 } from "lucide-react";
+import { Users, LayoutGrid, UserPlus, LogOut, Shield, Bell, KeyRound, ListTodo, MessageSquareHeart, Clock3, CalendarDays } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -17,6 +17,7 @@ const navItems = [
   { to: "/clients", icon: Users, label: "Clientes" },
   { to: "/tasks", icon: ListTodo, label: "Tarefas" },
   { to: "/ponto", icon: Clock3, label: "Ponto" },
+  { to: "/calendario", icon: CalendarDays, label: "Calendário" },
   { to: "/reviews", icon: MessageSquareHeart, label: "NPS" },
   { to: "/team/collaborators", icon: UserPlus, label: "Equipe / Colaboradores", managerOnly: true },
   { to: "/vault", icon: KeyRound, label: "Cofre" },
