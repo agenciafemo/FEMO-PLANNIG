@@ -22,6 +22,7 @@ import Programacao from "./pages/Programacao";
 import Relatorios from "./pages/Relatorios";
 import Tasks from "./pages/Tasks";
 import TimeClock from "./pages/TimeClock";
+import TeamCollaborators from "./pages/TeamCollaborators";
 import ClientPublic from "./pages/ClientPublic";
 import CreateOrganization from "./pages/CreateOrganization";
 import SelectOrganization from "./pages/SelectOrganization";
@@ -70,6 +71,15 @@ function OrganizationGuard({ children }: { children: React.ReactNode }) {
 // Com a flag desligada, nenhuma dessas telas é alcançável.
 function RequireMultiOrgFlag({ children }: { children: React.ReactNode }) {
   if (!MULTI_ORG_ENABLED) return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+function RequireTeamManager({ children }: { children: React.ReactNode }) {
+  const { role, loading } = useOrganizationContext();
+  if (loading) return null;
+  if (role !== "owner" && role !== "admin" && role !== "manager") {
+    return <Navigate to="/dashboard" replace />;
+  }
   return <>{children}</>;
 }
 
@@ -136,6 +146,14 @@ const App = () => (
                 <Route path="/relatorios" element={<Relatorios />} />
                 <Route path="/tasks" element={<Tasks />} />
                 <Route path="/ponto" element={<TimeClock />} />
+                <Route
+                  path="/team/collaborators"
+                  element={
+                    <RequireTeamManager>
+                      <TeamCollaborators />
+                    </RequireTeamManager>
+                  }
+                />
               </Route>
               <Route path="*" element={<NotFound />} />
                 </Routes>
