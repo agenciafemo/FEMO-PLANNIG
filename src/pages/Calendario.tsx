@@ -47,6 +47,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -149,7 +150,8 @@ type CommemorativeDateDraft = {
   month: number;
   day: number;
   category: "aniversario" | "personalizada" | "nacional" | "varejo" | "sazonal";
-  scope: "global" | "client";
+  scope: "global" | "clients";
+  clientIds: string[];
   color: string;
 };
 
@@ -314,13 +316,11 @@ async function getCommemorativeDates(year: number, clientId: string): Promise<Ca
 
 async function createCommemorativeDate(input: {
   organizationId: string;
-  clientId: string;
   draft: CommemorativeDateDraft;
 }): Promise<void> {
-  const { organizationId, clientId, draft } = input;
-  const { error } = await calendarDb.from<CatalogRow>("commemorative_dates").insert({
+  const { organizationId, draft } = input;
+  const base = {
     organization_id: organizationId,
-    client_id: draft.scope === "client" ? clientId : null,
     title: draft.title.trim(),
     month: draft.month,
     day: draft.day,
@@ -328,8 +328,17 @@ async function createCommemorativeDate(input: {
     recurring: true,
     recurrence_rule: "fixed",
     color: draft.color,
-  });
-  if (error) throw error;
+  };
+  // Global = 1 linha sem cliente; específicos = 1 linha por cliente escolhido.
+  const targets: (string | null)[] = draft.scope === "global" ? [null] : draft.clientIds;
+  for (const clientId of targets) {
+    const { error } = await calendarDb.from<CatalogRow>("commemorative_dates").insert({
+      ...base,
+      client_id: clientId,
+    });
+    // Ignora duplicata (a data já existe para aquele cliente) e segue.
+    if (error && error.code !== "23505") throw error;
+  }
 }
 
 async function getCalendarEvents(organizationId: string, clientId: string): Promise<CalendarItem[]> {
@@ -577,11 +586,11 @@ export default function Calendario() {
   const saveCommemorativeDate = useMutation({
     mutationFn: async (draft: CommemorativeDateDraft) => {
       if (!organizationId) throw new Error("Organização não identificada.");
-      if (draft.scope === "client" && !selectedClientId) {
-        throw new Error("Selecione um cliente para uma data por cliente.");
+      if (draft.scope === "clients" && draft.clientIds.length === 0) {
+        throw new Error("Selecione ao menos um cliente.");
       }
       if (!draft.title.trim()) throw new Error("Informe o título da data.");
-      await createCommemorativeDate({ organizationId, clientId: selectedClientId, draft });
+      await createCommemorativeDate({ organizationId, draft });
     },
     onSuccess: async () => {
       await refreshCatalog();
@@ -597,7 +606,8 @@ export default function Calendario() {
       month: visibleMonth.getMonth() + 1,
       day: 1,
       category: "aniversario",
-      scope: selectedClientId ? "client" : "global",
+      scope: selectedClientId ? "clients" : "global",
+      clientIds: selectedClientId ? [selectedClientId] : [],
       color: CATEGORY_COLORS.aniversario,
     });
   };
@@ -1168,16 +1178,62 @@ export default function Calendario() {
                   <Label htmlFor="calendar-date-scope">Aparece em</Label>
                   <Select
                     value={dateDraft.scope}
-                    onValueChange={(scope: "global" | "client") => setDateDraft({ ...dateDraft, scope })}
+                    onValueChange={(scope: "global" | "clients") => setDateDraft({ ...dateDraft, scope })}
                   >
                     <SelectTrigger id="calendar-date-scope"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="client" disabled={!selectedClientId}>Só este cliente</SelectItem>
+                      <SelectItem value="clients">Clientes específicos</SelectItem>
                       <SelectItem value="global">Toda a agência</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
+
+              {dateDraft.scope === "clients" && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label>Clientes ({dateDraft.clientIds.length} selecionado{dateDraft.clientIds.length === 1 ? "" : "s"})</Label>
+                    <button
+                      type="button"
+                      className="text-[11px] font-medium text-brand hover:underline"
+                      onClick={() => {
+                        const allIds = (clientsQuery.data ?? []).map((client) => client.id);
+                        const isAll = allIds.length > 0 && dateDraft.clientIds.length === allIds.length;
+                        setDateDraft({ ...dateDraft, clientIds: isAll ? [] : allIds });
+                      }}
+                    >
+                      {dateDraft.clientIds.length === (clientsQuery.data?.length ?? 0) && (clientsQuery.data?.length ?? 0) > 0
+                        ? "Limpar"
+                        : "Selecionar todos"}
+                    </button>
+                  </div>
+                  <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-lg border border-border/70 p-2">
+                    {(clientsQuery.data ?? []).map((client) => {
+                      const checked = dateDraft.clientIds.includes(client.id);
+                      return (
+                        <label
+                          key={client.id}
+                          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(value) => {
+                              const on = value === true;
+                              setDateDraft({
+                                ...dateDraft,
+                                clientIds: on
+                                  ? [...dateDraft.clientIds, client.id]
+                                  : dateDraft.clientIds.filter((id) => id !== client.id),
+                              });
+                            }}
+                          />
+                          <span className="truncate">{client.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <p className="text-[11px] text-muted-foreground">
                 A data se repete automaticamente todo ano no dia escolhido.
@@ -1187,7 +1243,14 @@ export default function Calendario() {
                 <Button type="button" variant="outline" onClick={() => setDateDraft(null)} disabled={saveCommemorativeDate.isPending}>
                   Cancelar
                 </Button>
-                <Button type="submit" disabled={saveCommemorativeDate.isPending || !dateDraft.title.trim()}>
+                <Button
+                  type="submit"
+                  disabled={
+                    saveCommemorativeDate.isPending ||
+                    !dateDraft.title.trim() ||
+                    (dateDraft.scope === "clients" && dateDraft.clientIds.length === 0)
+                  }
+                >
                   {saveCommemorativeDate.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Adicionar
                 </Button>
