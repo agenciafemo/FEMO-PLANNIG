@@ -254,3 +254,88 @@ export async function publishStoryPost(input: {
 
   return { mediaId, permalink };
 }
+
+/**
+ * Publica um CARROSSEL (2 a 10 imagens) no Instagram. Fluxo de 3 passos:
+ * cria um container-filho por imagem (is_carousel_item=true), cria o
+ * container-pai (media_type=CAROUSEL + children) com a caption, espera o pai
+ * ficar pronto e publica. A Meta baixa cada image_url (precisa ser https
+ * direto). Suporta apenas imagens (vídeo em carrossel fica para depois).
+ */
+export async function publishCarouselPost(input: {
+  igAccountId: string;
+  token: string;
+  childrenUrls: string[];
+  caption: string;
+}): Promise<{ mediaId: string; permalink: string | null }> {
+  const config = metaConfig();
+  const proof = await appSecretProof(input.token, config.appSecret);
+  const base = `https://graph.facebook.com/${config.graphVersion}`;
+  const auth = { Authorization: `Bearer ${input.token}` };
+
+  if (input.childrenUrls.length < 2 || input.childrenUrls.length > 10) {
+    throw new Error("carousel_count_invalid");
+  }
+
+  // 1) um container-filho por imagem.
+  const childIds: string[] = [];
+  for (const url of input.childrenUrls) {
+    const childUrl = new URL(`${base}/${encodeURIComponent(input.igAccountId)}/media`);
+    childUrl.searchParams.set("image_url", url);
+    childUrl.searchParams.set("is_carousel_item", "true");
+    childUrl.searchParams.set("appsecret_proof", proof);
+    const chRes = await fetch(childUrl, { method: "POST", headers: auth });
+    const chJson = await chRes.json().catch(() => ({}));
+    if (!chRes.ok || !chJson?.id) throw new Error(metaReason(chJson, "carousel_child_failed"));
+    childIds.push(String(chJson.id));
+  }
+
+  // 2) container-pai (CAROUSEL) com os filhos e a legenda.
+  const parentUrl = new URL(`${base}/${encodeURIComponent(input.igAccountId)}/media`);
+  parentUrl.searchParams.set("media_type", "CAROUSEL");
+  parentUrl.searchParams.set("children", childIds.join(","));
+  parentUrl.searchParams.set("caption", input.caption ?? "");
+  parentUrl.searchParams.set("appsecret_proof", proof);
+  const cRes = await fetch(parentUrl, { method: "POST", headers: auth });
+  const cJson = await cRes.json().catch(() => ({}));
+  if (!cRes.ok || !cJson?.id) throw new Error(metaReason(cJson, "carousel_container_failed"));
+  const creationId = String(cJson.id);
+
+  // 3) esperar o pai ficar pronto (os filhos de imagem processam rápido).
+  let ready = false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const stUrl = new URL(`${base}/${encodeURIComponent(creationId)}`);
+    stUrl.searchParams.set("fields", "status_code");
+    stUrl.searchParams.set("appsecret_proof", proof);
+    const stRes = await fetch(stUrl, { headers: auth });
+    const stJson = await stRes.json().catch(() => ({}));
+    if (stJson?.status_code === "FINISHED") { ready = true; break; }
+    if (stJson?.status_code === "ERROR") throw new Error("carousel_processing_error");
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  if (!ready) throw new Error("carousel_not_ready_timeout");
+
+  // 4) publicar.
+  const pubUrl = new URL(`${base}/${encodeURIComponent(input.igAccountId)}/media_publish`);
+  pubUrl.searchParams.set("creation_id", creationId);
+  pubUrl.searchParams.set("appsecret_proof", proof);
+  const pRes = await fetch(pubUrl, { method: "POST", headers: auth });
+  const pJson = await pRes.json().catch(() => ({}));
+  if (!pRes.ok || !pJson?.id) throw new Error(metaReason(pJson, "carousel_publish_failed"));
+  const mediaId = String(pJson.id);
+
+  // 5) permalink (best-effort).
+  let permalink: string | null = null;
+  try {
+    const permUrl = new URL(`${base}/${encodeURIComponent(mediaId)}`);
+    permUrl.searchParams.set("fields", "permalink");
+    permUrl.searchParams.set("appsecret_proof", proof);
+    const permRes = await fetch(permUrl, { headers: auth });
+    const permJson = await permRes.json().catch(() => ({}));
+    if (permRes.ok && typeof permJson?.permalink === "string") permalink = permJson.permalink;
+  } catch {
+    // ignora — permalink é opcional
+  }
+
+  return { mediaId, permalink };
+}
