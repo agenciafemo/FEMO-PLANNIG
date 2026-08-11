@@ -54,10 +54,11 @@ export async function getScheduledPosts(
 export async function createScheduledPost(input: {
   clientId: string;
   connectionId: string;
-  mediaType?: "image" | "reels" | "story";
+  mediaType?: "image" | "reels" | "story" | "carousel";
   imageUrl?: string | null;
   videoUrl?: string | null;
   coverUrl?: string | null;
+  childrenUrls?: string[] | null;
   caption?: string;
   scheduledFor?: string; // ISO; default agora (no servidor)
   postId?: string | null;
@@ -72,6 +73,7 @@ export async function createScheduledPost(input: {
     _caption: input.caption ?? "",
     _scheduled_for: input.scheduledFor ?? new Date().toISOString(),
     _post_id: input.postId ?? null,
+    _children_urls: input.childrenUrls ?? null,
   });
   if (error) throw error;
   return data as string;

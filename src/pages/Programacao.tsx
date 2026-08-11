@@ -49,6 +49,20 @@ interface ApprovedPost {
   cover_image_url: string | null;
   video_url: string | null;
   content_type: string | null;
+  media_urls: unknown;
+}
+
+// Extrai as imagens https de um post de carrossel (media_urls é Json no banco).
+// Ignora vídeos e links do Drive (a Meta baixa cada image_url direto).
+function carouselImageUrls(post: ApprovedPost): string[] {
+  const raw = Array.isArray(post.media_urls) ? post.media_urls : [];
+  return raw.filter(
+    (u): u is string =>
+      typeof u === "string" &&
+      /^https:\/\//.test(u) &&
+      !u.includes("drive.google.com") &&
+      !/\.(mp4|mov|webm|avi|mkv|m4v|ogv)(\?|$)/i.test(u),
+  );
 }
 
 // A legenda publicada no Instagram = legenda + hashtags (que ficam num campo
@@ -76,6 +90,15 @@ function buildScheduleInput(post: ApprovedPost) {
       videoUrl: v,
       coverUrl: post.cover_image_url ?? undefined,
     };
+  }
+  if (post.content_type === "carousel") {
+    const imgs = carouselImageUrls(post);
+    if (imgs.length < 2) {
+      throw new Error(
+        "Carrossel precisa de pelo menos 2 imagens https. Abra o post e adicione as imagens do carrossel.",
+      );
+    }
+    return { mediaType: "carousel" as const, childrenUrls: imgs.slice(0, 10) };
   }
   if (post.content_type === "story") {
     // Story pode ser vídeo (usa o arquivo direto) ou imagem (usa a capa).
@@ -148,7 +171,7 @@ export default function Programacao() {
     queryFn: async () => {
       const { data, error } = await (supabase
         .from("posts")
-        .select("id, caption, hashtags, cover_image_url, video_url, content_type, plannings!inner(client_id)") as any)
+        .select("id, caption, hashtags, cover_image_url, video_url, content_type, media_urls, plannings!inner(client_id)") as any)
         .eq("status", "approved")
         .eq("plannings.client_id", clientId);
       if (error) throw error;
@@ -156,7 +179,8 @@ export default function Programacao() {
         (p) =>
           p.cover_image_url ||
           (p.content_type === "reels" && p.video_url) ||
-          (p.content_type === "story" && p.video_url),
+          (p.content_type === "story" && p.video_url) ||
+          (p.content_type === "carousel" && carouselImageUrls(p).length >= 2),
       );
     },
     enabled: !!clientId,

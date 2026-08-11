@@ -10,7 +10,12 @@ import {
   methodNotAllowed,
 } from "../_shared/http.ts";
 import { createAdminClient } from "../_shared/supabase.ts";
-import { publishImagePost, publishReelsPost, publishStoryPost } from "../_shared/meta-publish.ts";
+import {
+  publishCarouselPost,
+  publishImagePost,
+  publishReelsPost,
+  publishStoryPost,
+} from "../_shared/meta-publish.ts";
 
 interface ClaimedItem {
   id: string;
@@ -20,6 +25,7 @@ interface ClaimedItem {
   image_url: string | null;
   video_url: string | null;
   cover_url: string | null;
+  children_urls: string[] | null;
   caption: string;
 }
 
@@ -81,6 +87,16 @@ Deno.serve(async (request) => {
             token,
             imageUrl: item.image_url,
             videoUrl: item.video_url,
+          }));
+        } else if (item.media_type === "carousel") {
+          if (!item.children_urls || item.children_urls.length < 2) {
+            throw new Error("carousel_children_missing");
+          }
+          ({ mediaId, permalink } = await publishCarouselPost({
+            igAccountId: item.instagram_account_id,
+            token,
+            childrenUrls: item.children_urls,
+            caption: item.caption ?? "",
           }));
         } else {
           if (!item.image_url) throw new Error("image_url_missing");
