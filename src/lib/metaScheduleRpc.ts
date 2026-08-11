@@ -54,7 +54,7 @@ export async function getScheduledPosts(
 export async function createScheduledPost(input: {
   clientId: string;
   connectionId: string;
-  mediaType?: "image" | "reels";
+  mediaType?: "image" | "reels" | "story";
   imageUrl?: string | null;
   videoUrl?: string | null;
   coverUrl?: string | null;

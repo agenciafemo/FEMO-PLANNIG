@@ -10,7 +10,7 @@ import {
   methodNotAllowed,
 } from "../_shared/http.ts";
 import { createAdminClient } from "../_shared/supabase.ts";
-import { publishImagePost, publishReelsPost } from "../_shared/meta-publish.ts";
+import { publishImagePost, publishReelsPost, publishStoryPost } from "../_shared/meta-publish.ts";
 
 interface ClaimedItem {
   id: string;
@@ -72,6 +72,15 @@ Deno.serve(async (request) => {
             videoUrl: item.video_url,
             coverUrl: item.cover_url,
             caption: item.caption ?? "",
+          }));
+        } else if (item.media_type === "story") {
+          // Story de imagem usa image_url; story de vídeo usa video_url.
+          if (!item.image_url && !item.video_url) throw new Error("story_media_missing");
+          ({ mediaId, permalink } = await publishStoryPost({
+            igAccountId: item.instagram_account_id,
+            token,
+            imageUrl: item.image_url,
+            videoUrl: item.video_url,
           }));
         } else {
           if (!item.image_url) throw new Error("image_url_missing");
