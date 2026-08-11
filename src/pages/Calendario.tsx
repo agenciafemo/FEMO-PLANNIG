@@ -46,6 +46,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -93,6 +94,7 @@ type CatalogRow = {
   offset_days?: number | null;
   color?: string | null;
   active?: boolean | null;
+  client_id?: string | null;
 };
 
 type EventRow = {
@@ -105,6 +107,9 @@ type EventRow = {
   color?: string | null;
   note?: string | null;
   description?: string | null;
+  all_day?: boolean | null;
+  start_time?: string | null;
+  end_time?: string | null;
 };
 
 type CalendarItem = {
@@ -117,6 +122,10 @@ type CalendarItem = {
   kind: "commemorative" | "event";
   note?: string;
   eventType?: CalendarEventType;
+  timeLabel?: string;
+  allDay?: boolean;
+  startTime?: string;
+  endTime?: string;
 };
 
 type CalendarEventType = "personalizado" | "campanha" | "comemorativa";
@@ -128,16 +137,43 @@ type EventDraft = {
   eventType: CalendarEventType;
   color: string;
   note: string;
+  allDay: boolean;
+  startTime: string;
+  endTime: string;
+};
+
+// Cadastro de uma data comemorativa/aniversário no catálogo (recorrente todo
+// ano). Escopo "global" = toda a agência; "cliente" = só o cliente atual.
+type CommemorativeDateDraft = {
+  title: string;
+  month: number;
+  day: number;
+  category: "aniversario" | "personalizada" | "nacional" | "varejo" | "sazonal";
+  scope: "global" | "client";
+  color: string;
 };
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+const MONTHS = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
 
 const CATEGORY_COLORS: Record<string, string> = {
   nacional: "#2563EB",
   varejo: "#7C3AED",
   sazonal: "#D97706",
+  aniversario: "#DB2777",
+  personalizada: "#0891B2",
   relacionamento: "#0F766E",
 };
+
+// Formata um TIME (HH:MM:SS) do banco para exibição curta (HH:MM).
+function shortTime(value?: string | null): string {
+  if (!value) return "";
+  return value.slice(0, 5);
+}
 
 const LEGEND = [
   { label: "Nacional", color: CATEGORY_COLORS.nacional },
@@ -208,9 +244,12 @@ function resolveCatalogDate(row: CatalogRow, year: number): Date | null {
   return null;
 }
 
-function normalizeCatalog(rows: CatalogRow[], year: number): CalendarItem[] {
+function normalizeCatalog(rows: CatalogRow[], year: number, clientId: string): CalendarItem[] {
   return rows.flatMap((row) => {
     if (row.active === false || row.recurring === false) return [];
+    // Datas por cliente só aparecem no calendário daquele cliente; datas sem
+    // client_id (catálogo global ou geral da org) aparecem para todos.
+    if (row.client_id != null && row.client_id !== clientId) return [];
     const date = resolveCatalogDate(row, year);
     const title = row.title ?? row.name;
     if (!date || !title) return [];
@@ -237,6 +276,14 @@ function normalizeEvents(rows: EventRow[], clientId: string): CalendarItem[] {
         : row.event_type === "comemorativa"
           ? "comemorativa"
           : "personalizado";
+    const allDay = row.all_day ?? true;
+    const startTime = shortTime(row.start_time);
+    const endTime = shortTime(row.end_time);
+    const timeLabel = allDay
+      ? ""
+      : endTime
+        ? `${startTime}–${endTime}`
+        : startTime;
     return [{
       id: `event-${row.id}`,
       recordId: row.id,
@@ -247,18 +294,42 @@ function normalizeEvents(rows: EventRow[], clientId: string): CalendarItem[] {
       kind: "event" as const,
       note: row.note ?? row.description ?? undefined,
       eventType,
+      allDay,
+      startTime,
+      endTime,
+      timeLabel,
     }];
   });
 }
 
-async function getCommemorativeDates(year: number): Promise<CalendarItem[]> {
+async function getCommemorativeDates(year: number, clientId: string): Promise<CalendarItem[]> {
   const current = await calendarDb.from<CatalogRow>("commemorative_dates").select("*");
-  if (!current.error) return normalizeCatalog(current.data ?? [], year);
+  if (!current.error) return normalizeCatalog(current.data ?? [], year, clientId);
   if (!isMissingRelation(current.error)) throw current.error;
 
   const legacy = await calendarDb.from<CatalogRow>("marketing_calendar_dates").select("*");
   if (legacy.error) throw legacy.error;
-  return normalizeCatalog(legacy.data ?? [], year);
+  return normalizeCatalog(legacy.data ?? [], year, clientId);
+}
+
+async function createCommemorativeDate(input: {
+  organizationId: string;
+  clientId: string;
+  draft: CommemorativeDateDraft;
+}): Promise<void> {
+  const { organizationId, clientId, draft } = input;
+  const { error } = await calendarDb.from<CatalogRow>("commemorative_dates").insert({
+    organization_id: organizationId,
+    client_id: draft.scope === "client" ? clientId : null,
+    title: draft.title.trim(),
+    month: draft.month,
+    day: draft.day,
+    category: draft.category,
+    recurring: true,
+    recurrence_rule: "fixed",
+    color: draft.color,
+  });
+  if (error) throw error;
 }
 
 async function getCalendarEvents(organizationId: string, clientId: string): Promise<CalendarItem[]> {
@@ -296,6 +367,9 @@ async function createCalendarEvent(input: {
     event_type: draft.eventType,
     color: draft.color,
     note: draft.note.trim() || null,
+    all_day: draft.allDay,
+    start_time: draft.allDay ? null : draft.startTime || null,
+    end_time: draft.allDay ? null : draft.endTime || null,
     created_by: userId,
   };
   const modern = await calendarDb.from<EventRow>("calendar_events").insert(modernPayload);
@@ -330,6 +404,9 @@ async function updateCalendarEvent(input: {
       event_type: draft.eventType,
       color: draft.color,
       note: draft.note.trim() || null,
+      all_day: draft.allDay,
+      start_time: draft.allDay ? null : draft.startTime || null,
+      end_time: draft.allDay ? null : draft.endTime || null,
     })
     .eq("id", eventId)
     .eq("organization_id", organizationId);
@@ -373,6 +450,7 @@ export default function Calendario() {
   const queryClient = useQueryClient();
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(new Date()));
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
+  const [dateDraft, setDateDraft] = useState<CommemorativeDateDraft | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [selectedByOrganization, setSelectedByOrganization] = usePersistedState<Record<string, string>>(
     "norteia-calendar-client-v1",
@@ -399,8 +477,8 @@ export default function Calendario() {
       : clientsQuery.data?.[0]?.id ?? "";
 
   const catalogQuery = useQuery({
-    queryKey: ["calendar-commemorative-dates", organizationId, visibleMonth.getFullYear()],
-    queryFn: () => getCommemorativeDates(visibleMonth.getFullYear()),
+    queryKey: ["calendar-commemorative-dates", organizationId, selectedClientId, visibleMonth.getFullYear()],
+    queryFn: () => getCommemorativeDates(visibleMonth.getFullYear(), selectedClientId),
     enabled: !!organizationId,
   });
 
@@ -415,12 +493,12 @@ export default function Calendario() {
   const upcomingStartYear = today.getFullYear();
   const upcomingEndYear = upcomingEnd.getFullYear();
   const upcomingCatalogQuery = useQuery({
-    queryKey: ["calendar-upcoming-commemorative-dates", organizationId, upcomingStartYear, upcomingEndYear],
+    queryKey: ["calendar-upcoming-commemorative-dates", organizationId, selectedClientId, upcomingStartYear, upcomingEndYear],
     queryFn: async () => {
       const years = upcomingStartYear === upcomingEndYear
         ? [upcomingStartYear]
         : [upcomingStartYear, upcomingEndYear];
-      const results = await Promise.all(years.map(getCommemorativeDates));
+      const results = await Promise.all(years.map((y) => getCommemorativeDates(y, selectedClientId)));
       return results.flat();
     },
     enabled: !!organizationId,
@@ -491,6 +569,39 @@ export default function Calendario() {
     onError: (error: Error) => toast.error(error.message),
   });
 
+  const refreshCatalog = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["calendar-commemorative-dates"] });
+    await queryClient.invalidateQueries({ queryKey: ["calendar-upcoming-commemorative-dates"] });
+  };
+
+  const saveCommemorativeDate = useMutation({
+    mutationFn: async (draft: CommemorativeDateDraft) => {
+      if (!organizationId) throw new Error("Organização não identificada.");
+      if (draft.scope === "client" && !selectedClientId) {
+        throw new Error("Selecione um cliente para uma data por cliente.");
+      }
+      if (!draft.title.trim()) throw new Error("Informe o título da data.");
+      await createCommemorativeDate({ organizationId, clientId: selectedClientId, draft });
+    },
+    onSuccess: async () => {
+      await refreshCatalog();
+      toast.success("Data adicionada ao calendário.");
+      setDateDraft(null);
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const openNewDate = () => {
+    setDateDraft({
+      title: "",
+      month: visibleMonth.getMonth() + 1,
+      day: 1,
+      category: "aniversario",
+      scope: selectedClientId ? "client" : "global",
+      color: CATEGORY_COLORS.aniversario,
+    });
+  };
+
   const openNewEvent = (day: Date) => {
     if (!selectedClientId) return;
     setEventDraft({
@@ -499,6 +610,9 @@ export default function Calendario() {
       eventType: "personalizado",
       color: "#0F766E",
       note: "",
+      allDay: true,
+      startTime: "",
+      endTime: "",
     });
   };
 
@@ -511,6 +625,9 @@ export default function Calendario() {
       eventType: item.eventType ?? "personalizado",
       color: item.color,
       note: item.note ?? "",
+      allDay: item.allDay ?? true,
+      startTime: item.startTime ?? "",
+      endTime: item.endTime ?? "",
     });
   };
 
@@ -529,16 +646,26 @@ export default function Calendario() {
         subtitle="Datas de marketing e compromissos de cada cliente em um só lugar."
         breadcrumb={[{ label: "Dashboard", to: "/dashboard" }, { label: "Calendário" }]}
         actions={
-          <Select value={selectedClientId} onValueChange={chooseClient} disabled={!clientsQuery.data?.length}>
-            <SelectTrigger className="w-full min-w-56 sm:w-64" aria-label="Selecionar cliente">
-              <SelectValue placeholder="Selecione um cliente" />
-            </SelectTrigger>
-            <SelectContent>
-              {(clientsQuery.data ?? []).map((client) => (
-                <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
+            <Select value={selectedClientId} onValueChange={chooseClient} disabled={!clientsQuery.data?.length}>
+              <SelectTrigger className="w-full min-w-56 sm:w-64" aria-label="Selecionar cliente">
+                <SelectValue placeholder="Selecione um cliente" />
+              </SelectTrigger>
+              <SelectContent>
+                {(clientsQuery.data ?? []).map((client) => (
+                  <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              onClick={openNewDate}
+              disabled={!clientsQuery.data?.length}
+              className="shrink-0"
+            >
+              <Plus className="mr-2 h-4 w-4" /> Adicionar data
+            </Button>
+          </div>
         }
       />
 
@@ -682,6 +809,9 @@ export default function Calendario() {
                                   openExistingEvent(item);
                                 }}
                               >
+                                {item.timeLabel && (
+                                  <span className="shrink-0 tabular-nums opacity-80">{item.timeLabel}</span>
+                                )}
                                 <span className="truncate">{item.title}</span>
                               </button>
                             ) : (
@@ -856,6 +986,40 @@ export default function Calendario() {
                 </div>
               </div>
 
+              <div className="space-y-3 rounded-lg border border-border/70 p-3">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="calendar-event-allday" className="cursor-pointer">Dia inteiro</Label>
+                  <Switch
+                    id="calendar-event-allday"
+                    checked={eventDraft.allDay}
+                    onCheckedChange={(allDay) => setEventDraft({ ...eventDraft, allDay })}
+                  />
+                </div>
+                {!eventDraft.allDay && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="calendar-event-start">Início</Label>
+                      <Input
+                        id="calendar-event-start"
+                        type="time"
+                        value={eventDraft.startTime}
+                        onChange={(event) => setEventDraft({ ...eventDraft, startTime: event.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="calendar-event-end">Fim</Label>
+                      <Input
+                        id="calendar-event-end"
+                        type="time"
+                        value={eventDraft.endTime}
+                        onChange={(event) => setEventDraft({ ...eventDraft, endTime: event.target.value })}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-1.5">
                 <Label htmlFor="calendar-event-color">Cor</Label>
                 <div className="flex items-center gap-3">
@@ -914,6 +1078,119 @@ export default function Calendario() {
                     {eventDraft.id ? "Salvar alterações" : "Criar evento"}
                   </Button>
                 </div>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!dateDraft}
+        onOpenChange={(open) => {
+          if (!open && !saveCommemorativeDate.isPending) setDateDraft(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adicionar data comemorativa</DialogTitle>
+          </DialogHeader>
+
+          {dateDraft && (
+            <form
+              className="space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                saveCommemorativeDate.mutate(dateDraft);
+              }}
+            >
+              <div className="space-y-1.5">
+                <Label htmlFor="calendar-date-title">Título</Label>
+                <Input
+                  id="calendar-date-title"
+                  value={dateDraft.title}
+                  onChange={(event) => setDateDraft({ ...dateDraft, title: event.target.value })}
+                  placeholder="Ex.: Aniversário do cliente"
+                  maxLength={160}
+                  autoFocus
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="calendar-date-day">Dia</Label>
+                  <Input
+                    id="calendar-date-day"
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={dateDraft.day}
+                    onChange={(event) => setDateDraft({ ...dateDraft, day: Number(event.target.value) })}
+                    required
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="calendar-date-month">Mês</Label>
+                  <Select
+                    value={String(dateDraft.month)}
+                    onValueChange={(value) => setDateDraft({ ...dateDraft, month: Number(value) })}
+                  >
+                    <SelectTrigger id="calendar-date-month"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {MONTHS.map((month, index) => (
+                        <SelectItem key={month} value={String(index + 1)}>{month}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="calendar-date-category">Categoria</Label>
+                  <Select
+                    value={dateDraft.category}
+                    onValueChange={(category: CommemorativeDateDraft["category"]) =>
+                      setDateDraft({ ...dateDraft, category, color: CATEGORY_COLORS[category] ?? dateDraft.color })
+                    }
+                  >
+                    <SelectTrigger id="calendar-date-category"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="aniversario">Aniversário</SelectItem>
+                      <SelectItem value="personalizada">Personalizada</SelectItem>
+                      <SelectItem value="nacional">Nacional</SelectItem>
+                      <SelectItem value="varejo">Varejo</SelectItem>
+                      <SelectItem value="sazonal">Sazonal</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="calendar-date-scope">Aparece em</Label>
+                  <Select
+                    value={dateDraft.scope}
+                    onValueChange={(scope: "global" | "client") => setDateDraft({ ...dateDraft, scope })}
+                  >
+                    <SelectTrigger id="calendar-date-scope"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="client" disabled={!selectedClientId}>Só este cliente</SelectItem>
+                      <SelectItem value="global">Toda a agência</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground">
+                A data se repete automaticamente todo ano no dia escolhido.
+              </p>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="outline" onClick={() => setDateDraft(null)} disabled={saveCommemorativeDate.isPending}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={saveCommemorativeDate.isPending || !dateDraft.title.trim()}>
+                  {saveCommemorativeDate.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Adicionar
+                </Button>
               </div>
             </form>
           )}
