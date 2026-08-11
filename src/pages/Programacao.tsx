@@ -77,6 +77,20 @@ function buildScheduleInput(post: ApprovedPost) {
       coverUrl: post.cover_image_url ?? undefined,
     };
   }
+  if (post.content_type === "story") {
+    // Story pode ser vídeo (usa o arquivo direto) ou imagem (usa a capa).
+    const v = post.video_url ?? "";
+    const isDirectVideo = /\.(mp4|mov|m4v)(\?|$)/i.test(v) && !v.includes("drive.google.com");
+    if (isDirectVideo) {
+      return { mediaType: "story" as const, videoUrl: v };
+    }
+    if (post.cover_image_url) {
+      return { mediaType: "story" as const, imageUrl: post.cover_image_url };
+    }
+    throw new Error(
+      "Story sem mídia válida. Adicione uma imagem de capa ou faça upload de um vídeo (mp4/mov) — link do Google Drive não pode ser publicado.",
+    );
+  }
   if (!post.cover_image_url) throw new Error("Post sem imagem de capa.");
   return { mediaType: "image" as const, imageUrl: post.cover_image_url };
 }
@@ -139,7 +153,10 @@ export default function Programacao() {
         .eq("plannings.client_id", clientId);
       if (error) throw error;
       return ((data ?? []) as ApprovedPost[]).filter(
-        (p) => p.cover_image_url || (p.content_type === "reels" && p.video_url),
+        (p) =>
+          p.cover_image_url ||
+          (p.content_type === "reels" && p.video_url) ||
+          (p.content_type === "story" && p.video_url),
       );
     },
     enabled: !!clientId,

@@ -176,3 +176,81 @@ export async function publishReelsPost(input: {
 
   return { mediaId, permalink };
 }
+
+/**
+ * Publica um STORY no Instagram (imagem OU vídeo). O container usa
+ * media_type=STORIES; imagem story usa image_url, vídeo story usa video_url.
+ * Stories não aceitam caption/hashtags pela Graph API (são ignorados). O
+ * polling cobre vídeo (mais lento) e imagem (rápido) com a mesma janela dos
+ * reels para caber no orçamento de 300s da Edge Function.
+ */
+export async function publishStoryPost(input: {
+  igAccountId: string;
+  token: string;
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+}): Promise<{ mediaId: string; permalink: string | null }> {
+  const config = metaConfig();
+  const proof = await appSecretProof(input.token, config.appSecret);
+  const base = `https://graph.facebook.com/${config.graphVersion}`;
+  const auth = { Authorization: `Bearer ${input.token}` };
+
+  const isVideo = Boolean(input.videoUrl);
+  if (!isVideo && !input.imageUrl) throw new Error("story_media_missing");
+
+  // 1) container do story (STORIES). Imagem ou vídeo, nunca os dois.
+  const containerUrl = new URL(`${base}/${encodeURIComponent(input.igAccountId)}/media`);
+  containerUrl.searchParams.set("media_type", "STORIES");
+  if (isVideo) {
+    containerUrl.searchParams.set("video_url", input.videoUrl as string);
+  } else {
+    containerUrl.searchParams.set("image_url", input.imageUrl as string);
+  }
+  containerUrl.searchParams.set("appsecret_proof", proof);
+  const cRes = await fetch(containerUrl, { method: "POST", headers: auth });
+  const cJson = await cRes.json().catch(() => ({}));
+  if (!cRes.ok || !cJson?.id) throw new Error(metaReason(cJson, "story_container_failed"));
+  const creationId = String(cJson.id);
+
+  // 2) esperar o processamento (FINISHED). Vídeo demora — janela ~3,7 min.
+  let ready = false;
+  for (let attempt = 0; attempt < 45; attempt++) {
+    const stUrl = new URL(`${base}/${encodeURIComponent(creationId)}`);
+    stUrl.searchParams.set("fields", "status_code,status");
+    stUrl.searchParams.set("appsecret_proof", proof);
+    const stRes = await fetch(stUrl, { headers: auth });
+    const stJson = await stRes.json().catch(() => ({}));
+    if (stJson?.status_code === "FINISHED") { ready = true; break; }
+    if (stJson?.status_code === "ERROR") {
+      const detail = typeof stJson?.status === "string" ? stJson.status : "";
+      const clean = detail.toLowerCase().replace(/[^a-z0-9_.:-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 100);
+      throw new Error(clean || "story_processing_error");
+    }
+    await new Promise((r) => setTimeout(r, isVideo ? 5000 : 2000));
+  }
+  if (!ready) throw new Error("story_not_ready_timeout");
+
+  // 3) publicar.
+  const pubUrl = new URL(`${base}/${encodeURIComponent(input.igAccountId)}/media_publish`);
+  pubUrl.searchParams.set("creation_id", creationId);
+  pubUrl.searchParams.set("appsecret_proof", proof);
+  const pRes = await fetch(pubUrl, { method: "POST", headers: auth });
+  const pJson = await pRes.json().catch(() => ({}));
+  if (!pRes.ok || !pJson?.id) throw new Error(metaReason(pJson, "story_publish_failed"));
+  const mediaId = String(pJson.id);
+
+  // 4) permalink (best-effort — stories podem não ter permalink público).
+  let permalink: string | null = null;
+  try {
+    const permUrl = new URL(`${base}/${encodeURIComponent(mediaId)}`);
+    permUrl.searchParams.set("fields", "permalink");
+    permUrl.searchParams.set("appsecret_proof", proof);
+    const permRes = await fetch(permUrl, { headers: auth });
+    const permJson = await permRes.json().catch(() => ({}));
+    if (permRes.ok && typeof permJson?.permalink === "string") permalink = permJson.permalink;
+  } catch {
+    // ignora — permalink é opcional
+  }
+
+  return { mediaId, permalink };
+}
