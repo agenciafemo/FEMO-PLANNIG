@@ -52,16 +52,22 @@ ALTER TABLE public.meta_scheduled_posts
   );
 
 -- Todas as URLs de children precisam ser https (a Meta baixa cada imagem).
+-- CHECK não aceita subquery; por isso a validação vai numa função IMMUTABLE
+-- (o unnest fica dentro dela, o que é permitido).
+CREATE OR REPLACE FUNCTION public.meta_children_all_https(_urls TEXT[])
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT _urls IS NULL
+      OR NOT EXISTS (SELECT 1 FROM unnest(_urls) AS u WHERE u !~ '^https://');
+$$;
+
 ALTER TABLE public.meta_scheduled_posts
   DROP CONSTRAINT IF EXISTS meta_scheduled_posts_children_urls_https;
 ALTER TABLE public.meta_scheduled_posts
   ADD CONSTRAINT meta_scheduled_posts_children_urls_https
-  CHECK (
-    children_urls IS NULL
-    OR NOT EXISTS (
-      SELECT 1 FROM unnest(children_urls) u WHERE u !~ '^https://'
-    )
-  );
+  CHECK (public.meta_children_all_https(children_urls));
 
 -- ---------------------------------------------------------------------------
 -- 2) create_scheduled_post: novo parâmetro _children_urls (image/reels/story/
