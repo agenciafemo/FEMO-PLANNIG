@@ -7,11 +7,18 @@ import {
   CheckCircle2,
   Clock3,
   Coffee,
+  Download,
   LogIn,
   LogOut,
+  Plus,
   TimerReset,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  generateTimeClockReportPdf,
+  type TimeClockPdfMember,
+} from "@/lib/timeClockReport";
 
 import { EmptyState, MetricCard, PageHeader, SectionHeader, StatusBadge } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -25,6 +32,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -67,6 +76,7 @@ interface TimeClockFilterBuilder<T> extends PromiseLike<QueryResult<T>> {
   lt(column: string, value: string): TimeClockFilterBuilder<T>;
   order(column: string, options?: { ascending?: boolean }): TimeClockFilterBuilder<T>;
   insert(values: Record<string, unknown>): TimeClockFilterBuilder<T>;
+  update(values: Record<string, unknown>): TimeClockFilterBuilder<T>;
 }
 
 const timeClockSupabase = supabase as unknown as {
@@ -88,6 +98,27 @@ const PUNCH_STEPS: Array<{
   { kind: "volta_almoco", label: "Volta do almoço", action: "Registrar volta do almoço", reference: "13:00", icon: BriefcaseBusiness },
   { kind: "saida", label: "Saída", action: "Registrar saída", reference: "17:30", icon: LogOut },
 ];
+
+type AdjustmentStatus = "pending" | "approved" | "rejected";
+
+type TimeClockAdjustmentRequest = {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  requested_punched_at: string;
+  kind: PunchKind;
+  reason: string;
+  status: AdjustmentStatus;
+  review_note: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+};
+
+const ADJUSTMENT_STATUS: Record<AdjustmentStatus, { label: string; variant: "warning" | "success" | "danger" }> = {
+  pending: { label: "Em análise", variant: "warning" },
+  approved: { label: "Aprovado", variant: "success" },
+  rejected: { label: "Rejeitado", variant: "danger" },
+};
 
 const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
   hour: "2-digit",
@@ -270,6 +301,49 @@ function summarizeHistory(punches: TimeClockPunch[], todayKey: string): HistoryD
     .sort((first, second) => second.dateKey.localeCompare(first.dateKey));
 }
 
+const EXPECTED_DAILY_SECONDS = 8 * 60 * 60; // jornada padrão de 8h
+
+function isBusinessDay(dateKey: string): boolean {
+  const weekday = new Date(`${dateKey}T12:00:00-03:00`).getDay(); // 0=dom .. 6=sab
+  return weekday >= 1 && weekday <= 5;
+}
+
+function isCompleteDay(day: HistoryDay): boolean {
+  return PUNCH_STEPS.every((step) => day.punches[step.kind]);
+}
+
+// Saldo do dia em segundos (extra positivo / negativo). null = não entra no
+// banco de horas (dia incompleto/em andamento). Dia útil espera 8h; fim de
+// semana espera 0 (só gera extra, nunca negativa).
+function dayBalanceSeconds(day: HistoryDay): number | null {
+  if (!isCompleteDay(day)) return null;
+  const expected = isBusinessDay(day.dateKey) ? EXPECTED_DAILY_SECONDS : 0;
+  return day.totalSeconds - expected;
+}
+
+// Formata um saldo com sinal (+1h 30min / −0h 45min / 0h 00min).
+function formatBalance(totalSeconds: number): string {
+  if (totalSeconds === 0) return "0h 00min";
+  const sign = totalSeconds > 0 ? "+" : "−";
+  const abs = Math.abs(totalSeconds);
+  const hours = Math.floor(abs / 3600);
+  const minutes = Math.floor((abs % 3600) / 60);
+  return `${sign}${hours}h ${String(minutes).padStart(2, "0")}min`;
+}
+
+// Agrega extras, negativas e saldo (banco de horas) de uma lista de dias.
+function summarizeBalance(days: HistoryDay[]): { extras: number; negativas: number; saldo: number } {
+  let extras = 0;
+  let negativas = 0;
+  for (const day of days) {
+    const balance = dayBalanceSeconds(day);
+    if (balance === null) continue;
+    if (balance > 0) extras += balance;
+    else if (balance < 0) negativas += -balance;
+  }
+  return { extras, negativas, saldo: extras - negativas };
+}
+
 export default function TimeClock() {
   const { user } = useAuth();
   const { organizationId, isLegacy, loading: organizationLoading } = useOrganization();
@@ -279,6 +353,11 @@ export default function TimeClock() {
   const [teamMemberFilter, setTeamMemberFilter] = useState("all");
   const [periodStart, setPeriodStart] = useState(() => `${agencyDateKey().slice(0, 7)}-01`);
   const [periodEnd, setPeriodEnd] = useState(() => agencyDateKey());
+  const [adjustmentOpen, setAdjustmentOpen] = useState(false);
+  const [adjustmentDate, setAdjustmentDate] = useState(() => agencyDateKey());
+  const [adjustmentTime, setAdjustmentTime] = useState(() => timeFormatter.format(new Date()));
+  const [adjustmentKind, setAdjustmentKind] = useState<PunchKind>("entrada");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
   const historyStart = useMemo(
     () => new Date(new Date(dayRange.start).getTime() - 29 * 24 * 60 * 60 * 1000).toISOString(),
     [dayRange.start]
@@ -297,6 +376,40 @@ export default function TimeClock() {
       return result.data === true;
     },
     enabled: !!user && !!organizationId && !isLegacy,
+  });
+
+  const myAdjustmentsQuery = useQuery({
+    queryKey: ["time-clock-my-adjustments", organizationId, user?.id],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockAdjustmentRequest[]>("time_clock_adjustment_requests")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .eq("user_id", user!.id)
+        .order("created_at", { ascending: false });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: !!user && !!organizationId && !isLegacy,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+
+  const pendingAdjustmentsQuery = useQuery({
+    queryKey: ["time-clock-pending-adjustments", organizationId],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockAdjustmentRequest[]>("time_clock_adjustment_requests")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .eq("status", "pending")
+        .order("created_at", { ascending: true });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: teamPermissionQuery.data === true && !!organizationId,
+    refetchInterval: 30_000,
+    retry: false,
   });
 
   const teamMembersQuery = useQuery({
@@ -356,6 +469,8 @@ export default function TimeClock() {
     () => summarizeHistory(historyQuery.data ?? [], todayKey),
     [historyQuery.data, todayKey]
   );
+
+  const personalBalance = useMemo(() => summarizeBalance(historyDays), [historyDays]);
 
   const teamPunchesQuery = useQuery({
     queryKey: [
@@ -417,13 +532,76 @@ export default function TimeClock() {
   const teamTotals = useMemo(() =>
     visibleTeamMembers.map((member) => {
       const days = teamHistoryDays.filter((item) => item.member.user_id === member.user_id);
+      const balance = summarizeBalance(days.map((item) => item.day));
       return {
         member,
         days: days.length,
         totalSeconds: days.reduce((total, item) => total + item.day.totalSeconds, 0),
+        extras: balance.extras,
+        negativas: balance.negativas,
+        saldo: balance.saldo,
       };
     }),
   [teamHistoryDays, visibleTeamMembers]);
+
+  const reportTotals = useMemo(
+    () => teamTotals.filter((total) => total.days > 0),
+    [teamTotals],
+  );
+
+  const handleDownloadPdf = () => {
+    if (!teamPeriodValid || teamPunchesQuery.isLoading) {
+      toast.error("Aguarde o carregamento de um período válido.");
+      return;
+    }
+    if (teamPunchesQuery.isError) {
+      toast.error("Não foi possível carregar os registros para gerar o relatório.");
+      return;
+    }
+
+    const members: TimeClockPdfMember[] = reportTotals.map((total) => {
+      const days = teamHistoryDays
+        .filter((item) => item.member.user_id === total.member.user_id)
+        .map(({ day }) => {
+          const balance = dayBalanceSeconds(day);
+          return {
+            date: formatHistoryDate(day.dateKey),
+            entrada: day.punches.entrada ? formatPunchTime(day.punches.entrada.punched_at) : "—",
+            saidaAlmoco: day.punches.saida_almoco ? formatPunchTime(day.punches.saida_almoco.punched_at) : "—",
+            voltaAlmoco: day.punches.volta_almoco ? formatPunchTime(day.punches.volta_almoco.punched_at) : "—",
+            saida: day.punches.saida ? formatPunchTime(day.punches.saida.punched_at) : "—",
+            total: day.totalSeconds > 0 ? formatWorkedDuration(day.totalSeconds) : "—",
+            saldo: balance === null ? "—" : formatBalance(balance),
+          };
+        })
+        .reverse();
+      return {
+        name: total.member.display_name,
+        role: total.member.job_title ?? "",
+        diasRegistrados: total.days,
+        totalTrabalhado: total.totalSeconds > 0 ? formatWorkedDuration(total.totalSeconds) : "0h 00min",
+        extras: total.extras > 0 ? formatBalance(total.extras) : "0h 00min",
+        negativas: total.negativas > 0 ? formatBalance(-total.negativas) : "0h 00min",
+        saldo: formatBalance(total.saldo),
+        days,
+      };
+    });
+    if (members.length === 0) {
+      toast.error("Sem dados para gerar o relatório neste período.");
+      return;
+    }
+    try {
+      generateTimeClockReportPdf({
+        periodLabel: `${formatHistoryDate(periodStart)} a ${formatHistoryDate(periodEnd)}`,
+        generatedAt: new Date().toLocaleString("pt-BR"),
+        detailed: teamMemberFilter !== "all",
+        members,
+      });
+      toast.success("Relatório gerado.");
+    } catch {
+      toast.error("Não foi possível gerar o relatório em PDF.");
+    }
+  };
 
   const registerPunch = useMutation({
     mutationFn: async (kind: PunchKind) => {
@@ -456,6 +634,64 @@ export default function TimeClock() {
     },
   });
 
+  const requestAdjustment = useMutation({
+    mutationFn: async () => {
+      if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
+      if (adjustmentReason.trim().length < 5) {
+        throw new Error("Explique o motivo do ajuste com pelo menos 5 caracteres.");
+      }
+      const requestedAt = new Date(`${adjustmentDate}T${adjustmentTime}:00-03:00`);
+      if (Number.isNaN(requestedAt.getTime())) throw new Error("Data ou horário inválido.");
+      if (requestedAt.getTime() > Date.now() + 5 * 60 * 1000) {
+        throw new Error("Não é permitido solicitar um horário futuro.");
+      }
+
+      const result = await timeClockSupabase
+        .from<null>("time_clock_adjustment_requests")
+        .insert({
+          organization_id: organizationId,
+          user_id: user.id,
+          requested_punched_at: requestedAt.toISOString(),
+          kind: adjustmentKind,
+          reason: adjustmentReason.trim(),
+        });
+      if (result.error) throw result.error;
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["time-clock-my-adjustments", organizationId, user?.id] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-pending-adjustments", organizationId] }),
+      ]);
+      toast.success("Horário enviado para análise da ADM.");
+      setAdjustmentOpen(false);
+      setAdjustmentReason("");
+    },
+    onError: (error: QueryError) => toast.error(error.message || "Não foi possível enviar a solicitação."),
+  });
+
+  const reviewAdjustment = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: "approved" | "rejected" }) => {
+      if (!organizationId) throw new Error("Organização indisponível.");
+      const result = await timeClockSupabase
+        .from<null>("time_clock_adjustment_requests")
+        .update({ status })
+        .eq("id", id)
+        .eq("organization_id", organizationId)
+        .eq("status", "pending");
+      if (result.error) throw result.error;
+    },
+    onSuccess: async (_, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["time-clock-pending-adjustments", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-punches", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-history", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-team-history", organizationId] }),
+      ]);
+      toast.success(variables.status === "approved" ? "Ajuste aprovado e incluído no ponto." : "Ajuste rejeitado.");
+    },
+    onError: (error: QueryError) => toast.error(error.message || "Não foi possível analisar a solicitação."),
+  });
+
   const loading = organizationLoading || punchesQuery.isLoading;
 
   return (
@@ -465,6 +701,21 @@ export default function TimeClock() {
           title="Ponto"
           subtitle="Registre sua jornada e acompanhe os horários do dia."
           breadcrumb={[{ label: "Gestão da equipe" }, { label: "Ponto" }]}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAdjustmentDate(agencyDateKey());
+                setAdjustmentTime(timeFormatter.format(new Date()));
+                setAdjustmentKind("entrada");
+                setAdjustmentReason("");
+                setAdjustmentOpen(true);
+              }}
+              disabled={!organizationId || isLegacy}
+            >
+              <Plus className="mr-2 h-4 w-4" /> Adicionar horário
+            </Button>
+          }
         />
 
         <div className="mt-6 grid gap-4 sm:grid-cols-3">
@@ -604,6 +855,53 @@ export default function TimeClock() {
           )}
         </section>
 
+        <section className="mt-8">
+          <SectionHeader
+            title="Meus ajustes de horário"
+            count={myAdjustmentsQuery.data?.length ?? 0}
+            icon={Clock3}
+            action={<span className="text-xs text-muted-foreground">Acompanhamento das solicitações</span>}
+          />
+
+          {myAdjustmentsQuery.isLoading ? (
+            <Skeleton className="mt-3 h-28 rounded-2xl" />
+          ) : myAdjustmentsQuery.isError ? (
+            <div className="mt-3 rounded-2xl border border-warning/20 bg-warning/5 p-4 text-sm text-muted-foreground">
+              As solicitações ficarão disponíveis após a migration de ajustes do ponto ser aplicada.
+            </div>
+          ) : (myAdjustmentsQuery.data ?? []).length === 0 ? (
+            <div className="mt-3 rounded-2xl border border-dashed border-border/70 px-5 py-6 text-center text-sm text-muted-foreground">
+              Você ainda não solicitou nenhum ajuste de horário.
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {(myAdjustmentsQuery.data ?? []).slice(0, 6).map((request) => {
+                const status = ADJUSTMENT_STATUS[request.status];
+                const kindLabel = PUNCH_STEPS.find((step) => step.kind === request.kind)?.label ?? request.kind;
+                return (
+                  <article key={request.id} className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold">{kindLabel}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {formatHistoryDate(agencyDateKey(new Date(request.requested_punched_at)))} · {formatPunchTime(request.requested_punched_at)}
+                        </p>
+                      </div>
+                      <StatusBadge variant={status.variant} size="sm">{status.label}</StatusBadge>
+                    </div>
+                    <p className="mt-3 text-sm text-muted-foreground">{request.reason}</p>
+                    {request.review_note && (
+                      <p className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                        Retorno da análise: {request.review_note}
+                      </p>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
         <section className="mt-10">
           <SectionHeader
             title="Histórico"
@@ -611,6 +909,35 @@ export default function TimeClock() {
             icon={CalendarRange}
             action={<span className="text-xs text-muted-foreground">Últimos 30 dias</span>}
           />
+
+          {historyDays.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card px-3 py-1.5 text-xs">
+                <span className="text-muted-foreground">Extras</span>
+                <span className="font-semibold tabular-nums text-success">
+                  {personalBalance.extras > 0 ? formatBalance(personalBalance.extras) : "0h 00min"}
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card px-3 py-1.5 text-xs">
+                <span className="text-muted-foreground">Negativas</span>
+                <span className="font-semibold tabular-nums text-destructive">
+                  {personalBalance.negativas > 0 ? formatBalance(-personalBalance.negativas) : "0h 00min"}
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card px-3 py-1.5 text-xs">
+                <span className="text-muted-foreground">Banco de horas</span>
+                <span
+                  className={cn(
+                    "font-semibold tabular-nums",
+                    personalBalance.saldo > 0 && "text-success",
+                    personalBalance.saldo < 0 && "text-destructive",
+                  )}
+                >
+                  {formatBalance(personalBalance.saldo)}
+                </span>
+              </span>
+            </div>
+          )}
 
           {historyQuery.isLoading ? (
             <Skeleton className="mt-4 h-72 rounded-2xl" />
@@ -640,6 +967,7 @@ export default function TimeClock() {
                     <TableHead className="min-w-32 text-center">Volta almoço</TableHead>
                     <TableHead className="text-center">Saída</TableHead>
                     <TableHead className="min-w-28">Total</TableHead>
+                    <TableHead className="min-w-28">Saldo</TableHead>
                     <TableHead className="min-w-56">Situação</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -657,6 +985,24 @@ export default function TimeClock() {
                         {day.partial && day.totalSeconds > 0 && (
                           <span className="ml-1 text-[10px] text-muted-foreground">parcial</span>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        {(() => {
+                          const balance = dayBalanceSeconds(day);
+                          if (balance === null) return <span className="text-muted-foreground">—</span>;
+                          return (
+                            <span
+                              className={cn(
+                                "font-semibold tabular-nums",
+                                balance > 0 && "text-success",
+                                balance < 0 && "text-destructive",
+                                balance === 0 && "text-muted-foreground",
+                              )}
+                            >
+                              {formatBalance(balance)}
+                            </span>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
                         {day.alerts.length === 0 ? (
@@ -684,13 +1030,97 @@ export default function TimeClock() {
         </section>
 
         {teamPermissionQuery.data === true && (
-          <section className="mt-12 border-t border-border/70 pt-10">
+          <section id="ajustes-ponto" className="mt-12 scroll-mt-24 border-t border-border/70 pt-10">
             <SectionHeader
               title="Visão da equipe"
               count={teamHistoryDays.length}
               icon={BriefcaseBusiness}
-              action={<StatusBadge variant="info" size="sm">Acesso ADM/Head</StatusBadge>}
+              action={
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadPdf}
+                    disabled={
+                      !teamPeriodValid
+                      || teamMembersQuery.isLoading
+                      || teamPunchesQuery.isLoading
+                      || teamPunchesQuery.isError
+                      || reportTotals.length === 0
+                    }
+                  >
+                    <Download className="mr-2 h-4 w-4" /> Baixar carga horária
+                  </Button>
+                  <StatusBadge variant="info" size="sm">Acesso ADM/Head</StatusBadge>
+                </div>
+              }
             />
+
+            <div className="mt-4 rounded-2xl border border-warning/25 bg-warning/5 p-4 sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-semibold">Solicitações aguardando análise</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Confira o horário e a justificativa antes de aprovar.
+                  </p>
+                </div>
+                <StatusBadge variant="warning" size="sm">
+                  {pendingAdjustmentsQuery.data?.length ?? 0} pendente(s)
+                </StatusBadge>
+              </div>
+
+              {pendingAdjustmentsQuery.isLoading ? (
+                <Skeleton className="mt-4 h-24 rounded-xl" />
+              ) : pendingAdjustmentsQuery.isError ? (
+                <p className="mt-4 text-sm text-muted-foreground">
+                  A fila ficará disponível após a migration de ajustes do ponto ser aplicada.
+                </p>
+              ) : (pendingAdjustmentsQuery.data ?? []).length === 0 ? (
+                <p className="mt-4 rounded-xl bg-card/70 px-4 py-5 text-center text-sm text-muted-foreground">
+                  Nenhuma solicitação pendente.
+                </p>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {(pendingAdjustmentsQuery.data ?? []).map((request) => {
+                    const member = teamMembersQuery.data?.find((item) => item.user_id === request.user_id);
+                    const kindLabel = PUNCH_STEPS.find((step) => step.kind === request.kind)?.label ?? request.kind;
+                    const reviewing = reviewAdjustment.isPending && reviewAdjustment.variables?.id === request.id;
+                    return (
+                      <article key={request.id} className="rounded-xl border border-border/70 bg-card p-4">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="font-medium">{member?.display_name ?? "Colaborador"}</p>
+                            {member?.job_title && <p className="text-xs text-muted-foreground">{member.job_title}</p>}
+                            <p className="mt-2 text-sm font-medium">
+                              {kindLabel} · {formatHistoryDate(agencyDateKey(new Date(request.requested_punched_at)))} às {formatPunchTime(request.requested_punched_at)}
+                            </p>
+                            <p className="mt-1 text-sm text-muted-foreground">{request.reason}</p>
+                          </div>
+                          <div className="flex shrink-0 gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              disabled={reviewing}
+                              onClick={() => reviewAdjustment.mutate({ id: request.id, status: "rejected" })}
+                            >
+                              <XCircle className="mr-1.5 h-4 w-4" /> Rejeitar
+                            </Button>
+                            <Button
+                              size="sm"
+                              disabled={reviewing}
+                              onClick={() => reviewAdjustment.mutate({ id: request.id, status: "approved" })}
+                            >
+                              <CheckCircle2 className="mr-1.5 h-4 w-4" /> Aprovar
+                            </Button>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             <div className="mt-4 rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
               <div className="grid gap-4 md:grid-cols-[minmax(220px,1fr)_180px_180px]">
@@ -758,6 +1188,9 @@ export default function TimeClock() {
                         <TableHead>Colaborador</TableHead>
                         <TableHead className="text-center">Dias registrados</TableHead>
                         <TableHead className="text-right">Total trabalhado</TableHead>
+                        <TableHead className="text-right">Extras</TableHead>
+                        <TableHead className="text-right">Negativas</TableHead>
+                        <TableHead className="text-right">Banco de horas</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -772,6 +1205,22 @@ export default function TimeClock() {
                           <TableCell className="text-center tabular-nums">{total.days}</TableCell>
                           <TableCell className="text-right font-semibold tabular-nums">
                             {total.totalSeconds > 0 ? formatWorkedDuration(total.totalSeconds) : "0h 00min"}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-success">
+                            {total.extras > 0 ? formatBalance(total.extras) : "—"}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-destructive">
+                            {total.negativas > 0 ? formatBalance(-total.negativas) : "—"}
+                          </TableCell>
+                          <TableCell className="text-right font-semibold tabular-nums">
+                            <span
+                              className={cn(
+                                total.saldo > 0 && "text-success",
+                                total.saldo < 0 && "text-destructive",
+                              )}
+                            >
+                              {formatBalance(total.saldo)}
+                            </span>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -811,6 +1260,7 @@ export default function TimeClock() {
                         <TableHead className="min-w-32 text-center">Volta almoço</TableHead>
                         <TableHead className="text-center">Saída</TableHead>
                         <TableHead className="min-w-28">Total</TableHead>
+                        <TableHead className="min-w-28">Saldo</TableHead>
                         <TableHead className="min-w-56">Situação</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -832,6 +1282,24 @@ export default function TimeClock() {
                             {day.partial && day.totalSeconds > 0 && (
                               <span className="ml-1 text-[10px] text-muted-foreground">parcial</span>
                             )}
+                          </TableCell>
+                          <TableCell>
+                            {(() => {
+                              const balance = dayBalanceSeconds(day);
+                              if (balance === null) return <span className="text-muted-foreground">—</span>;
+                              return (
+                                <span
+                                  className={cn(
+                                    "font-semibold tabular-nums",
+                                    balance > 0 && "text-success",
+                                    balance < 0 && "text-destructive",
+                                    balance === 0 && "text-muted-foreground",
+                                  )}
+                                >
+                                  {formatBalance(balance)}
+                                </span>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell>
                             {day.alerts.length === 0 ? (
@@ -860,6 +1328,81 @@ export default function TimeClock() {
           </section>
         )}
       </main>
+
+      <Dialog open={adjustmentOpen} onOpenChange={(open) => !requestAdjustment.isPending && setAdjustmentOpen(open)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adicionar horário para análise</DialogTitle>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              requestAdjustment.mutate();
+            }}
+          >
+            <p className="text-sm text-muted-foreground">
+              O horário não entra diretamente no ponto. A ADM precisa analisar e aprovar a solicitação.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="adjustment-date">Data</Label>
+                <Input
+                  id="adjustment-date"
+                  type="date"
+                  value={adjustmentDate}
+                  max={agencyDateKey()}
+                  onChange={(event) => setAdjustmentDate(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="adjustment-time">Horário</Label>
+                <Input
+                  id="adjustment-time"
+                  type="time"
+                  value={adjustmentTime}
+                  onChange={(event) => setAdjustmentTime(event.target.value)}
+                  required
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Tipo de registro</Label>
+              <Select value={adjustmentKind} onValueChange={(value: PunchKind) => setAdjustmentKind(value)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PUNCH_STEPS.map((step) => (
+                    <SelectItem key={step.kind} value={step.kind}>{step.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="adjustment-reason">Justificativa</Label>
+              <Textarea
+                id="adjustment-reason"
+                value={adjustmentReason}
+                onChange={(event) => setAdjustmentReason(event.target.value)}
+                placeholder="Explique por que este horário precisa ser incluído"
+                rows={4}
+                minLength={5}
+                maxLength={1000}
+                required
+              />
+              <p className="text-right text-[11px] text-muted-foreground">{adjustmentReason.length}/1000</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setAdjustmentOpen(false)} disabled={requestAdjustment.isPending}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={requestAdjustment.isPending || adjustmentReason.trim().length < 5}>
+                {requestAdjustment.isPending ? "Enviando..." : "Enviar para análise"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
