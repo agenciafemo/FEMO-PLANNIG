@@ -164,6 +164,25 @@
   }
 }
 
+@keyframes nrt-clock-wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(-14deg); }
+  40% { transform: rotate(12deg); }
+  60% { transform: rotate(-8deg); }
+  80% { transform: rotate(5deg); }
+}
+
+.nrt-clock-attention {
+  animation: nrt-clock-wiggle 0.9s ease-in-out infinite;
+  transform-origin: 50% 30%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nrt-clock-attention {
+    animation: none;
+  }
+}
+
 @media print {
   body.script-lauda-printing {
     background: #ffffff !important;

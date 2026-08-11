@@ -5,6 +5,7 @@ import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "./AppSidebar";
+import { TimeClockReviewBell } from "@/components/time-clock/TimeClockReviewBell";
 
 // Sem barra lateral: o Dashboard é o hub de navegação (grade de módulos).
 // O topo mantém o essencial — logo (volta ao início), notificações e a conta.
@@ -24,6 +25,7 @@ export function AppLayout() {
         </Link>
 
         <div className="flex items-center gap-1.5">
+          <TimeClockReviewBell />
           <NotificationBell />
           <Popover>
             <PopoverTrigger asChild>
