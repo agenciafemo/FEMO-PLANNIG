@@ -21,6 +21,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ListPlus,
   Loader2,
   Plus,
   RotateCcw,
@@ -153,6 +154,15 @@ type CommemorativeDateDraft = {
   scope: "global" | "clients";
   clientIds: string[];
   color: string;
+};
+
+// Rascunho de tarefa criada a partir de uma data/evento do calendário.
+type TaskDraft = {
+  title: string;
+  dueDate: string;
+  assigneeId: string;
+  priority: string;
+  sourceLabel: string;
 };
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -341,6 +351,66 @@ async function createCommemorativeDate(input: {
   }
 }
 
+type Assignee = {
+  user_id: string;
+  display_name: string;
+  job_title?: string | null;
+};
+
+// Diretório de quem pode receber tarefa (RPC do módulo de Tarefas).
+async function getAssignees(organizationId: string): Promise<Assignee[]> {
+  const { data, error } = await (supabase.rpc as unknown as (
+    fn: string,
+    args: Record<string, unknown>,
+  ) => PromiseLike<{ data: Assignee[] | null; error: DatabaseError | null }>)(
+    "get_task_assignees",
+    { _organization_id: organizationId },
+  );
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Conjunto de user_ids que têm a função "Social Mídia" (tags de colaborador).
+async function getSocialMediaUserIds(organizationId: string): Promise<string[]> {
+  const tags = await calendarDb.from<{ id: string; name: string }>("team_function_tags")
+    .select("id, name")
+    .eq("organization_id", organizationId);
+  if (tags.error || !tags.data) return [];
+  const socialTagIds = new Set(
+    tags.data.filter((tag) => /social|m[ií]dia/i.test(tag.name)).map((tag) => tag.id),
+  );
+  if (socialTagIds.size === 0) return [];
+  const members = await calendarDb.from<{ user_id: string; tag_id: string }>("team_member_functions")
+    .select("user_id, tag_id")
+    .eq("organization_id", organizationId);
+  if (members.error || !members.data) return [];
+  return members.data.filter((row) => socialTagIds.has(row.tag_id)).map((row) => row.user_id);
+}
+
+// Cria uma tarefa no quadro a partir de uma data/evento do calendário.
+async function createTaskFromCalendar(input: {
+  organizationId: string;
+  clientId: string;
+  userId: string;
+  title: string;
+  dueDate: string;
+  assigneeId: string;
+  priority: string;
+}): Promise<void> {
+  const { error } = await calendarDb.from("tasks").insert({
+    organization_id: input.organizationId,
+    client_id: input.clientId,
+    title: input.title.trim(),
+    assignee_id: input.assigneeId,
+    due_date: input.dueDate,
+    priority: input.priority,
+    status: "todo",
+    tags: ["calendario"],
+    created_by: input.userId,
+  });
+  if (error) throw error;
+}
+
 async function getCalendarEvents(organizationId: string, clientId: string): Promise<CalendarItem[]> {
   const { data, error } = await calendarDb.from<EventRow>("calendar_events")
     .select("*")
@@ -460,6 +530,7 @@ export default function Calendario() {
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(new Date()));
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
   const [dateDraft, setDateDraft] = useState<CommemorativeDateDraft | null>(null);
+  const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [selectedByOrganization, setSelectedByOrganization] = usePersistedState<Record<string, string>>(
     "norteia-calendar-client-v1",
@@ -495,6 +566,18 @@ export default function Calendario() {
     queryKey: ["calendar-events", organizationId, selectedClientId],
     queryFn: () => getCalendarEvents(organizationId!, selectedClientId),
     enabled: !!organizationId && !!selectedClientId,
+  });
+
+  const assigneesQuery = useQuery({
+    queryKey: ["calendar-task-assignees", organizationId],
+    queryFn: () => getAssignees(organizationId!),
+    enabled: !!organizationId,
+  });
+
+  const socialMediaQuery = useQuery({
+    queryKey: ["calendar-social-media-users", organizationId],
+    queryFn: () => getSocialMediaUserIds(organizationId!),
+    enabled: !!organizationId,
   });
 
   const today = startOfDay(new Date());
@@ -609,6 +692,48 @@ export default function Calendario() {
       scope: selectedClientId ? "clients" : "global",
       clientIds: selectedClientId ? [selectedClientId] : [],
       color: CATEGORY_COLORS.aniversario,
+    });
+  };
+
+  const saveTask = useMutation({
+    mutationFn: async (draft: TaskDraft) => {
+      if (!organizationId || !selectedClientId || !user?.id) {
+        throw new Error("Organização, cliente ou usuário não identificado.");
+      }
+      if (!draft.assigneeId) throw new Error("Selecione o responsável (social mídia).");
+      if (!draft.title.trim()) throw new Error("Informe o título da tarefa.");
+      await createTaskFromCalendar({
+        organizationId,
+        clientId: selectedClientId,
+        userId: user.id,
+        title: draft.title,
+        dueDate: draft.dueDate,
+        assigneeId: draft.assigneeId,
+        priority: draft.priority,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Tarefa enviada para o quadro do responsável.");
+      setTaskDraft(null);
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  // Pré-seleciona o primeiro colaborador com função "Social Mídia".
+  const openTaskFromItem = (item: CalendarItem) => {
+    if (!selectedClientId) {
+      toast.error("Selecione um cliente primeiro.");
+      return;
+    }
+    const socialIds = socialMediaQuery.data ?? [];
+    const assignees = assigneesQuery.data ?? [];
+    const firstSocial = assignees.find((assignee) => socialIds.includes(assignee.user_id));
+    setTaskDraft({
+      title: `Post: ${item.title}`,
+      dueDate: format(item.date, "yyyy-MM-dd"),
+      assigneeId: firstSocial?.user_id ?? assignees[0]?.user_id ?? "",
+      priority: "medium",
+      sourceLabel: item.title,
     });
   };
 
@@ -913,18 +1038,31 @@ export default function Calendario() {
                     </>
                   );
 
-                  return item.kind === "event" ? (
-                    <button
+                  return (
+                    <div
                       key={item.id}
-                      type="button"
-                      onClick={() => openExistingEvent(item)}
-                      className="w-full rounded-xl border border-border/70 p-3 text-left transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                      className="group relative rounded-xl border border-border/70 p-3 transition-colors hover:bg-muted/45"
                     >
-                      {content}
-                    </button>
-                  ) : (
-                    <div key={item.id} className="rounded-xl border border-border/70 p-3">
-                      {content}
+                      {item.kind === "event" ? (
+                        <button
+                          type="button"
+                          onClick={() => openExistingEvent(item)}
+                          className="block w-full pr-7 text-left focus-visible:outline-none"
+                        >
+                          {content}
+                        </button>
+                      ) : (
+                        <div className="pr-7">{content}</div>
+                      )}
+                      <button
+                        type="button"
+                        title="Criar tarefa para o social mídia"
+                        aria-label="Criar tarefa para o social mídia"
+                        onClick={() => openTaskFromItem(item)}
+                        className="absolute right-2 top-2 rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                      >
+                        <ListPlus className="h-4 w-4" />
+                      </button>
                     </div>
                   );
                 })}
@@ -1253,6 +1391,91 @@ export default function Calendario() {
                 >
                   {saveCommemorativeDate.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Adicionar
+                </Button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!taskDraft}
+        onOpenChange={(open) => {
+          if (!open && !saveTask.isPending) setTaskDraft(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Criar tarefa para o social mídia</DialogTitle>
+          </DialogHeader>
+
+          {taskDraft && (
+            <form
+              className="space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                saveTask.mutate(taskDraft);
+              }}
+            >
+              <div className="space-y-1.5">
+                <Label htmlFor="calendar-task-title">Título da tarefa</Label>
+                <Input
+                  id="calendar-task-title"
+                  value={taskDraft.title}
+                  onChange={(event) => setTaskDraft({ ...taskDraft, title: event.target.value })}
+                  maxLength={160}
+                  autoFocus
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="calendar-task-assignee">Responsável</Label>
+                  <Select
+                    value={taskDraft.assigneeId}
+                    onValueChange={(assigneeId) => setTaskDraft({ ...taskDraft, assigneeId })}
+                  >
+                    <SelectTrigger id="calendar-task-assignee"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                    <SelectContent>
+                      {(assigneesQuery.data ?? []).map((assignee) => {
+                        const isSocial = (socialMediaQuery.data ?? []).includes(assignee.user_id);
+                        return (
+                          <SelectItem key={assignee.user_id} value={assignee.user_id}>
+                            {assignee.display_name}{isSocial ? " · Social Mídia" : ""}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="calendar-task-priority">Prioridade</Label>
+                  <Select
+                    value={taskDraft.priority}
+                    onValueChange={(priority) => setTaskDraft({ ...taskDraft, priority })}
+                  >
+                    <SelectTrigger id="calendar-task-priority"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Baixa</SelectItem>
+                      <SelectItem value="medium">Média</SelectItem>
+                      <SelectItem value="high">Alta</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground">
+                Prazo: {format(parseISO(taskDraft.dueDate), "dd/MM/yyyy")} · cliente atual · vai para a coluna “A fazer” do responsável.
+              </p>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="outline" onClick={() => setTaskDraft(null)} disabled={saveTask.isPending}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={saveTask.isPending || !taskDraft.title.trim() || !taskDraft.assigneeId}>
+                  {saveTask.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Criar tarefa
                 </Button>
               </div>
             </form>
