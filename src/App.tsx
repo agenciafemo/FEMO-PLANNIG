@@ -24,6 +24,7 @@ import Tasks from "./pages/Tasks";
 import TimeClock from "./pages/TimeClock";
 import TeamCollaborators from "./pages/TeamCollaborators";
 import Calendario from "./pages/Calendario";
+import ControlDashboard from "./pages/ControlDashboard";
 import ClientPublic from "./pages/ClientPublic";
 import CreateOrganization from "./pages/CreateOrganization";
 import SelectOrganization from "./pages/SelectOrganization";
@@ -148,6 +149,14 @@ const App = () => (
                 <Route path="/tasks" element={<Tasks />} />
                 <Route path="/ponto" element={<TimeClock />} />
                 <Route path="/calendario" element={<Calendario />} />
+                <Route
+                  path="/dashboard-controle"
+                  element={
+                    <RequireTeamManager>
+                      <ControlDashboard />
+                    </RequireTeamManager>
+                  }
+                />
                 <Route
                   path="/team/collaborators"
                   element={
