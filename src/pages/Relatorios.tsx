@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,8 +24,6 @@ import {
 import { generateReport, getMetaInsights, type ReportResult, type MetaInsights } from "@/lib/reportRpc";
 import { getClientMetaStatus } from "@/lib/metaRpc";
 import { usePersistedState } from "@/hooks/usePersistedState";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
 
 const chartConfig = {
   alcance: { label: "Alcance", color: "hsl(173 58% 39%)" },
@@ -78,7 +76,7 @@ export default function Relatorios() {
   const { data: clients } = useQuery({
     queryKey: ["report-clients", organizationId],
     queryFn: async () => {
-      let q = supabase.from("clients").select("id, name, logo_url") as any;
+      let q = supabase.from("clients").select("id, name, logo_url");
       if (!isLegacy) q = q.eq("organization_id", organizationId!);
       const { data, error } = await q.order("name");
       if (error) throw error;
@@ -151,37 +149,53 @@ export default function Relatorios() {
     }
   }, [reportQuery.error]);
 
-  // PDF: captura o conteúdo do relatório (reportRef) como imagem e monta um PDF
-  // A4, quebrando em páginas. Reflete o tema atual (deixe claro p/ PDF branco).
-  const reportRef = useRef<HTMLDivElement>(null);
+  // O PDF é construído com primitivas vetoriais do @react-pdf/renderer.
+  // Imagens remotas são convertidas antes da renderização; se a origem bloquear
+  // CORS, o documento usa o fallback visual sem interromper o download.
   const [pdfBusy, setPdfBusy] = useState(false);
   const exportPdf = async () => {
-    const el = reportRef.current;
-    if (!el) return;
+    if (!insights) return;
+    const selectedClient = (clients ?? []).find((client) => client.id === clientId);
+    if (!selectedClient) {
+      toast.error("Não foi possível identificar o cliente deste relatório.");
+      return;
+    }
+
     setPdfBusy(true);
     try {
-      const canvas = await html2canvas(el, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: getComputedStyle(document.body).backgroundColor || "#ffffff",
-      });
-      const img = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({ unit: "pt", format: "a4" });
-      const pageW = pdf.internal.pageSize.getWidth();
-      const pageH = pdf.internal.pageSize.getHeight();
-      const imgH = (canvas.height * pageW) / canvas.width;
-      let heightLeft = imgH;
-      let position = 0;
-      pdf.addImage(img, "PNG", 0, position, pageW, imgH);
-      heightLeft -= pageH;
-      while (heightLeft > 0) {
-        position -= pageH;
-        pdf.addPage();
-        pdf.addImage(img, "PNG", 0, position, pageW, imgH);
-        heightLeft -= pageH;
-      }
-      const nome = insights?.profile?.username || insights?.client || "cliente";
-      pdf.save(`relatorio-${nome}-${range.from}.pdf`);
+      const [{ pdf }, { ReportPdfDocument }, { prepareReportPdfAssets }] = await Promise.all([
+        import("@react-pdf/renderer"),
+        import("@/components/reports"),
+        import("@/lib/reportPrint"),
+      ]);
+      const prepared = await prepareReportPdfAssets(insights, selectedClient.logo_url);
+      const blob = await pdf(
+        <ReportPdfDocument
+          client={{ name: selectedClient.name, logoUrl: prepared.clientLogoUrl }}
+          period={{
+            from: range.from,
+            to: range.to,
+            compareFrom: range.cFrom,
+            compareTo: range.cTo,
+          }}
+          insights={prepared.insights}
+        />,
+      ).toBlob();
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const safeName = (insights.profile?.username || selectedClient.name || "cliente")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9_-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .toLowerCase();
+      link.href = href;
+      link.download = `relatorio-${safeName || "cliente"}-${range.from}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1_000);
+      toast.success("PDF vetorial gerado com sucesso.");
     } catch (e) {
       toast.error("Erro ao gerar PDF: " + (e as Error).message);
     } finally {
@@ -332,7 +346,7 @@ export default function Relatorios() {
         </div>
       )}
 
-      <div ref={reportRef} className="space-y-4">
+      <div className="space-y-4">
       {insights && (() => {
         const p = insights.profile ?? {};
         const mediaList = Array.isArray(insights.media) ? insights.media : [];
