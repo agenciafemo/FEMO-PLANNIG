@@ -8,8 +8,10 @@ import {
   Clock3,
   Coffee,
   Download,
+  FileText,
   LogIn,
   LogOut,
+  Paperclip,
   Plus,
   TimerReset,
   XCircle,
@@ -58,6 +60,33 @@ type TimeClockPunch = {
   note: string | null;
   created_at: string;
 };
+
+type AbsenceStatus = "pending" | "approved" | "rejected";
+type AbsenceKind = "atestado" | "folga" | "ferias" | "outro";
+
+type TimeClockAbsence = {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  start_date: string;
+  end_date: string;
+  kind: AbsenceKind;
+  reason: string | null;
+  file_path: string | null;
+  status: AbsenceStatus;
+  review_note: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+};
+
+const ABSENCE_KIND_LABEL: Record<AbsenceKind, string> = {
+  atestado: "Atestado",
+  folga: "Folga",
+  ferias: "Férias",
+  outro: "Outro",
+};
+
+const ATTACHMENTS_BUCKET = "time-clock-attachments";
 
 type TeamMember = {
   user_id: string;
@@ -315,7 +344,9 @@ function isCompleteDay(day: HistoryDay): boolean {
 // Saldo do dia em segundos (extra positivo / negativo). null = não entra no
 // banco de horas (dia incompleto/em andamento). Dia útil espera 8h; fim de
 // semana espera 0 (só gera extra, nunca negativa).
-function dayBalanceSeconds(day: HistoryDay): number | null {
+function dayBalanceSeconds(day: HistoryDay, abonoDates?: Set<string>): number | null {
+  // Dia coberto por atestado aprovado é abonado: não gera negativa nem extra.
+  if (abonoDates?.has(day.dateKey)) return null;
   if (!isCompleteDay(day)) return null;
   const expected = isBusinessDay(day.dateKey) ? EXPECTED_DAILY_SECONDS : 0;
   return day.totalSeconds - expected;
@@ -332,16 +363,41 @@ function formatBalance(totalSeconds: number): string {
 }
 
 // Agrega extras, negativas e saldo (banco de horas) de uma lista de dias.
-function summarizeBalance(days: HistoryDay[]): { extras: number; negativas: number; saldo: number } {
+function summarizeBalance(
+  days: HistoryDay[],
+  abonoDates?: Set<string>,
+): { extras: number; negativas: number; saldo: number } {
   let extras = 0;
   let negativas = 0;
   for (const day of days) {
-    const balance = dayBalanceSeconds(day);
+    const balance = dayBalanceSeconds(day, abonoDates);
     if (balance === null) continue;
     if (balance > 0) extras += balance;
     else if (balance < 0) negativas += -balance;
   }
   return { extras, negativas, saldo: extras - negativas };
+}
+
+// Expande um intervalo [start,end] em chaves de data (yyyy-MM-dd).
+function expandDateRange(startDate: string, endDate: string): string[] {
+  const out: string[] = [];
+  let cursor = new Date(`${startDate}T12:00:00-03:00`);
+  const end = new Date(`${endDate}T12:00:00-03:00`);
+  while (cursor.getTime() <= end.getTime()) {
+    out.push(agencyDateKey(cursor));
+    cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000);
+  }
+  return out;
+}
+
+// Conjunto de dias abonados (só atestados aprovados) de uma lista.
+function abonoDatesFrom(absences: TimeClockAbsence[]): Set<string> {
+  const set = new Set<string>();
+  for (const absence of absences) {
+    if (absence.status !== "approved") continue;
+    for (const dateKey of expandDateRange(absence.start_date, absence.end_date)) set.add(dateKey);
+  }
+  return set;
 }
 
 export default function TimeClock() {
@@ -358,6 +414,12 @@ export default function TimeClock() {
   const [adjustmentTime, setAdjustmentTime] = useState(() => timeFormatter.format(new Date()));
   const [adjustmentKind, setAdjustmentKind] = useState<PunchKind>("entrada");
   const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [absenceOpen, setAbsenceOpen] = useState(false);
+  const [absenceStart, setAbsenceStart] = useState(() => agencyDateKey());
+  const [absenceEnd, setAbsenceEnd] = useState(() => agencyDateKey());
+  const [absenceKind, setAbsenceKind] = useState<AbsenceKind>("atestado");
+  const [absenceReason, setAbsenceReason] = useState("");
+  const [absenceFile, setAbsenceFile] = useState<File | null>(null);
   const historyStart = useMemo(
     () => new Date(new Date(dayRange.start).getTime() - 29 * 24 * 60 * 60 * 1000).toISOString(),
     [dayRange.start]
@@ -404,6 +466,38 @@ export default function TimeClock() {
         .eq("organization_id", organizationId!)
         .eq("status", "pending")
         .order("created_at", { ascending: true });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: teamPermissionQuery.data === true && !!organizationId,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+
+  const myAbsencesQuery = useQuery({
+    queryKey: ["time-clock-my-absences", organizationId, user?.id],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockAbsence[]>("time_clock_absences")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .eq("user_id", user!.id)
+        .order("start_date", { ascending: false });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: !!user && !!organizationId && !isLegacy,
+    retry: false,
+  });
+
+  const teamAbsencesQuery = useQuery({
+    queryKey: ["time-clock-team-absences", organizationId],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockAbsence[]>("time_clock_absences")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .order("start_date", { ascending: false });
       if (result.error) throw result.error;
       return result.data ?? [];
     },
@@ -470,7 +564,14 @@ export default function TimeClock() {
     [historyQuery.data, todayKey]
   );
 
-  const personalBalance = useMemo(() => summarizeBalance(historyDays), [historyDays]);
+  const myAbonoDates = useMemo(
+    () => abonoDatesFrom(myAbsencesQuery.data ?? []),
+    [myAbsencesQuery.data],
+  );
+  const personalBalance = useMemo(
+    () => summarizeBalance(historyDays, myAbonoDates),
+    [historyDays, myAbonoDates],
+  );
 
   const teamPunchesQuery = useQuery({
     queryKey: [
@@ -529,10 +630,20 @@ export default function TimeClock() {
       });
   }, [teamPunchesQuery.data, todayKey, visibleTeamMembers]);
 
+  const teamAbonoByUser = useMemo(() => {
+    const byUser = new Map<string, TimeClockAbsence[]>();
+    (teamAbsencesQuery.data ?? []).forEach((absence) => {
+      byUser.set(absence.user_id, [...(byUser.get(absence.user_id) ?? []), absence]);
+    });
+    const map = new Map<string, Set<string>>();
+    byUser.forEach((list, userId) => map.set(userId, abonoDatesFrom(list)));
+    return map;
+  }, [teamAbsencesQuery.data]);
+
   const teamTotals = useMemo(() =>
     visibleTeamMembers.map((member) => {
       const days = teamHistoryDays.filter((item) => item.member.user_id === member.user_id);
-      const balance = summarizeBalance(days.map((item) => item.day));
+      const balance = summarizeBalance(days.map((item) => item.day), teamAbonoByUser.get(member.user_id));
       return {
         member,
         days: days.length,
@@ -542,7 +653,7 @@ export default function TimeClock() {
         saldo: balance.saldo,
       };
     }),
-  [teamHistoryDays, visibleTeamMembers]);
+  [teamHistoryDays, visibleTeamMembers, teamAbonoByUser]);
 
   const reportTotals = useMemo(
     () => teamTotals.filter((total) => total.days > 0),
@@ -692,6 +803,84 @@ export default function TimeClock() {
     onError: (error: QueryError) => toast.error(error.message || "Não foi possível analisar a solicitação."),
   });
 
+  const createAbsence = useMutation({
+    mutationFn: async () => {
+      if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
+      if (!absenceStart || !absenceEnd) throw new Error("Informe o período do atestado.");
+      if (absenceEnd < absenceStart) throw new Error("A data final não pode ser antes da inicial.");
+      if (absenceKind === "atestado" && !absenceFile) {
+        throw new Error("Anexe a foto ou PDF do atestado.");
+      }
+      let filePath: string | null = null;
+      if (absenceFile) {
+        if (absenceFile.size > 10 * 1024 * 1024) throw new Error("Arquivo muito grande (máximo 10MB).");
+        const ext = absenceFile.name.split(".").pop()?.toLowerCase() || "dat";
+        const path = `${organizationId}/${user.id}/${crypto.randomUUID()}.${ext}`;
+        const upload = await supabase.storage.from(ATTACHMENTS_BUCKET).upload(path, absenceFile);
+        if (upload.error) throw upload.error;
+        filePath = path;
+      }
+      const result = await timeClockSupabase
+        .from<null>("time_clock_absences")
+        .insert({
+          organization_id: organizationId,
+          user_id: user.id,
+          start_date: absenceStart,
+          end_date: absenceEnd,
+          kind: absenceKind,
+          reason: absenceReason.trim() || null,
+          file_path: filePath,
+          created_by: user.id,
+        });
+      if (result.error) throw result.error;
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["time-clock-my-absences", organizationId, user?.id] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-team-absences", organizationId] }),
+      ]);
+      toast.success("Atestado enviado para análise da ADM.");
+      setAbsenceOpen(false);
+      setAbsenceReason("");
+      setAbsenceFile(null);
+    },
+    onError: (error: QueryError) => toast.error(error.message || "Não foi possível enviar o atestado."),
+  });
+
+  const reviewAbsence = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: "approved" | "rejected" }) => {
+      if (!organizationId) throw new Error("Organização indisponível.");
+      const result = await timeClockSupabase
+        .from<null>("time_clock_absences")
+        .update({ status })
+        .eq("id", id)
+        .eq("organization_id", organizationId)
+        .eq("status", "pending");
+      if (result.error) throw result.error;
+    },
+    onSuccess: async (_, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["time-clock-team-absences", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-my-absences", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-history", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-team-history", organizationId] }),
+      ]);
+      toast.success(variables.status === "approved" ? "Atestado aprovado — dias abonados." : "Atestado rejeitado.");
+    },
+    onError: (error: QueryError) => toast.error(error.message || "Não foi possível analisar o atestado."),
+  });
+
+  const openAbsenceFile = async (filePath: string) => {
+    const { data, error } = await supabase.storage
+      .from(ATTACHMENTS_BUCKET)
+      .createSignedUrl(filePath, 60);
+    if (error || !data?.signedUrl) {
+      toast.error("Não foi possível abrir o arquivo.");
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener");
+  };
+
   const loading = organizationLoading || punchesQuery.isLoading;
 
   return (
@@ -702,19 +891,35 @@ export default function TimeClock() {
           subtitle="Registre sua jornada e acompanhe os horários do dia."
           breadcrumb={[{ label: "Gestão da equipe" }, { label: "Ponto" }]}
           actions={
-            <Button
-              variant="outline"
-              onClick={() => {
-                setAdjustmentDate(agencyDateKey());
-                setAdjustmentTime(timeFormatter.format(new Date()));
-                setAdjustmentKind("entrada");
-                setAdjustmentReason("");
-                setAdjustmentOpen(true);
-              }}
-              disabled={!organizationId || isLegacy}
-            >
-              <Plus className="mr-2 h-4 w-4" /> Adicionar horário
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setAdjustmentDate(agencyDateKey());
+                  setAdjustmentTime(timeFormatter.format(new Date()));
+                  setAdjustmentKind("entrada");
+                  setAdjustmentReason("");
+                  setAdjustmentOpen(true);
+                }}
+                disabled={!organizationId || isLegacy}
+              >
+                <Plus className="mr-2 h-4 w-4" /> Adicionar horário
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setAbsenceStart(agencyDateKey());
+                  setAbsenceEnd(agencyDateKey());
+                  setAbsenceKind("atestado");
+                  setAbsenceReason("");
+                  setAbsenceFile(null);
+                  setAbsenceOpen(true);
+                }}
+                disabled={!organizationId || isLegacy}
+              >
+                <FileText className="mr-2 h-4 w-4" /> Adicionar atestado
+              </Button>
+            </div>
           }
         />
 
@@ -894,6 +1099,60 @@ export default function TimeClock() {
                       <p className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
                         Retorno da análise: {request.review_note}
                       </p>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section className="mt-8">
+          <SectionHeader
+            title="Meus atestados"
+            count={myAbsencesQuery.data?.length ?? 0}
+            icon={Paperclip}
+            action={<span className="text-xs text-muted-foreground">Atestados e abonos</span>}
+          />
+
+          {myAbsencesQuery.isLoading ? (
+            <Skeleton className="mt-3 h-24 rounded-2xl" />
+          ) : (myAbsencesQuery.data ?? []).length === 0 ? (
+            <div className="mt-3 rounded-2xl border border-dashed border-border/70 px-5 py-6 text-center text-sm text-muted-foreground">
+              Você ainda não enviou nenhum atestado. Use “Adicionar atestado” no topo.
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {(myAbsencesQuery.data ?? []).slice(0, 6).map((absence) => {
+                const status = ADJUSTMENT_STATUS[absence.status];
+                return (
+                  <article key={absence.id} className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold">{ABSENCE_KIND_LABEL[absence.kind]}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {formatHistoryDate(absence.start_date)}
+                          {absence.end_date !== absence.start_date ? ` – ${formatHistoryDate(absence.end_date)}` : ""}
+                        </p>
+                      </div>
+                      <StatusBadge variant={status.variant} size="sm">{status.label}</StatusBadge>
+                    </div>
+                    {absence.reason && <p className="mt-3 text-sm text-muted-foreground">{absence.reason}</p>}
+                    {(absence.file_path || absence.review_note) && (
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        {absence.file_path && (
+                          <button
+                            type="button"
+                            onClick={() => openAbsenceFile(absence.file_path!)}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-brand hover:underline"
+                          >
+                            <Paperclip className="h-3.5 w-3.5" /> Ver arquivo
+                          </button>
+                        )}
+                        {absence.review_note && (
+                          <span className="text-xs text-muted-foreground">Retorno: {absence.review_note}</span>
+                        )}
+                      </div>
                     )}
                   </article>
                 );
@@ -1118,6 +1377,76 @@ export default function TimeClock() {
                       </article>
                     );
                   })}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6">
+              <SectionHeader
+                title="Atestados pendentes"
+                icon={Paperclip}
+                action={
+                  <StatusBadge variant="warning" size="sm">
+                    {(teamAbsencesQuery.data ?? []).filter((absence) => absence.status === "pending").length} pendente(s)
+                  </StatusBadge>
+                }
+              />
+              {teamAbsencesQuery.isLoading ? (
+                <Skeleton className="mt-4 h-24 rounded-2xl" />
+              ) : (teamAbsencesQuery.data ?? []).filter((absence) => absence.status === "pending").length === 0 ? (
+                <p className="mt-4 rounded-2xl border border-dashed border-border/70 px-5 py-6 text-center text-sm text-muted-foreground">
+                  Nenhum atestado aguardando análise.
+                </p>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {(teamAbsencesQuery.data ?? [])
+                    .filter((absence) => absence.status === "pending")
+                    .map((absence) => {
+                      const member = teamMembersQuery.data?.find((item) => item.user_id === absence.user_id);
+                      const reviewing = reviewAbsence.isPending && reviewAbsence.variables?.id === absence.id;
+                      return (
+                        <article key={absence.id} className="rounded-xl border border-border/70 bg-card p-4">
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
+                              <p className="font-medium">{member?.display_name ?? "Colaborador"}</p>
+                              {member?.job_title && <p className="text-xs text-muted-foreground">{member.job_title}</p>}
+                              <p className="mt-2 text-sm font-medium">
+                                {ABSENCE_KIND_LABEL[absence.kind]} · {formatHistoryDate(absence.start_date)}
+                                {absence.end_date !== absence.start_date ? ` – ${formatHistoryDate(absence.end_date)}` : ""}
+                              </p>
+                              {absence.reason && <p className="mt-1 text-sm text-muted-foreground">{absence.reason}</p>}
+                              {absence.file_path && (
+                                <button
+                                  type="button"
+                                  onClick={() => openAbsenceFile(absence.file_path!)}
+                                  className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-brand hover:underline"
+                                >
+                                  <Paperclip className="h-3.5 w-3.5" /> Ver atestado
+                                </button>
+                              )}
+                            </div>
+                            <div className="flex shrink-0 gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                disabled={reviewing}
+                                onClick={() => reviewAbsence.mutate({ id: absence.id, status: "rejected" })}
+                              >
+                                <XCircle className="mr-1.5 h-4 w-4" /> Rejeitar
+                              </Button>
+                              <Button
+                                size="sm"
+                                disabled={reviewing}
+                                onClick={() => reviewAbsence.mutate({ id: absence.id, status: "approved" })}
+                              >
+                                <CheckCircle2 className="mr-1.5 h-4 w-4" /> Aprovar
+                              </Button>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
                 </div>
               )}
             </div>
@@ -1398,6 +1727,93 @@ export default function TimeClock() {
               </Button>
               <Button type="submit" disabled={requestAdjustment.isPending || adjustmentReason.trim().length < 5}>
                 {requestAdjustment.isPending ? "Enviando..." : "Enviar para análise"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={absenceOpen} onOpenChange={(open) => !createAbsence.isPending && setAbsenceOpen(open)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adicionar atestado</DialogTitle>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              createAbsence.mutate();
+            }}
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="absence-start">Início</Label>
+                <Input
+                  id="absence-start"
+                  type="date"
+                  value={absenceStart}
+                  onChange={(event) => setAbsenceStart(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="absence-end">Fim</Label>
+                <Input
+                  id="absence-end"
+                  type="date"
+                  value={absenceEnd}
+                  onChange={(event) => setAbsenceEnd(event.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="absence-kind">Tipo</Label>
+              <Select value={absenceKind} onValueChange={(value: AbsenceKind) => setAbsenceKind(value)}>
+                <SelectTrigger id="absence-kind"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="atestado">Atestado</SelectItem>
+                  <SelectItem value="folga">Folga</SelectItem>
+                  <SelectItem value="ferias">Férias</SelectItem>
+                  <SelectItem value="outro">Outro</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="absence-file">
+                Arquivo (foto ou PDF){absenceKind === "atestado" ? " *" : ""}
+              </Label>
+              <Input
+                id="absence-file"
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={(event) => setAbsenceFile(event.target.files?.[0] ?? null)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Máximo 10MB. Só você e a ADM/Head conseguem ver o arquivo.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="absence-reason">Observação (opcional)</Label>
+              <Textarea
+                id="absence-reason"
+                value={absenceReason}
+                onChange={(event) => setAbsenceReason(event.target.value)}
+                rows={3}
+                maxLength={1000}
+                placeholder="Ex.: consulta médica pela manhã"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="outline" onClick={() => setAbsenceOpen(false)} disabled={createAbsence.isPending}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={createAbsence.isPending}>
+                {createAbsence.isPending ? "Enviando…" : "Enviar atestado"}
               </Button>
             </div>
           </form>
