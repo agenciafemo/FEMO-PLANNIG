@@ -945,7 +945,7 @@ export default function TimeClock() {
           />
         </div>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.8fr)]">
+        <div className="mt-6">
           <section className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm sm:p-7">
             <StatusBadge variant={currentStatus.variant}>{currentStatus.label}</StatusBadge>
             <h2 className="mt-5 text-2xl font-semibold tracking-tight text-foreground">
@@ -969,27 +969,27 @@ export default function TimeClock() {
                 Próximo horário de referência: {nextStep.reference}
               </p>
             )}
-          </section>
 
-          <section className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm sm:p-6">
-            <SectionHeader title="Jornada de referência" icon={BriefcaseBusiness} />
-            <div className="mt-5 space-y-3 text-sm">
-              <div className="flex items-center justify-between rounded-xl bg-muted/50 px-4 py-3">
-                <span className="text-muted-foreground">Manhã</span>
-                <span className="font-semibold tabular-nums">08:30–12:00</span>
-              </div>
-              <div className="flex items-center justify-between rounded-xl bg-muted/50 px-4 py-3">
-                <span className="text-muted-foreground">Intervalo</span>
-                <span className="font-semibold tabular-nums">12:00–13:00</span>
-              </div>
-              <div className="flex items-center justify-between rounded-xl bg-muted/50 px-4 py-3">
-                <span className="text-muted-foreground">Tarde</span>
-                <span className="font-semibold tabular-nums">13:00–17:30</span>
+            {/* Jornada de referência — compacta, abaixo do botão. */}
+            <div className="mt-6 border-t border-border/60 pt-4">
+              <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                <BriefcaseBusiness className="h-3.5 w-3.5" /> Jornada de referência
+              </p>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5">
+                  <span className="text-muted-foreground">Manhã</span>
+                  <span className="font-semibold tabular-nums">08:30–12:00</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5">
+                  <span className="text-muted-foreground">Intervalo</span>
+                  <span className="font-semibold tabular-nums">12:00–13:00</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5">
+                  <span className="text-muted-foreground">Tarde</span>
+                  <span className="font-semibold tabular-nums">13:00–17:30</span>
+                </span>
               </div>
             </div>
-            <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-              Estes horários são uma referência da jornada padrão. O registro exibirá sempre o horário real da batida.
-            </p>
           </section>
         </div>
 
