@@ -36,6 +36,23 @@ const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "").to
 const CLIENT_LIMIT_MESSAGE =
   "Limite de clientes atingido. Como o Norteia está em fase beta, novas equipes podem cadastrar até 5 clientes neste momento. Para liberar mais acessos, fale com a equipe responsável.";
 
+// "Tempo na agência" a partir de uma data (yyyy-MM-dd). Ex.: "1 ano e 3 meses".
+function agencyTenure(since?: string | null): string | null {
+  if (!since) return null;
+  const start = new Date(`${since}T12:00:00`);
+  if (Number.isNaN(start.getTime())) return null;
+  const now = new Date();
+  let months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  if (now.getDate() < start.getDate()) months -= 1;
+  if (months < 0) return "menos de 1 mês";
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  const parts: string[] = [];
+  if (years > 0) parts.push(`${years} ${years === 1 ? "ano" : "anos"}`);
+  if (rest > 0) parts.push(`${rest} ${rest === 1 ? "mês" : "meses"}`);
+  return parts.length ? parts.join(" e ") : "menos de 1 mês";
+}
+
 export default function Clients() {
   const { user } = useAuth();
   const { organizationId, isLegacy, clientLimit } = useOrganization();
@@ -56,6 +73,7 @@ export default function Clients() {
   const [deletingClient, setDeletingClient] = useState<any | null>(null);
   const [editName, setEditName] = useState("");
   const [editNotes, setEditNotes] = useState("");
+  const [editAgencySince, setEditAgencySince] = useState("");
   const [editAccentColor, setEditAccentColor] = useState("#F97316");
   const [editLogoFile, setEditLogoFile] = useState<File | null>(null);
   const [editLogoPreview, setEditLogoPreview] = useState<string | null>(null);
@@ -155,6 +173,7 @@ export default function Clients() {
         notes: editNotes,
         accent_color: editAccentColor,
         logo_url: logoUrl,
+        agency_since: editAgencySince || null,
       } as any).eq("id", editingClient.id);
       if (error) throw error;
     },
@@ -232,6 +251,7 @@ export default function Clients() {
     setEditingClient(client);
     setEditName(client.name);
     setEditNotes(client.notes || "");
+    setEditAgencySince(client.agency_since || "");
     setEditAccentColor(client.accent_color || "#F97316");
     setEditLogoFile(null);
     setEditLogoPreview(client.logo_url || null);
@@ -370,6 +390,11 @@ export default function Clients() {
                       </div>
                       <div>
                         <p className="font-bold leading-tight">{client.name}</p>
+                        {agencyTenure(client.agency_since) && (
+                          <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">
+                            Na agência há {agencyTenure(client.agency_since)}
+                          </p>
+                        )}
                         {client.notes && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{client.notes}</p>}
                       </div>
                     </div>
@@ -459,6 +484,13 @@ export default function Clients() {
             <div className="space-y-2">
               <Label>Nome</Label>
               <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Nome do cliente" required />
+            </div>
+            <div className="space-y-2">
+              <Label>Cliente desde</Label>
+              <Input type="date" value={editAgencySince} onChange={(e) => setEditAgencySince(e.target.value)} />
+              {editAgencySince && (
+                <p className="text-xs text-muted-foreground">Na agência há {agencyTenure(editAgencySince)}.</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Cor de destaque</Label>
