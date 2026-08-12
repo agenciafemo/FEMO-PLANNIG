@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { addDays, format, startOfWeek } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts";
 import {
   AlertTriangle, CalendarDays, CheckCircle2, Clock3, CircleDot,
-  Instagram, ListTodo, TimerOff, Users, UsersRound,
+  Instagram, ListTodo, Loader2, RefreshCw, Sparkles, TimerOff, Users, UsersRound,
 } from "lucide-react";
 import { EmptyState, MetricCard, PageHeader, SectionHeader } from "@/components/common";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -54,6 +54,8 @@ type CatalogRow = {
   color?: string | null; active?: boolean | null;
 };
 type Upcoming = { id: string; title: string; date: Date; color: string; detail: string };
+type DashboardAnalysisResponse = { analysis?: unknown };
+type GeneratedAnalysis = { text: string; contextKey: string };
 
 const STATUS: Record<Status, { label: string; color: string }> = {
   todo: { label: "A fazer", color: "bg-slate-400" },
@@ -172,6 +174,16 @@ function catalogDate(row: CatalogRow, year: number): Date | null {
 function LoadingValue() { return <span className="inline-block h-6 w-12 animate-pulse rounded bg-muted" aria-label="Carregando" />; }
 function Warning({ children }: { children: string }) {
   return <div className="flex items-center gap-2 rounded-lg border border-warning/25 bg-warning-soft px-3 py-2 text-small text-warning"><AlertTriangle className="h-4 w-4" />{children}</div>;
+}
+function AnalysisText({ text }: { text: string }) {
+  return <div className="space-y-2 text-small leading-6 text-foreground">{text.split(/\r?\n/).map((rawLine, index) => {
+    const line = rawLine.trim();
+    if (!line) return <div key={index} className="h-1" />;
+    if (line.startsWith("## ")) return <h3 key={index} className="pt-2 text-h3 first:pt-0">{line.slice(3)}</h3>;
+    if (/^[-*]\s+/.test(line)) return <div key={index} className="flex gap-2 pl-1"><span className="mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full bg-brand" /><p>{line.replace(/^[-*]\s+/, "")}</p></div>;
+    if (/^\d+[.)]\s+/.test(line)) return <div key={index} className="flex gap-2 pl-1"><span className="font-semibold text-brand">{line.match(/^\d+/)?.[0]}.</span><p>{line.replace(/^\d+[.)]\s+/, "")}</p></div>;
+    return <p key={index} className="text-muted-foreground">{line}</p>;
+  })}</div>;
 }
 const actionLink = (to: string, label: string) => <Link to={to} className="text-small font-medium text-brand hover:underline">{label}</Link>;
 
@@ -326,12 +338,114 @@ export default function ControlDashboard() {
   })).sort((a, b) => b.horas - a.horas), [capacity.data?.members, point.data?.workedSecondsByUser]);
   const noPointAccess = pointPermission.data === false;
   const pointValue = (value?: number) => noPointAccess ? "Sem acesso" : value ?? <LoadingValue />;
-  const anyError = tasks.isError || capacity.isError || pointPermission.isError || point.isError || clients.isError || calendar.isError;
+  const anyError = tasks.isError || capacity.isError || pointPermission.isError || point.isError || clients.isError || instagram.isError || calendar.isError;
+  const analysisContextKey = `${period}:${activeFunction}`;
+  const [generatedAnalysis, setGeneratedAnalysis] = useState<GeneratedAnalysis | null>(null);
+  const analysisIsStale = generatedAnalysis !== null && generatedAnalysis.contextKey !== analysisContextKey;
+  const analysisReady = !anyError
+    && !tasks.isLoading
+    && !capacity.isLoading
+    && !pointPermission.isLoading
+    && !clients.isLoading
+    && !instagram.isLoading
+    && !calendar.isLoading
+    && (noPointAccess || !point.isLoading);
+  const analysisMutation = useMutation({
+    mutationFn: async () => {
+      const activeFunctionName = activeFunction === "all"
+        ? "Todas as funções"
+        : capacity.data?.functions.find((item) => item.id === activeFunction)?.name ?? "Função selecionada";
+      const metrics = {
+        periodo: {
+          tipo: period,
+          rotulo: periodLabel,
+          inicio: periodStart,
+          fim: today,
+        },
+        segmentacao: {
+          funcao: activeFunctionName,
+          observacao: "A segmentação por função afeta os indicadores e a carga de tarefas.",
+        },
+        tarefas: {
+          total: task.total,
+          abertas: task.open,
+          atrasadas: task.overdue,
+          concluidas_no_periodo: task.completed,
+          distribuicao_por_status: task.distribution,
+        },
+        carga_por_colaborador: workload.map((member) => ({
+          colaborador: member.display_name,
+          funcao_principal: member.job_title,
+          tarefas_abertas: member.openTasks,
+          sobrecarregado: member.openTasks >= 8,
+        })),
+        ponto: noPointAccess ? {
+          disponivel: false,
+          motivo: "Usuário sem permissão específica para visualizar o ponto da equipe.",
+        } : {
+          disponivel: true,
+          trabalhando_agora: point.data?.working ?? 0,
+          atrasos_na_entrada_hoje: point.data?.late ?? 0,
+          saldo_mensal_da_equipe_em_segundos: point.data?.balance ?? 0,
+          horas_trabalhadas_no_periodo: hoursChartData.map((item) => ({
+            colaborador: item.fullName,
+            horas: item.horas,
+          })),
+          ajustes_pendentes: null,
+          atestados_pendentes: null,
+          motivo_dados_pendentes_ausentes: "Esses indicadores não são calculados neste dashboard.",
+        },
+        calendario_proximos_7_dias: {
+          total: calendar.data?.length ?? 0,
+          itens: (calendar.data ?? []).map((item) => ({
+            titulo: item.title,
+            data: format(item.date, "yyyy-MM-dd"),
+            tipo: item.detail,
+          })),
+          clientes_sem_conteudo_proximo: null,
+          motivo_indicador_ausente: "O dashboard não calcula conteúdo futuro por cliente.",
+        },
+        clientes: {
+          total: clients.data?.length ?? 0,
+          instagram_conectado: instagram.data ?? 0,
+          instagram_nao_conectado: Math.max((clients.data?.length ?? 0) - (instagram.data ?? 0), 0),
+        },
+      };
+
+      const { data, error } = await supabase.functions.invoke<DashboardAnalysisResponse>("dashboard-analysis", {
+        body: { metrics },
+      });
+      if (error) throw error;
+      if (typeof data?.analysis !== "string" || !data.analysis.trim()) {
+        throw new Error("invalid_analysis_response");
+      }
+      return data.analysis.trim();
+    },
+    onSuccess: (text) => setGeneratedAnalysis({ text, contextKey: analysisContextKey }),
+  });
 
   return <div className="nrt-surface -mx-4 -mt-4 min-h-screen px-4 pb-14 pt-6 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-8">
     <div className="mx-auto max-w-[1280px] space-y-7">
       <PageHeader title="Dashboard de Controle" subtitle="Uma visão executiva da operação da agência, atualizada com os dados dos módulos." breadcrumb={[{ label: "Dashboard", to: "/dashboard" }, { label: "Controle" }]} actions={<div className="inline-flex rounded-lg border bg-surface p-1" aria-label="Período do painel"><Button type="button" size="sm" variant={period === "week" ? "default" : "ghost"} className="h-7 px-3" onClick={() => setPeriod("week")}>Esta semana</Button><Button type="button" size="sm" variant={period === "month" ? "default" : "ghost"} className="h-7 px-3" onClick={() => setPeriod("month")}>Este mês</Button></div>} />
       {anyError && <Warning>Parte dos indicadores não pôde ser atualizada. Os demais dados continuam disponíveis.</Warning>}
+
+      <section className="overflow-hidden rounded-xl border border-brand/20 bg-surface shadow-xs">
+        <div className="flex flex-col gap-4 border-b border-border/70 bg-brand-soft/45 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand text-primary-foreground"><Sparkles className="h-5 w-5" /></span>
+            <div><h2 className="text-h2">Análise da IA</h2><p className="mt-0.5 text-small text-muted-foreground">Resumo executivo, alertas e ações sugeridas para {periodLabel}.</p></div>
+          </div>
+          <Button type="button" className="shrink-0 gap-2" disabled={!analysisReady || analysisMutation.isPending} onClick={() => analysisMutation.mutate()}>
+            {analysisMutation.isPending ? <><Loader2 className="h-4 w-4 animate-spin" />Analisando...</> : generatedAnalysis ? <><RefreshCw className="h-4 w-4" />Atualizar</> : <><Sparkles className="h-4 w-4" />Gerar análise</>}
+          </Button>
+        </div>
+        <div className="p-5">
+          {analysisMutation.isPending ? <div className="space-y-3" aria-live="polite"><div className="h-4 w-3/4 animate-pulse rounded bg-muted" /><div className="h-4 w-full animate-pulse rounded bg-muted" /><div className="h-4 w-5/6 animate-pulse rounded bg-muted" /><p className="pt-2 text-caption text-muted-foreground">A IA está analisando somente os indicadores exibidos no painel.</p></div>
+            : analysisMutation.isError ? <div className="rounded-lg border border-destructive/25 bg-destructive/5 p-4"><p className="text-small font-semibold text-destructive">Não foi possível gerar a análise agora.</p><p className="mt-1 text-caption text-muted-foreground">Confira se a função foi publicada e tente novamente em alguns instantes.</p></div>
+              : generatedAnalysis ? <div className="space-y-4">{analysisIsStale && <Warning>O período ou a função mudou. Clique em Atualizar para analisar os indicadores atuais.</Warning>}<AnalysisText text={generatedAnalysis.text} /><p className="border-t pt-3 text-caption text-muted-foreground">Análise gerada por IA. Revise antes de tomar decisões ou compartilhar com a equipe.</p></div>
+                : <div className="flex flex-col items-center py-5 text-center"><Sparkles className="h-7 w-7 text-brand" /><p className="mt-3 text-small font-semibold">Transforme os indicadores em prioridades claras</p><p className="mt-1 max-w-xl text-caption text-muted-foreground">A análise usa tarefas, capacidade, ponto, agenda e clientes já carregados. Nenhum dado será inventado.</p>{!analysisReady && <p className="mt-3 text-caption text-warning">Aguardando todos os indicadores ficarem disponíveis.</p>}</div>}
+        </div>
+      </section>
 
       <section className="space-y-4">
         <SectionHeader title="Tarefas" icon={ListTodo} action={actionLink("/tasks", "Abrir quadro")} />
