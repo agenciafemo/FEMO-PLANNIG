@@ -26,6 +26,7 @@ import TeamCollaborators from "./pages/TeamCollaborators";
 import Calendario from "./pages/Calendario";
 import ControlDashboard from "./pages/ControlDashboard";
 import ClientPublic from "./pages/ClientPublic";
+import Privacidade from "./pages/Privacidade";
 import CreateOrganization from "./pages/CreateOrganization";
 import SelectOrganization from "./pages/SelectOrganization";
 import AcceptInvite from "./pages/AcceptInvite";
@@ -99,6 +100,8 @@ const App = () => (
               <Route path="/" element={<Index />} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/c/:token" element={<ClientPublic />} />
+              <Route path="/privacidade" element={<Privacidade />} />
+              <Route path="/exclusao-de-dados" element={<Privacidade />} />
               <Route
                 path="/organizations/new"
                 element={
