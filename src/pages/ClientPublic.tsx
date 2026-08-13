@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getPublicClient,
@@ -84,6 +85,14 @@ export default function ClientPublic() {
   const queryClient = useQueryClient();
   const [selectedPlanning, setSelectedPlanning] = useState<string | null>(null);
   const notifiedPlannings = useRef<Set<string>>(new Set());
+
+  // Se quem abre o portal é um usuário LOGADO no app (social mídia/equipe da
+  // agência conferindo algo), não conta como "cliente visualizou" — evita
+  // notificação falsa. Só visitante anônimo (o cliente de verdade) notifica.
+  const [isAgencyViewer, setIsAgencyViewer] = useState(false);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setIsAgencyViewer(!!data.session));
+  }, []);
   const [selectedPost, setSelectedPost] = useState<string | null>(null);
   const [selectedReport, setSelectedReport] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("plannings");
@@ -456,7 +465,7 @@ export default function ClientPublic() {
                             return (
                               <button key={p.id} onClick={() => {
                                 setSelectedPlanning(p.id);
-                                if (!notifiedPlannings.current.has(p.id)) {
+                                if (!isAgencyViewer && !notifiedPlannings.current.has(p.id)) {
                                   notifiedPlannings.current.add(p.id);
                                   // Best-effort: o wrapper trata erro internamente (console.warn),
                                   // sem promise rejeitada solta e sem toast de sucesso falso.

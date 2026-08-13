@@ -21,12 +21,14 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Download,
   ListPlus,
   Loader2,
   Plus,
   RotateCcw,
   Trash2,
 } from "lucide-react";
+import { jsPDF } from "jspdf";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -683,6 +685,65 @@ export default function Calendario() {
     onError: (error: Error) => toast.error(error.message),
   });
 
+  // Gera um PDF das datas comemorativas + eventos do mês visível, para a
+  // equipe usar no brainstorm daquele mês.
+  const downloadMonthPdf = () => {
+    const monthItems = items
+      .filter((item) => isSameMonth(item.date, visibleMonth))
+      .sort((a, b) => a.date.getTime() - b.date.getTime() || a.title.localeCompare(b.title, "pt-BR"));
+    if (monthItems.length === 0) {
+      toast.error("Nenhuma data ou evento neste mês.");
+      return;
+    }
+    const clientName = clientsQuery.data?.find((client) => client.id === selectedClientId)?.name ?? "";
+    const monthLabel = capitalize(format(visibleMonth, "MMMM 'de' yyyy", { locale: ptBR }));
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const margin = 48;
+    let y = margin;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text("Datas do mês", margin, y);
+    y += 22;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(110);
+    doc.text(`${monthLabel}${clientName ? ` · ${clientName}` : ""}`, margin, y);
+    y += 10;
+    doc.setDrawColor(220);
+    doc.line(margin, y, 547, y);
+    y += 22;
+    doc.setTextColor(0);
+    monthItems.forEach((item) => {
+      if (y > 790) {
+        doc.addPage();
+        y = margin;
+      }
+      const hex = item.color.replace("#", "");
+      doc.setFillColor(
+        parseInt(hex.slice(0, 2), 16) || 0,
+        parseInt(hex.slice(2, 4), 16) || 0,
+        parseInt(hex.slice(4, 6), 16) || 0,
+      );
+      doc.circle(margin + 3, y - 3, 3, "F");
+      const dateStr = capitalize(format(item.date, "EEE, dd/MM", { locale: ptBR }));
+      const tipo = item.kind === "event"
+        ? (item.eventType === "campanha" ? "Campanha" : item.eventType === "comemorativa" ? "Comemorativa" : "Evento")
+        : capitalize(item.category);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(dateStr, margin + 14, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(item.title, margin + 100, y);
+      doc.setTextColor(140);
+      doc.setFontSize(9);
+      doc.text(tipo, 470, y);
+      doc.setTextColor(0);
+      doc.setFontSize(10);
+      y += 20;
+    });
+    doc.save(`datas-${format(visibleMonth, "yyyy-MM")}.pdf`);
+  };
+
   const openNewDate = () => {
     setDateDraft({
       title: "",
@@ -799,6 +860,14 @@ export default function Calendario() {
               className="shrink-0"
             >
               <Plus className="mr-2 h-4 w-4" /> Adicionar data
+            </Button>
+            <Button
+              variant="outline"
+              onClick={downloadMonthPdf}
+              disabled={!clientsQuery.data?.length}
+              className="shrink-0"
+            >
+              <Download className="mr-2 h-4 w-4" /> Baixar PDF
             </Button>
           </div>
         }
