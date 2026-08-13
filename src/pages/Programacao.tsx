@@ -323,14 +323,14 @@ export default function Programacao() {
                 {!post.caption?.trim() && (
                   <p className="mb-1 flex items-center gap-1 text-[10px] text-amber-600"><AlertTriangle className="h-3 w-3" /> sem legenda</p>
                 )}
-                <div className="flex gap-1">
-                  <Button size="sm" className="h-7 flex-1 px-2 text-[11px]" disabled={!connectionId || publishNow.isPending}
+                <div className="flex flex-col gap-1">
+                  <Button size="sm" className="h-7 w-full min-w-0 justify-center px-2 text-[11px]" disabled={!connectionId || publishNow.isPending}
                     onClick={() => publishNow.mutate(post)}>
-                    {publishNow.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Send className="mr-1 h-3 w-3" /> Agora</>}
+                    {publishNow.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Send className="mr-1 h-3 w-3 shrink-0" /> Publicar agora</>}
                   </Button>
-                  <Button size="sm" variant="outline" className="h-7 flex-1 px-2 text-[11px]" disabled={!connectionId}
+                  <Button size="sm" variant="outline" className="h-7 w-full min-w-0 justify-center px-2 text-[11px]" disabled={!connectionId}
                     onClick={() => { setScheduling(post); setScheduleDate(format(new Date(), "yyyy-MM-dd")); setScheduleTime("12:00"); }}>
-                    <CalendarClock className="mr-1 h-3 w-3" /> Agendar
+                    <CalendarClock className="mr-1 h-3 w-3 shrink-0" /> Agendar
                   </Button>
                 </div>
               </div>
