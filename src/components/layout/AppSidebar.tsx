@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Users, LayoutGrid, UserPlus, LogOut, Shield, Bell, KeyRound, ListTodo, MessageSquareHeart, Clock3, CalendarDays } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -65,6 +65,17 @@ export function NotificationBell() {
   });
 
   const unreadCount = notifications?.filter((n: any) => !n.read).length ?? 0;
+
+  // Na primeira vez que a pessoa abre o app no dia, o painel de notificações
+  // abre sozinho (uma vez por dia) para ela conferir o que aconteceu.
+  useEffect(() => {
+    if (!notifications || notifications.length === 0) return;
+    const key = `norteia-notif-auto-open-${organizationId ?? "legacy"}`;
+    const today = new Date().toISOString().slice(0, 10);
+    if (localStorage.getItem(key) === today) return;
+    localStorage.setItem(key, today);
+    setOpen(true);
+  }, [notifications, organizationId]);
 
   const handleOpen = (v: boolean) => {
     setOpen(v);
