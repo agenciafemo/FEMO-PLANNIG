@@ -400,6 +400,8 @@ function abonoDatesFrom(absences: TimeClockAbsence[]): Set<string> {
   return set;
 }
 
+type HourBankBaseline = { baseline_seconds: number; effective_from: string };
+
 export default function TimeClock() {
   const { user } = useAuth();
   const { organizationId, isLegacy, loading: organizationLoading } = useOrganization();
@@ -572,6 +574,52 @@ export default function TimeClock() {
     () => summarizeBalance(historyDays, myAbonoDates),
     [historyDays, myAbonoDates],
   );
+
+  // Banco de horas ACUMULADO = saldo de abertura (migrado do app anterior) +
+  // saldos dos pontos a partir da data de corte. Resiliente: se a tabela ainda
+  // não existir neste ambiente, simplesmente não mostra o acumulado.
+  const bankBaselineQuery = useQuery({
+    queryKey: ["time-clock-bank-baseline", organizationId, user?.id],
+    queryFn: async () => {
+      try {
+        const result = await timeClockSupabase
+          .from<HourBankBaseline[]>("time_clock_hour_bank_baseline")
+          .select("baseline_seconds,effective_from")
+          .eq("organization_id", organizationId!)
+          .eq("user_id", user!.id);
+        if (result.error) return null;
+        return (result.data ?? [])[0] ?? null;
+      } catch {
+        return null;
+      }
+    },
+    enabled: !!user && !!organizationId && !isLegacy,
+    retry: false,
+  });
+  const bankEffectiveFrom = bankBaselineQuery.data?.effective_from ?? null;
+  const bankPunchesQuery = useQuery({
+    queryKey: ["time-clock-bank-punches", organizationId, user?.id, bankEffectiveFrom, todayKey],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockPunch[]>("time_clock_punches")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .eq("user_id", user!.id)
+        .gte("punched_at", agencyDayRange(bankEffectiveFrom!).start)
+        .lt("punched_at", dayRange.end)
+        .order("punched_at", { ascending: true });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: !!user && !!organizationId && !isLegacy && !!bankEffectiveFrom,
+  });
+  const accumulatedBank = useMemo(() => {
+    const baseline = bankBaselineQuery.data;
+    if (!baseline) return null;
+    const days = summarizeHistory(bankPunchesQuery.data ?? [], todayKey)
+      .filter((day) => day.dateKey >= baseline.effective_from);
+    return baseline.baseline_seconds + summarizeBalance(days, myAbonoDates).saldo;
+  }, [bankBaselineQuery.data, bankPunchesQuery.data, todayKey, myAbonoDates]);
 
   const teamPunchesQuery = useQuery({
     queryKey: [
@@ -937,11 +985,25 @@ export default function TimeClock() {
             tone={punches.length === 4 ? "success" : "brand"}
           />
           <MetricCard
-            label="Jornada padrão"
-            value="8 horas"
-            hint="08:30–12:00 / 13:00–17:30"
+            label="Banco de horas acumulado"
+            value={
+              accumulatedBank === null
+                ? bankBaselineQuery.isLoading
+                  ? <Skeleton className="h-7 w-20" />
+                  : "—"
+                : formatBalance(accumulatedBank)
+            }
+            hint={accumulatedBank === null ? "saldo ainda não definido" : "saldo atual + seus pontos"}
             icon={TimerReset}
-            tone="info"
+            tone={
+              accumulatedBank === null
+                ? "neutral"
+                : accumulatedBank > 0
+                  ? "success"
+                  : accumulatedBank < 0
+                    ? "warning"
+                    : "info"
+            }
           />
         </div>
 
