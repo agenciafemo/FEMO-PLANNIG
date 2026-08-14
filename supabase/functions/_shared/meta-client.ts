@@ -230,6 +230,34 @@ export async function getMetaUserId(
   return payload.id;
 }
 
+// Busca o access_token PERMANENTE de uma Página específica usando o token de
+// USUÁRIO (long-lived) de quem a administra. Tokens de Página derivados de um
+// user token de longa duração NÃO expiram — é o que mantém a publicação viva
+// além dos 60 dias do token de usuário. Uso exclusivamente server-side; este
+// valor nunca é retornado ao cliente.
+export async function getPageAccessToken(
+  pageId: string,
+  userToken: string,
+  config = metaConfig(),
+): Promise<string> {
+  if (!/^\d{1,32}$/.test(pageId)) throw new HttpError(400, "page_id_invalid");
+  const url = new URL(
+    `https://graph.facebook.com/${config.graphVersion}/${pageId}`,
+  );
+  url.searchParams.set("fields", "access_token");
+  url.searchParams.set(
+    "appsecret_proof",
+    await appSecretProof(userToken, config.appSecret),
+  );
+  const response = await fetchWithTimeout(url, {
+    method: "GET",
+    headers: bearerHeaders(userToken),
+  }, config.requestTimeoutMs);
+  const payload = await parseMetaResponse<{ access_token?: string }>(response);
+  if (!payload.access_token) throw new HttpError(502, "meta_page_token_missing");
+  return payload.access_token;
+}
+
 export async function discoverPages(
   token: string,
   config = metaConfig(),

@@ -23,12 +23,14 @@ import {
   directPageLookup,
   discoverPages,
   getGrantedPermissions,
+  getPageAccessToken,
   sanitizeDiscoveredPage,
 } from "../_shared/meta-client.ts";
 import { createAdminClient } from "../_shared/supabase.ts";
 import {
   finalizeConnection,
   getConnectionToken,
+  replaceConnectionToken,
 } from "../_shared/meta-vault.ts";
 import type { DiscoveredMetaPage } from "../_shared/meta-types.ts";
 
@@ -184,6 +186,31 @@ Deno.serve(async (request) => {
       instagramAccountType: selected.instagram?.account_type ?? null,
       requestId,
     });
+
+    // Etapa D — estabilidade: troca o token de USUÁRIO (expira em ~60 dias) pelo
+    // token da PÁGINA (permanente), para a publicação não morrer quando o user
+    // token expirar. Best-effort: se falhar, a conexão segue funcionando com o
+    // token de usuário (comportamento antigo) e não quebra a conexão.
+    try {
+      const pageToken = await getPageAccessToken(selected.id, token);
+      await replaceConnectionToken(admin, {
+        connectionId: connection.id,
+        actorUserId: actor.userId,
+        accessToken: pageToken,
+        tokenExpiresAt: null,
+        requestId,
+      });
+    } catch (error) {
+      safeLog("meta_connection_failure", {
+        function_name: "meta-connection-complete",
+        request_id: requestId,
+        step: "swap_page_token",
+        reason_code: error instanceof HttpError
+          ? error.reasonCode
+          : "page_token_swap_failed",
+      });
+    }
+
     return jsonResponse(
       {
         status: "connected",
