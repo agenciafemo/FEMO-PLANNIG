@@ -373,7 +373,7 @@ export default function Clients() {
           {[1, 2, 3, 4, 5, 6].map((i) => (<Card key={i} className="animate-pulse"><CardContent className="h-44" /></Card>))}
         </div>
       ) : clients && clients.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {clients.map((client) => {
             const accent = client.accent_color || "#F97316";
             return (

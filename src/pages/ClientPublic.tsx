@@ -19,6 +19,7 @@ import {
   type VideoScriptField,
 } from "@/lib/publicRpc";
 import { PUBLIC_AUDIO_ENABLED } from "@/lib/featureFlags";
+import { isAgencyDevice } from "@/lib/agencyDevice";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -89,9 +90,14 @@ export default function ClientPublic() {
   // Se quem abre o portal é um usuário LOGADO no app (social mídia/equipe da
   // agência conferindo algo), não conta como "cliente visualizou" — evita
   // notificação falsa. Só visitante anônimo (o cliente de verdade) notifica.
-  const [isAgencyViewer, setIsAgencyViewer] = useState(false);
+  // Agência = sessão ativa AGORA, ou navegador já marcado como "dispositivo da
+  // equipe" (alguém da agência já logou aqui antes). Cobre o social mídia que
+  // abre o link público sem estar logado no momento.
+  const [isAgencyViewer, setIsAgencyViewer] = useState(isAgencyDevice());
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setIsAgencyViewer(!!data.session));
+    supabase.auth.getSession().then(({ data }) =>
+      setIsAgencyViewer(!!data.session || isAgencyDevice())
+    );
   }, []);
   const [selectedPost, setSelectedPost] = useState<string | null>(null);
   const [selectedReport, setSelectedReport] = useState<string | null>(null);
