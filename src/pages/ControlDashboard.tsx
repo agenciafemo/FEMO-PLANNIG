@@ -337,8 +337,26 @@ export default function ControlDashboard() {
     horas: Number(((point.data?.workedSecondsByUser[member.user_id] ?? 0) / 3600).toFixed(1)),
   })).sort((a, b) => b.horas - a.horas), [capacity.data?.members, point.data?.workedSecondsByUser]);
   const noPointAccess = pointPermission.data === false;
-  const pointValue = (value?: number) => noPointAccess ? "Sem acesso" : value ?? <LoadingValue />;
-  const anyError = tasks.isError || capacity.isError || pointPermission.isError || point.isError || clients.isError || instagram.isError || calendar.isError;
+  const pointFailed = pointPermission.isError || point.isError;
+  const pointValue = (value?: number) =>
+    noPointAccess ? "Sem acesso" : pointFailed ? "Indisponível" : value ?? <LoadingValue />;
+  // Lista os indicadores que realmente falharam + a mensagem de erro, para o
+  // gestor (e nós) sabermos o motivo em vez de um aviso genérico.
+  const failedIndicators = ([
+    ["Tarefas", tasks],
+    ["Capacidade da equipe", capacity],
+    ["Permissão do ponto", pointPermission],
+    ["Ponto", point],
+    ["Clientes", clients],
+    ["Instagram", instagram],
+    ["Agenda", calendar],
+  ] as const)
+    .filter(([, query]) => query.isError)
+    .map(([label, query]) => {
+      const message = (query.error as { message?: string } | null)?.message ?? "erro desconhecido";
+      return `${label}: ${message.slice(0, 160)}`;
+    });
+  const anyError = failedIndicators.length > 0;
   const analysisContextKey = `${period}:${activeFunction}`;
   const [generatedAnalysis, setGeneratedAnalysis] = useState<GeneratedAnalysis | null>(null);
   const analysisIsStale = generatedAnalysis !== null && generatedAnalysis.contextKey !== analysisContextKey;
@@ -427,7 +445,19 @@ export default function ControlDashboard() {
   return <div className="nrt-surface -mx-4 -mt-4 min-h-screen px-4 pb-14 pt-6 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-8">
     <div className="mx-auto max-w-[1280px] space-y-7">
       <PageHeader title="Dashboard de Controle" subtitle="Uma visão executiva da operação da agência, atualizada com os dados dos módulos." breadcrumb={[{ label: "Dashboard", to: "/dashboard" }, { label: "Controle" }]} actions={<div className="inline-flex rounded-lg border bg-surface p-1" aria-label="Período do painel"><Button type="button" size="sm" variant={period === "week" ? "default" : "ghost"} className="h-7 px-3" onClick={() => setPeriod("week")}>Esta semana</Button><Button type="button" size="sm" variant={period === "month" ? "default" : "ghost"} className="h-7 px-3" onClick={() => setPeriod("month")}>Este mês</Button></div>} />
-      {anyError && <Warning>Parte dos indicadores não pôde ser atualizada. Os demais dados continuam disponíveis.</Warning>}
+      {anyError && (
+        <div className="rounded-lg border border-warning/25 bg-warning-soft px-3 py-2 text-small text-warning">
+          <div className="flex items-center gap-2 font-medium">
+            <AlertTriangle className="h-4 w-4" />
+            Parte dos indicadores não pôde ser atualizada. Os demais dados continuam disponíveis.
+          </div>
+          <ul className="mt-1 list-disc pl-6 text-caption opacity-90">
+            {failedIndicators.map((line, index) => (
+              <li key={index}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <section className="overflow-hidden rounded-xl border border-brand/20 bg-surface shadow-xs">
         <div className="flex flex-col gap-4 border-b border-border/70 bg-brand-soft/45 p-5 sm:flex-row sm:items-center sm:justify-between">
