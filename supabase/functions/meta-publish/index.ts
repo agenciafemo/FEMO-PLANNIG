@@ -121,6 +121,19 @@ Deno.serve(async (request) => {
           _error_code: code,
         });
         failed++;
+        // M3: queda de token/sessão do Facebook (erro 190/460) -> marca a
+        // conexão como reauth_required (alimenta o banner) e notifica a equipe
+        // uma vez. Best-effort: nunca deixa isso quebrar o worker.
+        if (/(^|_)190(_|$)|460/.test(code)) {
+          try {
+            await admin.rpc("meta_server_mark_connection_reauth", {
+              _connection_id: item.connection_id,
+              _reason_code: code.slice(0, 60),
+            });
+          } catch (_reauthError) {
+            // ignora: a falha da publicação já foi registrada acima
+          }
+        }
       }
     }
 
