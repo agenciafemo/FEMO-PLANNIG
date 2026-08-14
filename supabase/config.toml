@@ -11,6 +11,9 @@ verify_jwt = false
 [functions.meta-connection-complete]
 verify_jwt = true
 
+[functions.meta-token-backfill]
+verify_jwt = true
+
 [functions.meta-connection-health]
 verify_jwt = true
 
