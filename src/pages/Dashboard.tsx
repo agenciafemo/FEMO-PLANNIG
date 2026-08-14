@@ -18,6 +18,7 @@ import {
   Users2,
 } from "lucide-react";
 import { PROGRAMACAO_ENABLED, RELATORIOS_ENABLED } from "@/lib/featureFlags";
+import { MetaReconnectAlert } from "@/components/client/MetaReconnectAlert";
 
 // Saudação pelo horário — sem depender de nenhum dado do usuário.
 function greeting(): string {
@@ -85,6 +86,9 @@ export default function Dashboard() {
             Escolha um módulo para começar.
           </p>
         </div>
+
+        {/* Aviso de contas Meta que precisam de reconexão (só aparece se houver) */}
+        <MetaReconnectAlert />
 
         {/* Módulo em destaque */}
         <Link to="/plannings" className="group block">

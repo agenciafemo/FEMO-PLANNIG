@@ -400,6 +400,9 @@ function abonoDatesFrom(absences: TimeClockAbsence[]): Set<string> {
   return set;
 }
 
+type HourBankBaseline = { baseline_seconds: number; effective_from: string };
+type TeamHourBankBaseline = { user_id: string; baseline_seconds: number; effective_from: string };
+
 export default function TimeClock() {
   const { user } = useAuth();
   const { organizationId, isLegacy, loading: organizationLoading } = useOrganization();
@@ -573,6 +576,52 @@ export default function TimeClock() {
     [historyDays, myAbonoDates],
   );
 
+  // Banco de horas ACUMULADO = saldo de abertura (migrado do app anterior) +
+  // saldos dos pontos a partir da data de corte. Resiliente: se a tabela ainda
+  // não existir neste ambiente, simplesmente não mostra o acumulado.
+  const bankBaselineQuery = useQuery({
+    queryKey: ["time-clock-bank-baseline", organizationId, user?.id],
+    queryFn: async () => {
+      try {
+        const result = await timeClockSupabase
+          .from<HourBankBaseline[]>("time_clock_hour_bank_baseline")
+          .select("baseline_seconds,effective_from")
+          .eq("organization_id", organizationId!)
+          .eq("user_id", user!.id);
+        if (result.error) return null;
+        return (result.data ?? [])[0] ?? null;
+      } catch {
+        return null;
+      }
+    },
+    enabled: !!user && !!organizationId && !isLegacy,
+    retry: false,
+  });
+  const bankEffectiveFrom = bankBaselineQuery.data?.effective_from ?? null;
+  const bankPunchesQuery = useQuery({
+    queryKey: ["time-clock-bank-punches", organizationId, user?.id, bankEffectiveFrom, todayKey],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockPunch[]>("time_clock_punches")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .eq("user_id", user!.id)
+        .gte("punched_at", agencyDayRange(bankEffectiveFrom!).start)
+        .lt("punched_at", dayRange.end)
+        .order("punched_at", { ascending: true });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: !!user && !!organizationId && !isLegacy && !!bankEffectiveFrom,
+  });
+  const accumulatedBank = useMemo(() => {
+    const baseline = bankBaselineQuery.data;
+    if (!baseline) return null;
+    const days = summarizeHistory(bankPunchesQuery.data ?? [], todayKey)
+      .filter((day) => day.dateKey >= baseline.effective_from);
+    return baseline.baseline_seconds + summarizeBalance(days, myAbonoDates).saldo;
+  }, [bankBaselineQuery.data, bankPunchesQuery.data, todayKey, myAbonoDates]);
+
   const teamPunchesQuery = useQuery({
     queryKey: [
       "time-clock-team-history",
@@ -639,6 +688,68 @@ export default function TimeClock() {
     byUser.forEach((list, userId) => map.set(userId, abonoDatesFrom(list)));
     return map;
   }, [teamAbsencesQuery.data]);
+
+  // Saldos de abertura (banco acumulado) de toda a equipe. Best-effort: se a
+  // tabela não existir, o acúmulo simplesmente não aparece.
+  const teamBaselinesQuery = useQuery({
+    queryKey: ["time-clock-team-baselines", organizationId],
+    queryFn: async () => {
+      try {
+        const result = await timeClockSupabase
+          .from<TeamHourBankBaseline[]>("time_clock_hour_bank_baseline")
+          .select("user_id,baseline_seconds,effective_from")
+          .eq("organization_id", organizationId!);
+        if (result.error) return [];
+        return (result.data ?? []) as TeamHourBankBaseline[];
+      } catch {
+        return [];
+      }
+    },
+    enabled: teamPermissionQuery.data === true && !!organizationId,
+    retry: false,
+  });
+  const teamBankStart = useMemo(() => {
+    const rows = teamBaselinesQuery.data ?? [];
+    if (rows.length === 0) return null;
+    return rows.reduce((min, row) => (row.effective_from < min ? row.effective_from : min), rows[0].effective_from);
+  }, [teamBaselinesQuery.data]);
+  // Pontos de toda a equipe desde a data de corte mais antiga (independente do
+  // filtro de período), para acumular o banco sobre o baseline.
+  const teamBankPunchesQuery = useQuery({
+    queryKey: ["time-clock-team-bank-punches", organizationId, teamBankStart, todayKey],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockPunch[]>("time_clock_punches")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .gte("punched_at", agencyDayRange(teamBankStart!).start)
+        .lt("punched_at", dayRange.end)
+        .order("punched_at", { ascending: true });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: teamPermissionQuery.data === true && !!organizationId && !!teamBankStart,
+  });
+  const teamAccumulated = useMemo(() => {
+    const baselines = new Map((teamBaselinesQuery.data ?? []).map((row) => [row.user_id, row]));
+    const punchesByMember = new Map<string, TimeClockPunch[]>();
+    (teamBankPunchesQuery.data ?? []).forEach((punch) => {
+      punchesByMember.set(punch.user_id, [...(punchesByMember.get(punch.user_id) ?? []), punch]);
+    });
+    const map = new Map<string, number | null>();
+    visibleTeamMembers.forEach((member) => {
+      const baseline = baselines.get(member.user_id);
+      if (!baseline) {
+        map.set(member.user_id, null);
+        return;
+      }
+      const days = summarizeHistory(punchesByMember.get(member.user_id) ?? [], todayKey)
+        .filter((day) => day.dateKey >= baseline.effective_from);
+      const { saldo } = summarizeBalance(days, teamAbonoByUser.get(member.user_id));
+      map.set(member.user_id, baseline.baseline_seconds + saldo);
+    });
+    return map;
+  }, [teamBaselinesQuery.data, teamBankPunchesQuery.data, visibleTeamMembers, todayKey, teamAbonoByUser]);
 
   const teamTotals = useMemo(() =>
     visibleTeamMembers.map((member) => {
@@ -937,11 +1048,25 @@ export default function TimeClock() {
             tone={punches.length === 4 ? "success" : "brand"}
           />
           <MetricCard
-            label="Jornada padrão"
-            value="8 horas"
-            hint="08:30–12:00 / 13:00–17:30"
+            label="Banco de horas acumulado"
+            value={
+              accumulatedBank === null
+                ? bankBaselineQuery.isLoading
+                  ? <Skeleton className="h-7 w-20" />
+                  : "—"
+                : formatBalance(accumulatedBank)
+            }
+            hint={accumulatedBank === null ? "saldo ainda não definido" : "saldo atual + seus pontos"}
             icon={TimerReset}
-            tone="info"
+            tone={
+              accumulatedBank === null
+                ? "neutral"
+                : accumulatedBank > 0
+                  ? "success"
+                  : accumulatedBank < 0
+                    ? "warning"
+                    : "info"
+            }
           />
         </div>
 
@@ -1519,7 +1644,8 @@ export default function TimeClock() {
                         <TableHead className="text-right">Total trabalhado</TableHead>
                         <TableHead className="text-right">Extras</TableHead>
                         <TableHead className="text-right">Negativas</TableHead>
-                        <TableHead className="text-right">Banco de horas</TableHead>
+                        <TableHead className="text-right">Saldo do período</TableHead>
+                        <TableHead className="text-right">Banco acumulado</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1550,6 +1676,24 @@ export default function TimeClock() {
                             >
                               {formatBalance(total.saldo)}
                             </span>
+                          </TableCell>
+                          <TableCell className="text-right font-semibold tabular-nums">
+                            {(() => {
+                              const acc = teamAccumulated.get(total.member.user_id);
+                              if (acc === null || acc === undefined) {
+                                return <span className="text-muted-foreground">—</span>;
+                              }
+                              return (
+                                <span
+                                  className={cn(
+                                    acc > 0 && "text-success",
+                                    acc < 0 && "text-destructive",
+                                  )}
+                                >
+                                  {formatBalance(acc)}
+                                </span>
+                              );
+                            })()}
                           </TableCell>
                         </TableRow>
                       ))}
