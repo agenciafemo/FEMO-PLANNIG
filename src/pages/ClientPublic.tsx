@@ -19,7 +19,7 @@ import {
   type VideoScriptField,
 } from "@/lib/publicRpc";
 import { PUBLIC_AUDIO_ENABLED } from "@/lib/featureFlags";
-import { isAgencyDevice } from "@/lib/agencyDevice";
+import { isAgencyDevice, markAgencyDevice } from "@/lib/agencyDevice";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -94,10 +94,17 @@ export default function ClientPublic() {
   // equipe" (alguém da agência já logou aqui antes). Cobre o social mídia que
   // abre o link público sem estar logado no momento.
   const [isAgencyViewer, setIsAgencyViewer] = useState(isAgencyDevice());
+  // Só liberamos a notificação de "cliente abriu" DEPOIS de confirmar quem é o
+  // viewer (a checagem de sessão é assíncrona). Sem isso, um clique rápido antes
+  // da checagem resolver dispara a notificação falsa mesmo sendo a equipe.
+  // Se a marca do dispositivo já existe, já começamos "confirmados".
+  const [viewerChecked, setViewerChecked] = useState(isAgencyDevice());
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) =>
-      setIsAgencyViewer(!!data.session || isAgencyDevice())
-    );
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) markAgencyDevice();
+      setIsAgencyViewer(!!data.session || isAgencyDevice());
+      setViewerChecked(true);
+    });
   }, []);
   const [selectedPost, setSelectedPost] = useState<string | null>(null);
   const [selectedReport, setSelectedReport] = useState<string | null>(null);
@@ -471,7 +478,7 @@ export default function ClientPublic() {
                             return (
                               <button key={p.id} onClick={() => {
                                 setSelectedPlanning(p.id);
-                                if (!isAgencyViewer && !notifiedPlannings.current.has(p.id)) {
+                                if (viewerChecked && !isAgencyViewer && !notifiedPlannings.current.has(p.id)) {
                                   notifiedPlannings.current.add(p.id);
                                   // Best-effort: o wrapper trata erro internamente (console.warn),
                                   // sem promise rejeitada solta e sem toast de sucesso falso.
