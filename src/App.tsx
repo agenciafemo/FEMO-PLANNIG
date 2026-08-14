@@ -26,6 +26,7 @@ import TeamCollaborators from "./pages/TeamCollaborators";
 import Calendario from "./pages/Calendario";
 import ControlDashboard from "./pages/ControlDashboard";
 import ContentKnowledge from "./pages/ContentKnowledge";
+import ContentStudio from "./pages/ContentStudio";
 import ClientPublic from "./pages/ClientPublic";
 import Privacidade from "./pages/Privacidade";
 import CreateOrganization from "./pages/CreateOrganization";
@@ -154,6 +155,7 @@ const App = () => (
                 <Route path="/ponto" element={<TimeClock />} />
                 <Route path="/calendario" element={<Calendario />} />
                 <Route path="/conteudo/base" element={<ContentKnowledge />} />
+                <Route path="/conteudo" element={<ContentStudio />} />
                 <Route
                   path="/dashboard-controle"
                   element={
