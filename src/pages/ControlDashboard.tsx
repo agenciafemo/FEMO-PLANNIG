@@ -32,7 +32,12 @@ interface QueryBuilder<T> extends PromiseLike<QueryResult<T>> {
 interface UntypedDatabaseClient { from<T>(table: string): QueryBuilder<T>; }
 type RpcResult = { data: unknown; error: DatabaseError | null };
 const db = supabase as unknown as UntypedDatabaseClient;
-const callRpc = supabase.rpc as unknown as (name: string, args: Record<string, unknown>) => Promise<RpcResult>;
+// Chama supabase.rpc como MÉTODO (preserva o `this`). Extrair `supabase.rpc`
+// para uma variável solta perde o binding e quebra com
+// "Cannot read properties of undefined (reading 'rest')".
+const callRpc = (name: string, args: Record<string, unknown>): Promise<RpcResult> =>
+  (supabase.rpc as unknown as (n: string, a: Record<string, unknown>) => Promise<RpcResult>)
+    .call(supabase, name, args);
 const TIME_ZONE = "America/Sao_Paulo";
 const DAILY_SECONDS = 8 * 60 * 60;
 type Status = "todo" | "doing" | "review" | "done";

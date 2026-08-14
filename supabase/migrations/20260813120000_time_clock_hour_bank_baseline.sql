@@ -62,4 +62,9 @@ CREATE POLICY time_clock_hour_bank_baseline_write
   USING (public.can_view_team_time_clock(organization_id))
   WITH CHECK (public.can_view_team_time_clock(organization_id));
 
+-- Privilégios de tabela para a role da API. O RLS acima é que restringe as
+-- linhas; sem este GRANT, `authenticated` não consegue nem tocar a tabela
+-- (leituras caem em "permission denied" / retorno vazio no app).
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.time_clock_hour_bank_baseline TO authenticated;
+
 COMMIT;
