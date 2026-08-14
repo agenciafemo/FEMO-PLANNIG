@@ -120,6 +120,14 @@ function buildScheduleInput(post: ApprovedPost) {
 
 const WEEKDAYS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 
+// Sugestão de horário ao abrir o agendamento: próxima hora cheia a partir de
+// agora. Evita cair no passado quando já passou do meio-dia (default antigo).
+function defaultScheduleSlot(): { date: string; time: string } {
+  const d = new Date(Date.now() + 60 * 60 * 1000);
+  d.setMinutes(0, 0, 0);
+  return { date: format(d, "yyyy-MM-dd"), time: format(d, "HH:mm") };
+}
+
 function statusChip(status: string): { label: string; cls: string } {
   switch (status) {
     case "published":
@@ -235,6 +243,10 @@ export default function Programacao() {
       if (!connectionId || !scheduling) throw new Error("Cliente sem Instagram conectado");
       const when = new Date(`${scheduleDate}T${scheduleTime}:00`);
       if (isNaN(when.getTime())) throw new Error("Data/hora inválida");
+      // Reforço: não deixa agendar no passado (publicaria na hora ou falharia).
+      if (when.getTime() <= Date.now() + 60 * 1000) {
+        throw new Error("Escolha uma data e hora no futuro.");
+      }
       await createScheduledPost({
         clientId,
         connectionId,
@@ -329,7 +341,7 @@ export default function Programacao() {
                     {publishNow.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Send className="mr-1 h-3 w-3 shrink-0" /> Publicar agora</>}
                   </Button>
                   <Button size="sm" variant="outline" className="h-7 w-full min-w-0 justify-center px-2 text-[11px]" disabled={!connectionId}
-                    onClick={() => { setScheduling(post); setScheduleDate(format(new Date(), "yyyy-MM-dd")); setScheduleTime("12:00"); }}>
+                    onClick={() => { const slot = defaultScheduleSlot(); setScheduling(post); setScheduleDate(slot.date); setScheduleTime(slot.time); }}>
                     <CalendarClock className="mr-1 h-3 w-3 shrink-0" /> Agendar
                   </Button>
                 </div>
@@ -349,32 +361,38 @@ export default function Programacao() {
         {days.map((day) => {
           const items = itemsForDay(day);
           const isToday = isSameDay(day, new Date());
+          const isPast = format(day, "yyyy-MM-dd") < format(new Date(), "yyyy-MM-dd");
           return (
-            <div key={day.toISOString()} className={`min-h-28 rounded-lg border p-1.5 ${isToday ? "border-brand/40" : "border-border"}`}>
+            <div key={day.toISOString()} className={`min-h-28 rounded-lg border p-1.5 ${isToday ? "border-brand/40" : "border-border"} ${isPast ? "bg-muted/20 opacity-60" : ""}`}>
               <div className="flex flex-col gap-1.5">
                 {items.map((it) => {
                   const chip = statusChip(it.status);
                   return (
-                    <div key={it.id} className="rounded-md bg-muted/60 p-1.5">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${chip.cls}`}>{chip.label}</span>
-                        <span className="text-[9px] text-muted-foreground">{format(new Date(it.scheduled_for), "HH:mm")}</span>
-                      </div>
-                      <div className="mt-1 flex items-center gap-1">
-                        <button onClick={() => setReceipt(it)} className="flex items-center gap-0.5 text-[9px] text-muted-foreground hover:text-foreground" aria-label="Recibo">
-                          <FileText className="h-2.5 w-2.5" /> recibo
-                        </button>
-                        {it.status === "published" && it.permalink && (
-                          <a href={it.permalink} target="_blank" rel="noreferrer" className="flex items-center gap-0.5 text-[9px] text-info hover:underline">
-                            <ExternalLink className="h-2.5 w-2.5" /> ver
-                          </a>
-                        )}
-                        {it.status === "published" && <CheckCircle2 className="h-3 w-3 text-success" />}
-                        {(it.status === "queued" || it.status === "failed") && (
-                          <button onClick={() => cancel.mutate(it.id)} className="flex items-center gap-0.5 text-[9px] text-muted-foreground hover:text-destructive" aria-label="Cancelar">
-                            <X className="h-2.5 w-2.5" /> cancelar
+                    <div key={it.id} className="flex items-start gap-1.5 rounded-md bg-muted/60 p-1.5">
+                      {(it.image_url || it.cover_url) && (
+                        <img src={it.image_url ?? it.cover_url ?? undefined} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${chip.cls}`}>{chip.label}</span>
+                          <span className="text-[9px] text-muted-foreground">{format(new Date(it.scheduled_for), "HH:mm")}</span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <button onClick={() => setReceipt(it)} className="flex items-center gap-0.5 text-[9px] text-muted-foreground hover:text-foreground" aria-label="Recibo">
+                            <FileText className="h-2.5 w-2.5" /> recibo
                           </button>
-                        )}
+                          {it.status === "published" && it.permalink && (
+                            <a href={it.permalink} target="_blank" rel="noreferrer" className="flex items-center gap-0.5 text-[9px] text-info hover:underline">
+                              <ExternalLink className="h-2.5 w-2.5" /> ver
+                            </a>
+                          )}
+                          {it.status === "published" && <CheckCircle2 className="h-3 w-3 text-success" />}
+                          {(it.status === "queued" || it.status === "failed") && (
+                            <button onClick={() => cancel.mutate(it.id)} className="flex items-center gap-0.5 text-[9px] text-muted-foreground hover:text-destructive" aria-label="Cancelar">
+                              <X className="h-2.5 w-2.5" /> cancelar
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -466,7 +484,7 @@ export default function Programacao() {
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <Label className="text-xs">Data</Label>
-                <Input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} />
+                <Input type="date" min={format(new Date(), "yyyy-MM-dd")} value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Hora</Label>
