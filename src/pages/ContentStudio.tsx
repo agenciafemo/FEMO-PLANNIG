@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { GeneratedContentResult } from "@/components/content/GeneratedContentResult";
 import { EmptyState, PageHeader } from "@/components/common";
+import { ArtGenerator } from "@/components/content/ArtGenerator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -167,6 +168,8 @@ export default function ContentStudio() {
             {clientsQuery.isLoading || baseQuery.isLoading ? <Skeleton className="h-[520px] rounded-2xl" /> : result ? <GeneratedContentResult content={result.content} contextSummary={result.context_summary} onChange={(content) => setResult({ ...result, content })} onRegenerate={() => submit()} /> : <EmptyState icon={Sparkles} title="Seu rascunho aparecerá aqui" description="Selecione o cliente, escolha o formato e descreva o tema. A IA usará apenas a base aprovada no Norteia." className="min-h-[520px]" />}
           </div>
         </div>
+
+        {clientId && <ArtGenerator clientId={clientId} />}
       </div>
     </div>
   );

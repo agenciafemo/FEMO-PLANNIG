@@ -37,6 +37,11 @@ verify_jwt = true
 [functions.generate-content]
 verify_jwt = true
 
+# Gera ARTES (imagens) com IA a partir da direcao visual + referencias de
+# design do cliente. Chave do Gemini no servidor; le contexto via RLS.
+[functions.generate-image]
+verify_jwt = true
+
 # Puxa métricas do Instagram (Insights) para os relatórios estilo Reportei.
 # Exige login: valida acesso do usuário ao cliente e usa o token da conexão.
 [functions.meta-insights]
