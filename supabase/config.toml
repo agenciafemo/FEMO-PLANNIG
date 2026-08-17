@@ -32,6 +32,11 @@ verify_jwt = false
 [functions.generate-report]
 verify_jwt = true
 
+# Gera copies e roteiros usando exclusivamente a base estruturada do cliente.
+# A funcao valida o usuario e le o contexto via RLS; nao confia no frontend.
+[functions.generate-content]
+verify_jwt = true
+
 # Puxa métricas do Instagram (Insights) para os relatórios estilo Reportei.
 # Exige login: valida acesso do usuário ao cliente e usa o token da conexão.
 [functions.meta-insights]
