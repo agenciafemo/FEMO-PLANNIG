@@ -47,6 +47,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
+import { DesignReferencesTab } from "@/components/content/DesignReferencesTab";
 import {
   arrayToLines,
   ClaimStatus,
@@ -471,6 +472,7 @@ export default function ContentKnowledge() {
               <TabsTrigger value="knowledge">Conhecimento ({baseQuery.data?.items.length ?? 0})</TabsTrigger>
               <TabsTrigger value="claims">Claims ({baseQuery.data?.claims.length ?? 0})</TabsTrigger>
               <TabsTrigger value="rules">Regras ({baseQuery.data?.rules.length ?? 0})</TabsTrigger>
+              <TabsTrigger value="design_refs">Referências</TabsTrigger>
             </TabsList>
 
             <TabsContent value="identity">
@@ -534,6 +536,9 @@ export default function ContentKnowledge() {
                   <div className="grid gap-3 md:grid-cols-2">{baseQuery.data?.rules.map((item) => <RecordCard key={item.id} title={item.title} description={item.rule_text} badges={[SEVERITY_LABELS[item.severity], `v${item.version}`, item.client_id ? "Deste cliente" : "Regra geral", ...(item.channels ?? [])]} sourceUrl={item.source_url} canEdit={canEdit && (Boolean(item.client_id) || canManageCompliance)} onEdit={() => openRule(item)} onDelete={() => setDeleteTarget({ relation: "client_compliance_rules", id: item.id, label: item.title })} />)}</div>
                 )}
               </CollectionPanel>
+            </TabsContent>
+            <TabsContent value="design_refs">
+              <DesignReferencesTab organizationId={organizationId!} clientId={clientId} />
             </TabsContent>
           </Tabs>
         )}
