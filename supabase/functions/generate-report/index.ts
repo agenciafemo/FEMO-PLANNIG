@@ -11,10 +11,11 @@ import {
 } from "../_shared/http.ts";
 import { createUserClient, requiredEnv } from "../_shared/supabase.ts";
 
-// Modelo rápido e barato — suficiente para escrever a análise do relatório.
-const GEMINI_MODEL = "gemini-flash-latest";
-const GEMINI_URL =
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+// Modelos (com fallback): o Gemini às vezes devolve 503 "modelo com alta
+// demanda" — transitório. Tentamos o próximo modelo com espera crescente.
+const GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.0-flash", "gemini-1.5-flash"];
+const RETRYABLE = new Set([429, 500, 502, 503]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface ReportBody {
   client_id?: string;
@@ -26,25 +27,32 @@ interface ReportBody {
 }
 
 // Chama o Gemini com o prompt e devolve o texto. A chave vem SÓ do env
-// (secret GEMINI_API_KEY) — nunca do código nem do frontend.
+// (secret GEMINI_API_KEY). Tenta modelos em sequência com retry para o 503
+// "modelo com alta demanda" (transitório) — assim o relatório não falha à toa.
 async function askGemini(prompt: string): Promise<string> {
   const key = requiredEnv("GEMINI_API_KEY");
-  const res = await fetch(GEMINI_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-goog-api-key": key },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-    }),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new HttpError(502, "gemini_request_failed");
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < GEMINI_MODELS.length; attempt++) {
+    const model = GEMINI_MODELS[attempt];
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-goog-api-key": key },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      },
+    );
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (typeof text === "string" && text.trim()) return text.trim();
+    }
+    lastStatus = res.status;
+    console.error("gemini_error", model, res.status, JSON.stringify(json).slice(0, 500));
+    if (res.ok || !RETRYABLE.has(res.status)) break;
+    await sleep(600 * (attempt + 1));
   }
-  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (typeof text !== "string" || !text.trim()) {
-    throw new HttpError(502, "gemini_empty_response");
-  }
-  return text.trim();
+  throw new HttpError(502, `gemini_${lastStatus || "empty"}`);
 }
 
 Deno.serve(async (request) => {
@@ -172,19 +180,26 @@ Deno.serve(async (request) => {
     // geracao — o relatorio ainda e retornado normalmente).
     const clientOrg = (client as { organization_id?: string }).organization_id;
     if (clientOrg) {
-      // deno-lint-ignore no-explicit-any
-      await (supabase as any)
-        .from("client_report_history")
-        .insert({
-          organization_id: clientOrg,
-          client_id: clientId,
-          period_from: dados.periodo.de,
-          period_to: dados.periodo.ate,
-          analysis,
-          dados,
-          metricas,
-          created_by: userData.user.id,
-        });
+      try {
+        // deno-lint-ignore no-explicit-any
+        const { error: histError } = await (supabase as any)
+          .from("client_report_history")
+          .insert({
+            organization_id: clientOrg,
+            client_id: clientId,
+            period_from: dados.periodo.de,
+            period_to: dados.periodo.ate,
+            analysis,
+            dados,
+            metricas,
+            created_by: userData.user.id,
+          });
+        // Nao derruba a geracao: se a tabela nao existir ou o RLS barrar, o
+        // relatorio ainda e devolvido. So registra nos logs para diagnostico.
+        if (histError) console.error("report_history_insert_failed", histError.message);
+      } catch (e) {
+        console.error("report_history_insert_threw", (e as Error)?.message);
+      }
     }
 
     return jsonResponse({ analysis, dados, metricas }, 200, headers);
