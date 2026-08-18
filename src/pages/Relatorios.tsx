@@ -22,6 +22,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { generateReport, getMetaInsights, type ReportResult, type MetaInsights } from "@/lib/reportRpc";
+import { ReportHistory } from "@/components/reports/ReportHistory";
 import { getClientMetaStatus } from "@/lib/metaRpc";
 import { usePersistedState } from "@/hooks/usePersistedState";
 
@@ -144,10 +145,14 @@ export default function Relatorios() {
     }
   }, [insightsQuery.error]);
   useEffect(() => {
+    if (reportQuery.data) {
+      // Novo relatório foi gerado e salvo (server-side): atualiza o histórico.
+      queryClient.invalidateQueries({ queryKey: ["report-history", organizationId, clientId] });
+    }
     if (reportQuery.error) {
       toast.error("Erro ao gerar: " + (reportQuery.error as Error).message);
     }
-  }, [reportQuery.error]);
+  }, [reportQuery.error, reportQuery.data, organizationId, clientId, queryClient]);
 
   // O PDF é construído com primitivas vetoriais do @react-pdf/renderer.
   // Imagens remotas são convertidas antes da renderização; se a origem bloquear
@@ -272,6 +277,8 @@ export default function Relatorios() {
           >
             <ArrowLeft className="h-4 w-4" /> Voltar para clientes
           </button>
+
+          <ReportHistory organizationId={organizationId!} clientId={clientId} />
 
           <div className="rounded-xl border bg-card p-5">
         <p className="text-sm text-muted-foreground">
