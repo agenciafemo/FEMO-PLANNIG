@@ -7,6 +7,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "./AppSidebar";
 import { TimeClockReviewBell } from "@/components/time-clock/TimeClockReviewBell";
 import { FloatingTaskTimer } from "@/components/tasks/FloatingTaskTimer";
+import { NavbarTaskTimer } from "@/components/tasks/NavbarTaskTimer";
 
 // Sem barra lateral: o Dashboard é o hub de navegação (grade de módulos).
 // O topo mantém o essencial — logo (volta ao início), notificações e a conta.
@@ -26,6 +27,7 @@ export function AppLayout() {
         </Link>
 
         <div className="flex items-center gap-1.5">
+          <NavbarTaskTimer />
           <TimeClockReviewBell />
           <NotificationBell />
           <Popover>
