@@ -68,7 +68,9 @@ export default function Relatorios() {
   const { user } = useAuth();
   const { organizationId, isLegacy } = useOrganization();
   const queryClient = useQueryClient();
-  const [selected, setSelected] = usePersistedState<string>("report-client", "");
+  // NÃO persiste o cliente: a página deve abrir sempre na LISTA de clientes,
+  // não pular direto pro último relatório aberto.
+  const [selected, setSelected] = useState<string>("");
   const [period, setPeriod] = usePersistedState<string>("report-period", "30d");
   const [customFrom, setCustomFrom] = usePersistedState<string>("report-cfrom", "");
   const [customTo, setCustomTo] = usePersistedState<string>("report-cto", "");
