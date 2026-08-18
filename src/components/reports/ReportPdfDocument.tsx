@@ -9,6 +9,28 @@ import {
 } from "@react-pdf/renderer";
 
 import type { MediaItem, MetaInsights } from "@/lib/reportRpc";
+import type { AdsInsights } from "@/lib/adsRpc";
+
+// Nomes amigáveis dos resultados de Ads (subconjunto do usado na tela).
+const AD_ACTION_LABELS: Record<string, string> = {
+  "offsite_conversion.fb_pixel_purchase": "Compras (site)",
+  "onsite_conversion.purchase": "Compras",
+  "purchase": "Compras",
+  "offsite_conversion.fb_pixel_lead": "Leads (site)",
+  "onsite_conversion.lead_grouped": "Leads",
+  "lead": "Leads",
+  "onsite_conversion.messaging_conversation_started_7d": "Conversas iniciadas",
+  "onsite_conversion.total_messaging_connection": "Conexões por mensagem",
+  "onsite_conversion.messaging_first_reply": "Primeiras respostas",
+  "link_click": "Cliques no link",
+  "landing_page_view": "Visitas à página",
+  "video_view": "Views de vídeo (3s)",
+  "post_engagement": "Engajamento no post",
+};
+
+function formatMoney(value: number): string {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
 
 import {
   ReportPdfBarChart,
@@ -49,6 +71,7 @@ export type ReportPdfDocumentProps = {
   client: ReportPdfClient;
   period: ReportPdfPeriod;
   insights: MetaInsights;
+  ads?: AdsInsights | null;
   deltas?: ReportPdfDeltas;
   generatedAt?: Date;
   norteiaLogoUrl?: string;
@@ -402,6 +425,41 @@ const styles = StyleSheet.create({
     padding: 18,
     textAlign: "center",
   },
+  adResultRow: {
+    borderColor: BORDER,
+    borderRadius: 7,
+    borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  adResultLabel: {
+    color: INK,
+    fontSize: 9.5,
+  },
+  adResultValue: {
+    color: INK,
+    fontSize: 9.5,
+    fontWeight: 700,
+  },
+  adTableHead: {
+    borderBottomColor: BORDER,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    marginTop: 6,
+    paddingBottom: 5,
+  },
+  adRow: {
+    borderBottomColor: BORDER,
+    borderBottomWidth: 0.5,
+    flexDirection: "row",
+    paddingVertical: 6,
+  },
+  adColName: { color: INK, fontSize: 9, width: "46%" },
+  adColNum: { color: INK, fontSize: 9, textAlign: "right", width: "18%" },
+  adColHead: { color: MUTED, fontSize: 7.5, fontWeight: 700, textTransform: "uppercase" },
   finalPage: {
     alignItems: "center",
     backgroundColor: PAPER,
@@ -514,6 +572,7 @@ export function ReportPdfDocument({
   client,
   period,
   insights,
+  ads,
   deltas,
   generatedAt = new Date(),
   norteiaLogoUrl = "/brand/norteia/logo/NORTEIA.png",
@@ -572,6 +631,23 @@ export function ReportPdfDocument({
     },
   ];
   const logo = assetUrl(norteiaLogoUrl);
+
+  // Resultados de Ads com nome amigável (só os que têm rótulo definido).
+  const adResults = ads
+    ? Object.keys(AD_ACTION_LABELS)
+        .map((type) => {
+          const a = ads.totais.acoes.find((x) => x.action_type === type);
+          if (!a) return null;
+          const custo = ads.totais.custo_por_acao.find((c) => c.action_type === type);
+          return {
+            label: AD_ACTION_LABELS[type],
+            valor: Number(a.value),
+            custo: custo ? Number(custo.value) : null,
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => Boolean(x))
+    : [];
+  const adCampaigns = ads ? ads.campanhas.slice(0, 10) : [];
 
   return (
     <Document
@@ -716,6 +792,65 @@ export function ReportPdfDocument({
         </View>
         <PageFooter />
       </Page>
+
+      {ads && (
+        <Page size="A4" style={styles.page}>
+          <PageHeader client={client} period={period} />
+          <View style={styles.section}>
+            <Text style={styles.sectionEyebrow}>Tráfego pago</Text>
+            <Text style={styles.sectionTitle}>Desempenho dos anúncios (Meta Ads)</Text>
+            <Text style={styles.sectionDescription}>Investimento e resultados das campanhas no período selecionado.</Text>
+            <View style={styles.metricsGrid}>
+              <View style={styles.metricCard} wrap={false}>
+                <Text style={styles.metricLabel}>Investimento</Text>
+                <Text style={styles.metricValue}>{formatMoney(ads.totais.gasto)}</Text>
+              </View>
+              <MetricCard metric={{ label: "Impressões", value: ads.totais.impressoes }} />
+              <MetricCard metric={{ label: "Alcance", value: ads.totais.alcance }} />
+              <MetricCard metric={{ label: "Cliques", value: ads.totais.cliques }} />
+            </View>
+          </View>
+
+          {adResults.length > 0 && (
+            <View style={styles.section} wrap={false}>
+              <Text style={styles.chartTitle}>Resultados</Text>
+              {adResults.map((r) => (
+                <View key={r.label} style={styles.adResultRow}>
+                  <Text style={styles.adResultLabel}>{r.label}</Text>
+                  <Text style={styles.adResultValue}>
+                    {formatNumber(r.valor)}{r.custo != null ? `  ·  ${formatMoney(r.custo)}/un` : ""}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          <View style={styles.section}>
+            <Text style={styles.chartTitle}>Campanhas no período</Text>
+            {adCampaigns.length > 0 ? (
+              <>
+                <View style={styles.adTableHead}>
+                  <Text style={[styles.adColName, styles.adColHead]}>Campanha</Text>
+                  <Text style={[styles.adColNum, styles.adColHead]}>Gasto</Text>
+                  <Text style={[styles.adColNum, styles.adColHead]}>Alcance</Text>
+                  <Text style={[styles.adColNum, styles.adColHead]}>Cliques</Text>
+                </View>
+                {adCampaigns.map((c, i) => (
+                  <View key={i} style={styles.adRow} wrap={false}>
+                    <Text style={styles.adColName}>{c.nome ?? "—"}</Text>
+                    <Text style={styles.adColNum}>{formatMoney(c.gasto)}</Text>
+                    <Text style={styles.adColNum}>{formatNumber(c.alcance)}</Text>
+                    <Text style={styles.adColNum}>{formatNumber(c.cliques)}</Text>
+                  </View>
+                ))}
+              </>
+            ) : (
+              <Text style={styles.empty}>Nenhuma campanha com dados no período.</Text>
+            )}
+          </View>
+          <PageFooter />
+        </Page>
+      )}
 
       <Page size="A4" style={styles.finalPage}>
         <Image src={logo} style={styles.finalLogo} />
