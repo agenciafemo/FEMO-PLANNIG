@@ -145,7 +145,12 @@ export default function Clients() {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      // Invalida QUALQUER lista de clientes (report-clients, ads-clients,
+      // prog-clients, dashboard-clients-count...), não só ["clients"] — assim o
+      // cliente novo aparece na hora em todas as telas (staleTime global é 5min).
+      queryClient.invalidateQueries({
+        predicate: (q) => q.queryKey.some((k) => typeof k === "string" && /client/i.test(k)),
+      });
       setOpen(false);
       setName(""); setNotes(""); setAccentColor("#F97316");
       setLogoFile(null); setLogoPreview(null);
@@ -178,7 +183,12 @@ export default function Clients() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      // Invalida QUALQUER lista de clientes (report-clients, ads-clients,
+      // prog-clients, dashboard-clients-count...), não só ["clients"] — assim o
+      // cliente novo aparece na hora em todas as telas (staleTime global é 5min).
+      queryClient.invalidateQueries({
+        predicate: (q) => q.queryKey.some((k) => typeof k === "string" && /client/i.test(k)),
+      });
       setEditingClient(null);
       toast.success("Cliente atualizado!");
     },
@@ -191,7 +201,12 @@ export default function Clients() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      // Invalida QUALQUER lista de clientes (report-clients, ads-clients,
+      // prog-clients, dashboard-clients-count...), não só ["clients"] — assim o
+      // cliente novo aparece na hora em todas as telas (staleTime global é 5min).
+      queryClient.invalidateQueries({
+        predicate: (q) => q.queryKey.some((k) => typeof k === "string" && /client/i.test(k)),
+      });
       toast.success("Cliente removido");
       setDeletingClient(null);
     },
