@@ -24,6 +24,16 @@ import {
 import { generateReport, getMetaInsights, type ReportResult, type MetaInsights } from "@/lib/reportRpc";
 import { ReportHistory } from "@/components/reports/ReportHistory";
 import { AdsReport } from "@/components/reports/AdsReport";
+import { loadClientAdAccounts } from "@/lib/adsRpc";
+
+// Logo da Meta (o lucide-react não tem). Usa currentColor para herdar a cor.
+function MetaIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M6.915 4.03c-1.968 0-3.683 1.28-4.871 3.113C.704 9.208 0 11.883 0 14.449c0 .706.07 1.369.21 1.973a6.624 6.624 0 0 0 .265.86 5.297 5.297 0 0 0 .371.761c.696 1.159 1.818 1.927 3.593 1.927 1.497 0 2.633-.671 3.965-2.444.76-1.012 1.144-1.626 2.663-4.32l.756-1.339.186-.325c.061.1.121.196.183.3l2.152 3.595c.724 1.21 1.665 2.556 2.47 3.314 1.046.987 1.992 1.22 3.06 1.22 1.075 0 1.876-.355 2.455-.843a3.743 3.743 0 0 0 .81-.973c.542-.939.861-2.127.861-3.745 0-2.72-.681-5.357-2.084-7.45-1.282-1.912-2.957-2.93-4.716-2.93-1.047 0-2.088.467-3.053 1.308-.652.57-1.257 1.29-1.82 2.05-.69-.875-1.335-1.547-1.958-2.056-1.182-.966-2.315-1.303-3.454-1.303zm10.16 2.053c1.147 0 2.188.758 2.992 1.999 1.132 1.748 1.647 4.195 1.647 6.4 0 1.548-.368 2.9-1.839 2.9-.58 0-1.027-.23-1.664-1.004-.496-.601-1.343-1.878-2.832-4.358l-.617-1.028a44.908 44.908 0 0 0-1.255-1.98c.07-.109.141-.224.211-.327 1.12-1.667 2.118-2.602 3.157-2.602zm-10.201.553c1.263 0 2.734 1.246 3.886 3.061-.135.202-.27.412-.405.633-.58.907-1.18 1.897-1.851 3.05-.043.062-.11.204-.111.204-.63 1.106-1.081 1.897-1.503 2.516-.7 1.014-1.235 1.475-1.923 1.475-.639 0-1.037-.24-1.293-.66-.201-.343-.322-.784-.322-1.398 0-1.588.481-3.352 1.288-4.687.77-1.276 1.699-1.994 2.518-2.194z" />
+    </svg>
+  );
+}
 import { getClientMetaStatus } from "@/lib/metaRpc";
 import { usePersistedState } from "@/hooks/usePersistedState";
 
@@ -111,6 +121,15 @@ export default function Relatorios() {
   });
 
   const clientId = selected;
+  const currentClient = (clients ?? []).find((c) => c.id === clientId);
+
+  // Quais clientes têm conta de anúncios (Meta Ads) vinculada — para o ícone
+  // da Meta no card. Mesma key do AdsReport, então compartilha cache.
+  const { data: adMap } = useQuery({
+    queryKey: ["ads-mapping", organizationId],
+    queryFn: () => loadClientAdAccounts(organizationId!),
+    enabled: !!organizationId,
+  });
 
   // Métricas e análise ficam no CACHE do React Query (keyed por cliente), não
   // no estado do componente — assim sobrevivem a sair e voltar da página.
@@ -263,6 +282,7 @@ export default function Relatorios() {
                   <div className="mt-1.5 flex items-center gap-2">
                     <Instagram className={`h-4 w-4 ${chans.includes("instagram") ? "text-brand" : "text-muted-foreground/30"}`} />
                     <Facebook className={`h-4 w-4 ${chans.includes("facebook_page") ? "text-brand" : "text-muted-foreground/30"}`} />
+                    <MetaIcon className={`h-4 w-4 ${adMap?.[c.id] ? "text-brand" : "text-muted-foreground/30"}`} />
                     <span className="ml-1 text-xs text-muted-foreground">
                       {chans.length > 0 ? "Conectado" : "Sem conexão"}
                     </span>
@@ -280,6 +300,21 @@ export default function Relatorios() {
           >
             <ArrowLeft className="h-4 w-4" /> Voltar para clientes
           </button>
+
+          {/* Cabeçalho: identifica QUAL cliente está aberto. */}
+          <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4">
+            {currentClient?.logo_url ? (
+              <img src={currentClient.logo_url} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
+            ) : (
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-muted text-base font-semibold text-muted-foreground">
+                {(currentClient?.name ?? "?").slice(0, 2).toUpperCase()}
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">Relatório do cliente</p>
+              <h2 className="truncate text-lg font-bold">{currentClient?.name ?? "—"}</h2>
+            </div>
+          </div>
 
           <ReportHistory organizationId={organizationId!} clientId={clientId} />
 
