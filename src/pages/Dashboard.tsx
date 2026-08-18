@@ -74,19 +74,72 @@ export default function Dashboard() {
     enabled: !!user && (isLegacy || !!organizationId),
   });
 
+  // Nome de quem está logado, para a saudação. profiles é keyed por id.
+  const { data: profileName } = useQuery({
+    queryKey: ["dashboard-profile-name", user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", user!.id)
+        .maybeSingle();
+      return (data as { full_name: string | null } | null)?.full_name ?? null;
+    },
+    enabled: !!user,
+  });
+
+  const rawName =
+    profileName ||
+    ((user?.user_metadata?.full_name as string | undefined) ?? "") ||
+    (user?.email?.split("@")[0] ?? "");
+  const firstWord = rawName.trim().split(/\s+/)[0] ?? "";
+  const firstName = firstWord ? firstWord.charAt(0).toUpperCase() + firstWord.slice(1) : "";
+
+  // Frase do dia (IA). Cacheada por dia no navegador — chama a função no máximo
+  // 1x/dia. Silenciosa: se falhar, o Dashboard segue normal sem a frase.
+  const { data: dailyQuote } = useQuery({
+    queryKey: ["daily-quote"],
+    queryFn: async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      try {
+        const raw = localStorage.getItem("nrt-daily-quote");
+        if (raw) {
+          const parsed = JSON.parse(raw) as { date: string; quote: string };
+          if (parsed.date === today && parsed.quote) return parsed.quote;
+        }
+      } catch { /* ignora cache inválido */ }
+      const { data, error } = await supabase.functions.invoke("daily-quote");
+      if (error) throw error;
+      const quote = (data as { quote?: string })?.quote ?? "";
+      try {
+        localStorage.setItem("nrt-daily-quote", JSON.stringify({ date: today, quote }));
+      } catch { /* best-effort */ }
+      return quote;
+    },
+    enabled: !!user,
+    staleTime: Infinity,
+    retry: false,
+  });
+
   return (
     <div className="nrt-surface -mx-4 -mt-4 min-h-screen px-4 pb-16 pt-6 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-8">
       <div className="mx-auto max-w-[1100px] space-y-8">
         {/* Saudação */}
         <div>
           <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">Dashboard</p>
-          <h1 className="mt-1.5 text-3xl font-semibold tracking-tight">{greeting()}</h1>
+          <h1 className="mt-1.5 text-3xl font-semibold tracking-tight">{greeting()}{firstName ? `, ${firstName}` : ""}</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
             {clientsCount != null
               ? `${clientsCount} ${clientsCount === 1 ? "cliente ativo" : "clientes ativos"}. `
               : ""}
             Escolha um módulo para começar.
           </p>
+          {dailyQuote && (
+            <div className="mt-4 max-w-2xl rounded-xl border border-border bg-card/60 px-4 py-3">
+              <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-brand">Reflexão do dia</p>
+              <p className="mt-1 text-sm italic text-foreground/90">“{dailyQuote}”</p>
+            </div>
+          )}
         </div>
 
         {/* Aviso de contas Meta que precisam de reconexão (só aparece se houver) */}
