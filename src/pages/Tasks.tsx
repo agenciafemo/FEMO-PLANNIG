@@ -984,6 +984,8 @@ export default function Tasks() {
     onSuccess: (action) => {
       setNowMs(Date.now());
       queryClient.invalidateQueries({ queryKey: ["tasks-board", organizationId] });
+      // Atualiza o cronômetro flutuante global na hora.
+      queryClient.invalidateQueries({ queryKey: ["running-timer"] });
       toast.success(action === "started" ? "Timer iniciado" : "Tempo registrado");
     },
     onError: (error) => {
