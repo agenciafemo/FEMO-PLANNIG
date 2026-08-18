@@ -14,30 +14,49 @@ import { createUserClient, requiredEnv } from "../_shared/supabase.ts";
 // Frase do dia para o Dashboard — uma reflexão curta para a equipe da agência.
 // Gerada pelo Gemini (chave só no secret GEMINI_API_KEY). O frontend guarda a
 // frase por dia (localStorage), então isto roda no máximo 1x por dia por pessoa.
-const GEMINI_MODEL = "gemini-flash-latest";
-const GEMINI_URL =
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+//
+// O Gemini às vezes devolve 503 ("modelo com alta demanda") — é transitório.
+// Por isso tentamos com retry + fallback de modelo antes de desistir.
+const GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.0-flash", "gemini-1.5-flash"];
+const RETRYABLE = new Set([429, 500, 502, 503]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function callGemini(model: string, key: string, prompt: string) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-goog-api-key": key },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 1.1, maxOutputTokens: 120 },
+      }),
+    },
+  );
+  const json = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, json };
+}
 
 async function askGemini(prompt: string): Promise<string> {
   const key = requiredEnv("GEMINI_API_KEY");
-  const res = await fetch(GEMINI_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-goog-api-key": key },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 1.1, maxOutputTokens: 120 },
-    }),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    console.error("daily_quote_gemini_error", res.status, JSON.stringify(json).slice(0, 500));
-    throw new HttpError(502, `gemini_${res.status}`);
+  let lastStatus = 0;
+  // 3 tentativas; a cada tentativa troca de modelo (fallback) e espera mais.
+  for (let attempt = 0; attempt < GEMINI_MODELS.length; attempt++) {
+    const model = GEMINI_MODELS[attempt];
+    const res = await callGemini(model, key, prompt);
+    if (res.ok) {
+      const text = res.json?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (typeof text === "string" && text.trim()) {
+        return text.trim().replace(/^["“”']+|["“”']+$/g, "");
+      }
+    }
+    lastStatus = res.status;
+    console.error("daily_quote_gemini_error", model, res.status, JSON.stringify(res.json).slice(0, 300));
+    // Se não for um erro transitório, não adianta insistir.
+    if (res.ok || !RETRYABLE.has(res.status)) break;
+    await sleep(600 * (attempt + 1));
   }
-  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (typeof text !== "string" || !text.trim()) {
-    throw new HttpError(502, "gemini_empty_response");
-  }
-  return text.trim().replace(/^["“”']+|["“”']+$/g, "");
+  throw new HttpError(502, `gemini_${lastStatus || "empty"}`);
 }
 
 Deno.serve(async (request) => {
