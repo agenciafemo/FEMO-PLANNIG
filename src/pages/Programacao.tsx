@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -167,6 +168,10 @@ export default function Programacao() {
 
   const clientId = selected || clients?.[0]?.id || "";
 
+  // Posts "escondidos" da fila (ex.: já postados manualmente em meses anteriores).
+  // Guardado por navegador (localStorage); não apaga o post — só some da fila.
+  const [dismissed, setDismissed] = usePersistedState<string[]>("prog-dismissed", []);
+
   const { data: statusRows } = useQuery({
     queryKey: ["prog-conn", clientId],
     queryFn: () => getClientMetaStatus(clientId),
@@ -209,7 +214,13 @@ export default function Programacao() {
   });
 
   const scheduledIds = new Set((scheduled ?? []).map((s) => s.post_id).filter(Boolean) as string[]);
-  const backlog = (approved ?? []).filter((p) => !scheduledIds.has(p.id));
+  const dismissedSet = new Set(dismissed);
+  const backlog = (approved ?? []).filter((p) => !scheduledIds.has(p.id) && !dismissedSet.has(p.id));
+  // Quantos posts DESTE cliente estão ocultos (para oferecer "reexibir").
+  const clientApprovedIds = new Set((approved ?? []).map((p) => p.id));
+  const hiddenCount = (approved ?? []).filter(
+    (p) => !scheduledIds.has(p.id) && dismissedSet.has(p.id),
+  ).length;
 
   const weekStart = addWeeks(startOfWeek(new Date(), { weekStartsOn: 1 }), weekOffset);
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -320,15 +331,35 @@ export default function Programacao() {
 
       {/* Fila "A programar" */}
       <div className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-3">
-        <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-amber-600">
-          <Clock className="h-4 w-4" /> A programar — {backlog.length} {backlog.length === 1 ? "post aprovado" : "posts aprovados"}
-        </p>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="flex items-center gap-1.5 text-sm font-medium text-amber-600">
+            <Clock className="h-4 w-4" /> A programar — {backlog.length} {backlog.length === 1 ? "post aprovado" : "posts aprovados"}
+          </p>
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setDismissed(dismissed.filter((id) => !clientApprovedIds.has(id)))}
+              className="shrink-0 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              Reexibir {hiddenCount} oculto{hiddenCount === 1 ? "" : "s"}
+            </button>
+          )}
+        </div>
         {backlog.length === 0 ? (
           <p className="px-1 py-2 text-xs text-muted-foreground">Nenhum post aprovado com imagem para programar.</p>
         ) : (
           <div className="flex gap-2 overflow-x-auto pb-1">
             {backlog.map((post) => (
-              <div key={post.id} className="w-40 shrink-0 rounded-xl border border-border bg-card p-2">
+              <div key={post.id} className="relative w-40 shrink-0 rounded-xl border border-border bg-card p-2">
+                <button
+                  type="button"
+                  onClick={() => setDismissed([...dismissed, post.id])}
+                  title="Remover da fila (ex.: já postado). Não apaga o post."
+                  aria-label="Remover da fila"
+                  className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-background/80 text-muted-foreground shadow-sm backdrop-blur-sm hover:bg-background hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
                 <div className="mb-2 h-24 w-full overflow-hidden rounded-lg bg-muted">
                   {post.cover_image_url && <img src={post.cover_image_url} alt="" className="h-full w-full object-cover" />}
                 </div>
