@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/chart";
 import { generateReport, getMetaInsights, type ReportResult, type MetaInsights } from "@/lib/reportRpc";
 import { ReportHistory } from "@/components/reports/ReportHistory";
+import { AdsReport } from "@/components/reports/AdsReport";
 import { getClientMetaStatus } from "@/lib/metaRpc";
 import { usePersistedState } from "@/hooks/usePersistedState";
 
@@ -281,6 +282,8 @@ export default function Relatorios() {
           </button>
 
           <ReportHistory organizationId={organizationId!} clientId={clientId} />
+
+          <AdsReport clientId={clientId} />
 
           <div className="rounded-xl border bg-card p-5">
         <p className="text-sm text-muted-foreground">
