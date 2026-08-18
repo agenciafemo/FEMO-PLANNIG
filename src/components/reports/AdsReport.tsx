@@ -69,7 +69,14 @@ function prettyAction(type: string): string {
 }
 
 // Seção de Tráfego Pago (Meta Ads) para dentro do relatório de um cliente.
-export function AdsReport({ clientId }: { clientId: string }) {
+// onReport: avisa o pai (Relatórios) do último resultado, para incluir no PDF.
+export function AdsReport({
+  clientId,
+  onReport,
+}: {
+  clientId: string;
+  onReport?: (data: AdsInsights | null) => void;
+}) {
   const { user } = useAuth();
   const { organizationId, role } = useOrganization();
   const queryClient = useQueryClient();
@@ -142,6 +149,7 @@ export function AdsReport({ clientId }: { clientId: string }) {
         ? await getAdsInsights({ clientId, datePreset: period.preset })
         : await getAdsInsights({ clientId, from: customFrom, to: customTo });
       setReport(data);
+      onReport?.(data);
     } catch (e) {
       toast.error(`Erro ao puxar tráfego pago: ${(e as Error).message}`);
     } finally {

@@ -24,7 +24,7 @@ import {
 import { generateReport, getMetaInsights, type ReportResult, type MetaInsights } from "@/lib/reportRpc";
 import { ReportHistory } from "@/components/reports/ReportHistory";
 import { AdsReport } from "@/components/reports/AdsReport";
-import { loadClientAdAccounts } from "@/lib/adsRpc";
+import { loadClientAdAccounts, type AdsInsights } from "@/lib/adsRpc";
 
 // Logo da Meta (o lucide-react não tem). Usa currentColor para herdar a cor.
 function MetaIcon({ className }: { className?: string }) {
@@ -123,6 +123,11 @@ export default function Relatorios() {
   const clientId = selected;
   const currentClient = (clients ?? []).find((c) => c.id === clientId);
 
+  // Dados do Tráfego Pago (vindos do AdsReport) para incluir no PDF. Zera ao
+  // trocar de cliente, para não misturar dados de outro cliente no download.
+  const [adsData, setAdsData] = useState<AdsInsights | null>(null);
+  useEffect(() => { setAdsData(null); }, [clientId]);
+
   // Quais clientes têm conta de anúncios (Meta Ads) vinculada — para o ícone
   // da Meta no card. Mesma key do AdsReport, então compartilha cache.
   const { data: adMap } = useQuery({
@@ -206,6 +211,7 @@ export default function Relatorios() {
             compareTo: range.cTo,
           }}
           insights={prepared.insights}
+          ads={adsData}
         />,
       ).toBlob();
       const href = URL.createObjectURL(blob);
@@ -318,7 +324,7 @@ export default function Relatorios() {
 
           <ReportHistory organizationId={organizationId!} clientId={clientId} />
 
-          <AdsReport clientId={clientId} />
+          <AdsReport key={clientId} clientId={clientId} onReport={setAdsData} />
 
           <div className="rounded-xl border bg-card p-5">
         <p className="text-sm text-muted-foreground">
