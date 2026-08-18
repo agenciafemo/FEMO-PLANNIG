@@ -78,10 +78,10 @@ Deno.serve(async (request) => {
     const fromIso = from.toISOString();
     const toIso = to.toISOString();
 
-    // Cliente (nome) — RLS garante o acesso.
+    // Cliente (nome + org) — RLS garante o acesso.
     const { data: client, error: clientError } = await supabase
       .from("clients")
-      .select("id, name")
+      .select("id, name, organization_id")
       .eq("id", clientId)
       .single();
     if (clientError || !client) throw new HttpError(404, "client_not_found");
@@ -167,6 +167,25 @@ Deno.serve(async (request) => {
     ].filter(Boolean).join("\n");
 
     const analysis = await askGemini(prompt);
+
+    // Persiste no historico do cliente (best-effort: se falhar, nao quebra a
+    // geracao — o relatorio ainda e retornado normalmente).
+    const clientOrg = (client as { organization_id?: string }).organization_id;
+    if (clientOrg) {
+      // deno-lint-ignore no-explicit-any
+      await (supabase as any)
+        .from("client_report_history")
+        .insert({
+          organization_id: clientOrg,
+          client_id: clientId,
+          period_from: dados.periodo.de,
+          period_to: dados.periodo.ate,
+          analysis,
+          dados,
+          metricas,
+          created_by: userData.user.id,
+        });
+    }
 
     return jsonResponse({ analysis, dados, metricas }, 200, headers);
   } catch (error) {
