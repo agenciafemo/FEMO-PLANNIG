@@ -93,7 +93,10 @@ export default function Dashboard() {
     ((user?.user_metadata?.full_name as string | undefined) ?? "") ||
     (user?.email?.split("@")[0] ?? "");
   const firstWord = rawName.trim().split(/\s+/)[0] ?? "";
-  const firstName = firstWord ? firstWord.charAt(0).toUpperCase() + firstWord.slice(1) : "";
+  // Normaliza para "Fernanda" mesmo que o cadastro esteja em CAIXA ALTA.
+  const firstName = firstWord
+    ? firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase()
+    : "";
 
   // Frase do dia (IA). Cacheada por dia no navegador — chama a função no máximo
   // 1x/dia. Silenciosa: se falhar, o Dashboard segue normal sem a frase.
