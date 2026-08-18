@@ -582,6 +582,9 @@ export default function Tasks() {
   const [dueDate, setDueDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [tagsInput, setTagsInput] = useState("");
   const [subtaskTitle, setSubtaskTitle] = useState("");
+  // Subtarefas em rascunho ao CRIAR uma tarefa (a tarefa ainda não existe, então
+  // guardamos localmente e inserimos depois que ela é criada).
+  const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
   const [filtersByOrganization, setFiltersByOrganization] = usePersistedState<Record<string, TaskFilters>>(
     "norteia.tasks.filters.v1",
     {}
@@ -849,20 +852,37 @@ export default function Tasks() {
       }
 
       const todoCount = localTasks.filter((task) => task.status === "todo").length;
-      const { error } = await taskSupabase.from<null>("tasks").insert({
-        organization_id: organizationId!,
-        ...values,
-        status: "todo",
-        position: todoCount,
-        created_by: user!.id,
-      });
+      const { data: created, error } = await taskSupabase
+        .from<{ id: string }>("tasks")
+        .insert({
+          organization_id: organizationId!,
+          ...values,
+          status: "todo",
+          position: todoCount,
+          created_by: user!.id,
+        })
+        .select("id")
+        .single();
       if (error) throw error;
+
+      // Subtarefas em rascunho adicionadas na criação.
+      const drafts = draftSubtasks.map((t) => t.trim()).filter(Boolean);
+      if (created?.id && drafts.length > 0) {
+        const rows = drafts.map((title, index) => ({
+          task_id: created.id,
+          title,
+          position: index,
+        }));
+        const { error: subError } = await taskSupabase.from<null>("task_subtasks").insert(rows);
+        if (subError) throw subError;
+      }
       return "created" as const;
     },
     onSuccess: (action) => {
       queryClient.invalidateQueries({ queryKey: ["tasks-board", organizationId] });
       setTaskDialogOpen(false);
       setEditingTask(null);
+      setDraftSubtasks([]);
       toast.success(action === "created" ? "Tarefa criada" : "Tarefa atualizada");
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Não foi possível salvar a tarefa"),
@@ -993,6 +1013,7 @@ export default function Tasks() {
     setDueDate(format(new Date(), "yyyy-MM-dd"));
     setTagsInput("");
     setSubtaskTitle("");
+    setDraftSubtasks([]);
     setTaskDialogOpen(true);
   };
 
@@ -1006,6 +1027,7 @@ export default function Tasks() {
     setDueDate(task.due_date);
     setTagsInput(task.tags.join(", "));
     setSubtaskTitle("");
+    setDraftSubtasks([]);
     setTaskDialogOpen(true);
   };
 
@@ -1306,6 +1328,76 @@ export default function Tasks() {
                           className="shrink-0 gap-1.5"
                           disabled={!subtaskTitle.trim() || addSubtask.isPending}
                           onClick={() => addSubtask.mutate()}
+                        >
+                          <Plus className="h-4 w-4" /> Adicionar
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {!editingTask && (
+                    <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3.5">
+                      <div className="flex items-center gap-2">
+                        <ListChecks className="h-4 w-4 text-muted-foreground" />
+                        <Label>Subtarefas</Label>
+                        {draftSubtasks.length > 0 && (
+                          <span className="ml-auto text-xs font-medium text-muted-foreground">{draftSubtasks.length}</span>
+                        )}
+                      </div>
+
+                      {draftSubtasks.length > 0 ? (
+                        <div className="space-y-1.5">
+                          {draftSubtasks.map((draft, index) => (
+                            <div
+                              key={index}
+                              className="group/subtask flex items-center gap-2 rounded-lg bg-background/70 px-2.5 py-2"
+                            >
+                              <span className="min-w-0 flex-1 text-sm">{draft}</span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-muted-foreground opacity-60 hover:text-destructive group-hover/subtask:opacity-100"
+                                aria-label={`Remover subtarefa ${draft}`}
+                                onClick={() => setDraftSubtasks((prev) => prev.filter((_, idx) => idx !== index))}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="rounded-lg border border-dashed border-border/70 px-3 py-4 text-center text-xs text-muted-foreground">
+                          Nenhuma subtarefa adicionada.
+                        </p>
+                      )}
+
+                      <div className="flex gap-2">
+                        <Input
+                          value={subtaskTitle}
+                          onChange={(event) => setSubtaskTitle(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter") return;
+                            event.preventDefault();
+                            if (subtaskTitle.trim()) {
+                              setDraftSubtasks((prev) => [...prev, subtaskTitle.trim()]);
+                              setSubtaskTitle("");
+                            }
+                          }}
+                          placeholder="Adicionar uma subtarefa"
+                          aria-label="Título da nova subtarefa"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="shrink-0 gap-1.5"
+                          disabled={!subtaskTitle.trim()}
+                          onClick={() => {
+                            if (subtaskTitle.trim()) {
+                              setDraftSubtasks((prev) => [...prev, subtaskTitle.trim()]);
+                              setSubtaskTitle("");
+                            }
+                          }}
                         >
                           <Plus className="h-4 w-4" /> Adicionar
                         </Button>

@@ -108,12 +108,66 @@ export default function Plannings() {
         if (postsError) throw postsError;
       }
 
+      // Ecossistema Planejamento -> Tarefas: cria 1 tarefa-mãe no quadro do
+      // social mídia, com uma subtarefa por peça de conteúdo. Best-effort — se
+      // falhar (ex.: modo legado sem organização), o planejamento segue normal.
+      try {
+        if (organizationId) {
+          const monthName = new Date(parseInt(year), parseInt(month) - 1, 1)
+            .toLocaleDateString("pt-BR", { month: "long" });
+          const monthTitle = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+          const dueDate = new Date(parseInt(year), parseInt(month), 0)
+            .toISOString()
+            .slice(0, 10); // último dia do mês
+
+          const { data: task, error: taskError } = await supabase
+            .from("tasks")
+            .insert({
+              organization_id: organizationId,
+              client_id: selectedClient,
+              planning_id: planning.id,
+              title: `Planejamento ${monthTitle}/${year}`,
+              description: "Tarefa criada automaticamente a partir do planejamento.",
+              status: "todo",
+              priority: "medium",
+              assignee_id: user!.id,
+              created_by: user!.id,
+              due_date: dueDate,
+            } as any)
+            .select()
+            .single();
+          if (taskError) throw taskError;
+
+          // Subtarefas: 1 por peça, na ordem do fluxo de produção.
+          const subtaskDefs: Array<[number, string]> = [
+            [reelsCount, "Reels/Roteiro"],
+            [carouselCount, "Carrossel"],
+            [postCount, "Post feed"],
+            [storiesCount, "Story"],
+            [blogCount, "Texto blog"],
+          ];
+          let spos = 0;
+          const subtasksToInsert: any[] = [];
+          for (const [count, label] of subtaskDefs) {
+            for (let i = 1; i <= count; i++) {
+              subtasksToInsert.push({ task_id: task.id, title: `${label} ${i}`, position: spos++ });
+            }
+          }
+          if (subtasksToInsert.length > 0) {
+            await supabase.from("task_subtasks").insert(subtasksToInsert as any);
+          }
+        }
+      } catch (taskErr) {
+        console.error("Planejamento criado, mas falhou ao gerar a tarefa:", taskErr);
+      }
+
       return planning;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["plannings"] });
+      queryClient.invalidateQueries({ queryKey: ["tasks-board"] });
       setOpen(false);
-      toast.success("Planejamento criado!");
+      toast.success("Planejamento criado! Tarefa gerada no quadro do responsável.");
     },
     onError: (e: any) => toast.error(e.message),
   });
