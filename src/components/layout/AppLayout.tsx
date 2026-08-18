@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "./AppSidebar";
 import { TimeClockReviewBell } from "@/components/time-clock/TimeClockReviewBell";
+import { FloatingTaskTimer } from "@/components/tasks/FloatingTaskTimer";
 
 // Sem barra lateral: o Dashboard é o hub de navegação (grade de módulos).
 // O topo mantém o essencial — logo (volta ao início), notificações e a conta.
@@ -64,6 +65,9 @@ export function AppLayout() {
       <main className="min-h-[calc(100vh-4rem)] p-4 sm:p-6">
         <Outlet />
       </main>
+
+      {/* Cronômetro flutuante global — visível em qualquer página enquanto roda. */}
+      <FloatingTaskTimer />
     </div>
   );
 }
