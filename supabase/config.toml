@@ -46,3 +46,8 @@ verify_jwt = true
 # Exige login: valida acesso do usuário ao cliente e usa o token da conexão.
 [functions.meta-insights]
 verify_jwt = true
+
+# Relatório de tráfego pago (Meta Ads). Exige login; usa o secret
+# META_ADS_SYSTEM_TOKEN para ler os anúncios (separado da publicação).
+[functions.meta-ads-insights]
+verify_jwt = true
