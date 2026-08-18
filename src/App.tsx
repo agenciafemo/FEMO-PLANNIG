@@ -20,6 +20,7 @@ import Vault from "./pages/Vault";
 import Reviews from "./pages/Reviews";
 import Programacao from "./pages/Programacao";
 import Relatorios from "./pages/Relatorios";
+import TrafegoPago from "./pages/TrafegoPago";
 import Tasks from "./pages/Tasks";
 import TimeClock from "./pages/TimeClock";
 import TeamCollaborators from "./pages/TeamCollaborators";
@@ -151,6 +152,7 @@ const App = () => (
                 <Route path="/reviews" element={<Reviews />} />
                 <Route path="/programacao" element={<Programacao />} />
                 <Route path="/relatorios" element={<Relatorios />} />
+                <Route path="/trafego-pago" element={<TrafegoPago />} />
                 <Route path="/tasks" element={<Tasks />} />
                 <Route path="/ponto" element={<TimeClock />} />
                 <Route path="/calendario" element={<Calendario />} />
