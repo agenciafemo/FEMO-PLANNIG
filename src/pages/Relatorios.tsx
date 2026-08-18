@@ -87,6 +87,15 @@ export default function Relatorios() {
   const [customTo, setCustomTo] = usePersistedState<string>("report-cto", "");
   const range = periodRange(period, customFrom, customTo);
 
+  // Período de COMPARAÇÃO: "auto" = período imediatamente anterior (padrão);
+  // "custom" = duas datas escolhidas (ex.: comparar com o mês passado ou outro).
+  const [compareMode, setCompareMode] = usePersistedState<string>("report-compare-mode", "auto");
+  const [compareFrom, setCompareFrom] = usePersistedState<string>("report-cmp-from", "");
+  const [compareTo, setCompareTo] = usePersistedState<string>("report-cmp-to", "");
+  const cmp = compareMode === "custom" && compareFrom && compareTo
+    ? { from: compareFrom, to: compareTo }
+    : { from: range.cFrom, to: range.cTo };
+
   const { data: clients } = useQuery({
     queryKey: ["report-clients", organizationId],
     queryFn: async () => {
@@ -143,7 +152,7 @@ export default function Relatorios() {
   const insightsQuery = useQuery({
     queryKey: insightsKey,
     queryFn: () => getMetaInsights({
-      clientId, from: range.from, to: range.to, compareFrom: range.cFrom, compareTo: range.cTo,
+      clientId, from: range.from, to: range.to, compareFrom: cmp.from, compareTo: cmp.to,
     }),
     enabled: false,
   });
@@ -155,7 +164,7 @@ export default function Relatorios() {
       let ins = queryClient.getQueryData<MetaInsights>(insightsKey) ?? null;
       if (!ins) {
         ins = await getMetaInsights({
-          clientId, from: range.from, to: range.to, compareFrom: range.cFrom, compareTo: range.cTo,
+          clientId, from: range.from, to: range.to, compareFrom: cmp.from, compareTo: cmp.to,
         });
         queryClient.setQueryData(insightsKey, ins);
       }
@@ -207,8 +216,8 @@ export default function Relatorios() {
           period={{
             from: range.from,
             to: range.to,
-            compareFrom: range.cFrom,
-            compareTo: range.cTo,
+            compareFrom: cmp.from,
+            compareTo: cmp.to,
           }}
           insights={prepared.insights}
           ads={adsData}
@@ -354,9 +363,33 @@ export default function Relatorios() {
               </div>
             </>
           )}
+
+          {/* Período de comparação (auto ou datas escolhidas) */}
+          <div className="space-y-1">
+            <span className="block text-xs text-muted-foreground">Comparar com</span>
+            <Select value={compareMode} onValueChange={setCompareMode}>
+              <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Período anterior (auto)</SelectItem>
+                <SelectItem value="custom">Datas personalizadas</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {compareMode === "custom" && (
+            <>
+              <div className="space-y-1">
+                <span className="block text-xs text-muted-foreground">Comparar de</span>
+                <Input type="date" value={compareFrom} onChange={(e) => setCompareFrom(e.target.value)} className="w-40" />
+              </div>
+              <div className="space-y-1">
+                <span className="block text-xs text-muted-foreground">Comparar até</span>
+                <Input type="date" value={compareTo} onChange={(e) => setCompareTo(e.target.value)} className="w-40" />
+              </div>
+            </>
+          )}
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          {range.from} → {range.to} · comparando com {range.cFrom} → {range.cTo}
+          {range.from} → {range.to} · comparando com {cmp.from} → {cmp.to}
         </p>
 
         <div className="mt-4 flex flex-wrap gap-2">
