@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GripVertical, Loader2, Square, Timer, X } from "lucide-react";
+import { GripVertical, Loader2, PictureInPicture2, Square, Timer, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePersistedState } from "@/hooks/usePersistedState";
@@ -33,6 +33,14 @@ export function FloatingTaskTimer() {
   const [pos, setPos] = usePersistedState<{ x: number; y: number } | null>("nrt-timer-pos", null);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
 
+  // Picture-in-Picture (janelinha que flutua sobre tudo, tipo o Google Meet).
+  // Só existe no Chrome recente (Document Picture-in-Picture API).
+  const pipApi = (typeof window !== "undefined" ? (window as any).documentPictureInPicture : undefined);
+  const pipSupported = !!pipApi;
+  const pipWinRef = useRef<Window | null>(null);
+  const pipTimeRef = useRef<HTMLElement | null>(null);
+  const runningRef = useRef<RunningEntry | null>(null);
+
   // Timer em andamento do usuário (ended_at nulo). Refetch periódico para pegar
   // quando um timer é iniciado/parado em outra tela ou aba.
   const { data: running } = useQuery({
@@ -52,20 +60,14 @@ export function FloatingTaskTimer() {
     refetchInterval: 15000,
   });
 
-  // Tique de 1s só enquanto há timer rodando.
-  useEffect(() => {
-    if (!running) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [running]);
-
   const stop = useMutation({
     mutationFn: async () => {
-      if (!running) return;
+      const current = runningRef.current;
+      if (!current) return;
       const { error } = await (supabase as any)
         .from("task_time_entries")
         .update({ ended_at: new Date().toISOString() })
-        .eq("id", running.id);
+        .eq("id", current.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -73,6 +75,88 @@ export function FloatingTaskTimer() {
       queryClient.invalidateQueries({ queryKey: ["tasks-board"] });
     },
   });
+
+  const elapsedNow = () => {
+    const c = runningRef.current;
+    return c ? Math.floor((Date.now() - new Date(c.started_at).getTime()) / 1000) : 0;
+  };
+
+  // Abre a janelinha PiP (flutua sobre tudo). Exige gesto do usuário (clique).
+  async function openPip() {
+    if (!pipSupported || pipWinRef.current || !runningRef.current) return;
+    try {
+      const pip: Window = await pipApi.requestWindow({ width: 300, height: 104 });
+      pipWinRef.current = pip;
+      const doc = pip.document;
+      doc.body.style.cssText = "margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0b0c0e;color:#fff;";
+      const wrap = doc.createElement("div");
+      wrap.style.cssText = "display:flex;align-items:center;gap:12px;padding:14px 16px;height:100%;box-sizing:border-box;";
+      const info = doc.createElement("div");
+      info.style.cssText = "flex:1;min-width:0;";
+      const title = doc.createElement("div");
+      title.textContent = runningRef.current.tasks?.title ?? "Tarefa";
+      title.style.cssText = "font-size:12px;opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+      const time = doc.createElement("div");
+      time.style.cssText = "font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;color:#2dd4bf;line-height:1.1;";
+      time.textContent = fmt(elapsedNow());
+      pipTimeRef.current = time;
+      info.appendChild(title);
+      info.appendChild(time);
+      const stopBtn = doc.createElement("button");
+      stopBtn.textContent = "Parar";
+      stopBtn.style.cssText = "background:#dc2626;color:#fff;border:none;border-radius:999px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;";
+      stopBtn.onclick = () => stop.mutate();
+      wrap.appendChild(info);
+      wrap.appendChild(stopBtn);
+      doc.body.appendChild(wrap);
+      pip.addEventListener("pagehide", () => {
+        pipWinRef.current = null;
+        pipTimeRef.current = null;
+      });
+    } catch {
+      // Bloqueado (sem gesto) ou não suportado — mantém o widget dentro do app.
+    }
+  }
+
+  // Mantém a ref do timer atual (para o PiP e o botão parar).
+  useEffect(() => { runningRef.current = running ?? null; }, [running]);
+
+  // Tique de 1s: atualiza o widget e a janelinha PiP (se aberta).
+  useEffect(() => {
+    if (!running) return;
+    const t = window.setInterval(() => {
+      setNow(Date.now());
+      if (pipTimeRef.current) pipTimeRef.current.textContent = fmt(elapsedNow());
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, [running]);
+
+  // Ao SAIR da aba, tenta abrir a janelinha sozinho; ao voltar, fecha.
+  // (O navegador pode exigir o clique no botão — por isso o botão existe.)
+  useEffect(() => {
+    if (!running || !pipSupported) return;
+    const onVisibility = () => {
+      if (document.hidden) {
+        if (!pipWinRef.current) void openPip();
+      } else if (pipWinRef.current) {
+        pipWinRef.current.close();
+        pipWinRef.current = null;
+        pipTimeRef.current = null;
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, pipSupported]);
+
+  // Fecha a janelinha quando o timer para ou o componente desmonta.
+  useEffect(() => {
+    if (!running && pipWinRef.current) {
+      pipWinRef.current.close();
+      pipWinRef.current = null;
+      pipTimeRef.current = null;
+    }
+  }, [running]);
 
   // Arrastar pela tela.
   function onPointerDown(e: React.PointerEvent) {
@@ -137,6 +221,17 @@ export function FloatingTaskTimer() {
         {stop.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3 w-3 fill-current" />}
         Parar
       </button>
+
+      {pipSupported && (
+        <button
+          onClick={() => void openPip()}
+          className="rounded-full p-1 text-muted-foreground hover:text-brand"
+          aria-label="Abrir janela flutuante"
+          title="Flutuar sobre tudo (fica visível fora da aba)"
+        >
+          <PictureInPicture2 className="h-3.5 w-3.5" />
+        </button>
+      )}
 
       <button
         onClick={() => setHiddenFor(running.id)}
