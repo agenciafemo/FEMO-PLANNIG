@@ -47,7 +47,18 @@ interface Body {
   client_id?: string;
   from?: string; // YYYY-MM-DD
   to?: string; // YYYY-MM-DD
+  date_preset?: string; // last_7d | last_14d | last_30d | this_month | last_month | maximum
 }
+
+// Presets aceitos (evita injeção — só passamos pro Meta o que está aqui).
+const ALLOWED_PRESETS = new Set([
+  "last_7d",
+  "last_14d",
+  "last_30d",
+  "this_month",
+  "last_month",
+  "maximum",
+]);
 
 // deno-lint-ignore no-explicit-any
 type Json = any;
@@ -132,12 +143,26 @@ Deno.serve(async (request) => {
     }
     const act = `act_${mapping.ad_account_id}`;
 
-    // Período (default: últimos 30 dias).
-    const today = new Date().toISOString().slice(0, 10);
-    const to = body.to ?? today;
-    const from = body.from ??
-      new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const timeRange = JSON.stringify({ since: from, until: to });
+    // Período: por preset (últimos 7/14/30 dias, este mês, mês passado, todo)
+    // OU intervalo personalizado (from/to). Preset tem prioridade.
+    const preset = typeof body.date_preset === "string" &&
+        ALLOWED_PRESETS.has(body.date_preset)
+      ? body.date_preset
+      : null;
+    let applyPeriod: (u: URL) => void;
+    let periodo: { de?: string; ate?: string; preset?: string };
+    if (preset) {
+      applyPeriod = (u) => u.searchParams.set("date_preset", preset);
+      periodo = { preset };
+    } else {
+      const today = new Date().toISOString().slice(0, 10);
+      const to = body.to ?? today;
+      const from = body.from ??
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const timeRange = JSON.stringify({ since: from, until: to });
+      applyPeriod = (u) => u.searchParams.set("time_range", timeRange);
+      periodo = { de: from, ate: to };
+    }
 
     // Totais da conta no período.
     const totalsUrl = new URL(`${base}/${act}/insights`);
@@ -145,7 +170,7 @@ Deno.serve(async (request) => {
       "fields",
       "spend,impressions,reach,clicks,ctr,cpc,cpm,actions,cost_per_action_type",
     );
-    totalsUrl.searchParams.set("time_range", timeRange);
+    applyPeriod(totalsUrl);
     const totalsJson = await metaGet(totalsUrl, adsToken, proof);
     const totalsRow = (totalsJson.data ?? [])[0] ?? {};
 
@@ -156,7 +181,7 @@ Deno.serve(async (request) => {
       "fields",
       "campaign_name,spend,impressions,reach,clicks,actions,cost_per_action_type,objective",
     );
-    campUrl.searchParams.set("time_range", timeRange);
+    applyPeriod(campUrl);
     campUrl.searchParams.set("limit", "100");
     const campJson = await metaGet(campUrl, adsToken, proof);
     const campaigns = ((campJson.data ?? []) as Json[])
@@ -188,7 +213,7 @@ Deno.serve(async (request) => {
     return jsonResponse(
       {
         conta: { id: mapping.ad_account_id, nome: mapping.ad_account_name ?? null },
-        periodo: { de: from, ate: to },
+        periodo,
         totais,
         campanhas: campaigns,
       },
