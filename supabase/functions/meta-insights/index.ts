@@ -210,6 +210,55 @@ Deno.serve(async (request) => {
       ? null
       : (reachTotalRes.json?.error?.message ?? reachDailyRes.json?.error?.message ?? "insights_unavailable");
 
+    // 3f) FACEBOOK orgânico — best-effort, NÃO quebra o relatório do Instagram.
+    // Usa o MESMO token de Página (só leitura de insights); não toca em publicação.
+    let facebook:
+      | { name: string | null; followers: number | null; reach: number | null; views: number | null; engagement: number | null }
+      | null = null;
+    try {
+      const { data: fbChannel } = await admin
+        .from("meta_connection_channels")
+        .select("external_account_id")
+        .eq("connection_id", conn.id)
+        .eq("channel_type", "facebook_page")
+        .eq("status", "active")
+        .maybeSingle();
+      const pageId = fbChannel?.external_account_id;
+      if (pageId) {
+        // Cada métrica é buscada em separado: se uma estiver depreciada na
+        // versão da Graph API, as outras ainda voltam.
+        const fbMetric = async (metric: string): Promise<number | null> => {
+          const r = await call(`${encodeURIComponent(pageId)}/insights`, {
+            metric,
+            period: "day",
+            since: String(since),
+            until: String(until),
+          });
+          if (!r.ok) return null;
+          const m = (r.json?.data ?? [])[0] as { values?: Array<{ value?: number }> } | undefined;
+          if (!m) return null;
+          return (m.values ?? []).reduce((s: number, v) => s + (v.value ?? 0), 0);
+        };
+        const [fbProfile, reach, engagement, views] = await Promise.all([
+          call(encodeURIComponent(pageId), { fields: "name,followers_count,fan_count" }),
+          fbMetric("page_impressions_unique"),
+          fbMetric("page_post_engagements"),
+          fbMetric("page_views_total"),
+        ]);
+        facebook = {
+          name: fbProfile.ok ? (fbProfile.json?.name ?? null) : null,
+          followers: fbProfile.ok
+            ? (fbProfile.json?.followers_count ?? fbProfile.json?.fan_count ?? null)
+            : null,
+          reach,
+          views,
+          engagement,
+        };
+      }
+    } catch (_e) {
+      facebook = null; // best-effort: erro no FB não afeta o Instagram
+    }
+
     return jsonResponse(
       {
         client: client.name,
@@ -228,6 +277,7 @@ Deno.serve(async (request) => {
         account_insights: reachDailyRes.ok ? (reachDailyRes.json?.data ?? []) : null,
         new_followers: followerCountRes.ok ? (followerCountRes.json?.data?.[0]?.values ?? []) : null,
         demographics: { genero: demoGenero, idade: demoIdade, cidade: demoCidade },
+        facebook,
       },
       200,
       headers,
