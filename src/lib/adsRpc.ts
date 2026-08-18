@@ -19,7 +19,7 @@ export interface AdAction {
 
 export interface AdsInsights {
   conta: { id: string; nome: string | null };
-  periodo: { de: string; ate: string };
+  periodo: { de?: string; ate?: string; preset?: string };
   totais: {
     gasto: number;
     impressoes: number;
@@ -52,14 +52,22 @@ export async function listAdAccounts(): Promise<AdAccount[]> {
   return (data as { accounts: AdAccount[] }).accounts ?? [];
 }
 
-// Puxa as métricas de tráfego pago de um cliente no período.
+// Puxa as métricas de tráfego pago de um cliente no período. Use datePreset
+// (últimos 7/14/30 dias, este mês, mês passado, maximum) OU from/to (custom).
 export async function getAdsInsights(input: {
   clientId: string;
   from?: string; // YYYY-MM-DD
   to?: string; // YYYY-MM-DD
+  datePreset?: string;
 }): Promise<AdsInsights> {
   const { data, error } = await supabase.functions.invoke("meta-ads-insights", {
-    body: { mode: "insights", client_id: input.clientId, from: input.from, to: input.to },
+    body: {
+      mode: "insights",
+      client_id: input.clientId,
+      from: input.from,
+      to: input.to,
+      date_preset: input.datePreset,
+    },
   });
   if (error) throw error;
   return data as AdsInsights;
