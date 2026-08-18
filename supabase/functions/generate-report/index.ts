@@ -38,7 +38,11 @@ async function askGemini(prompt: string): Promise<string> {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new HttpError(502, "gemini_request_failed");
+    // Loga o corpo real do Gemini (aparece nos logs da função) e devolve o
+    // status no reason_code — ex.: gemini_429 (cota), gemini_403 (billing),
+    // gemini_400 (requisicao). Assim o erro deixa de ser generico.
+    console.error("gemini_error", res.status, JSON.stringify(json).slice(0, 800));
+    throw new HttpError(502, `gemini_${res.status}`);
   }
   const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (typeof text !== "string" || !text.trim()) {
@@ -172,19 +176,26 @@ Deno.serve(async (request) => {
     // geracao — o relatorio ainda e retornado normalmente).
     const clientOrg = (client as { organization_id?: string }).organization_id;
     if (clientOrg) {
-      // deno-lint-ignore no-explicit-any
-      await (supabase as any)
-        .from("client_report_history")
-        .insert({
-          organization_id: clientOrg,
-          client_id: clientId,
-          period_from: dados.periodo.de,
-          period_to: dados.periodo.ate,
-          analysis,
-          dados,
-          metricas,
-          created_by: userData.user.id,
-        });
+      try {
+        // deno-lint-ignore no-explicit-any
+        const { error: histError } = await (supabase as any)
+          .from("client_report_history")
+          .insert({
+            organization_id: clientOrg,
+            client_id: clientId,
+            period_from: dados.periodo.de,
+            period_to: dados.periodo.ate,
+            analysis,
+            dados,
+            metricas,
+            created_by: userData.user.id,
+          });
+        // Nao derruba a geracao: se a tabela nao existir ou o RLS barrar, o
+        // relatorio ainda e devolvido. So registra nos logs para diagnostico.
+        if (histError) console.error("report_history_insert_failed", histError.message);
+      } catch (e) {
+        console.error("report_history_insert_threw", (e as Error)?.message);
+      }
     }
 
     return jsonResponse({ analysis, dados, metricas }, 200, headers);
