@@ -59,6 +59,33 @@ async function askGemini(prompt: string): Promise<string> {
   throw new HttpError(502, `gemini_${lastStatus || "empty"}`);
 }
 
+// Frases de reserva (curadas) — usadas quando o Gemini está indisponível, para
+// o card SEMPRE aparecer. Rotacionam por dia do ano.
+const FALLBACK_QUOTES = [
+  "Consistência não é fazer muito num dia; é não sumir nos outros.",
+  "Marca forte é a soma de pequenos cuidados repetidos com paciência.",
+  "Antes de criar mais, entenda melhor para quem você está criando.",
+  "O cliente não compra o post; compra a confiança que ele transmite.",
+  "Criatividade gosta de prazo, mas floresce com clareza de objetivo.",
+  "Um bom conteúdo responde uma dúvida real antes de pedir atenção.",
+  "Estratégia é decidir o que NÃO fazer para o essencial brilhar.",
+  "Feito com atenção hoje evita retrabalho apressado amanhã.",
+  "A melhor ideia perde valor se a execução não for cuidadosa.",
+  "Escute o cliente com a mesma energia com que você fala com ele.",
+  "Constância vence talento quando o talento não aparece todo dia.",
+  "Cada entrega é uma amostra de como a agência trata quem confia nela.",
+  "Simplicidade é o resultado de muito trabalho, não de pressa.",
+  "Dados mostram o caminho; sensibilidade mostra o tom certo de andar nele.",
+  "Reputação se constrói no detalhe que ninguém pediu, mas todo mundo nota.",
+];
+
+function fallbackQuote(): string {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0).getTime();
+  const dayOfYear = Math.floor((now.getTime() - start) / 86_400_000);
+  return FALLBACK_QUOTES[dayOfYear % FALLBACK_QUOTES.length];
+}
+
 Deno.serve(async (request) => {
   const headers = corsHeaders(request);
   try {
@@ -92,8 +119,18 @@ Deno.serve(async (request) => {
       "Responda SOMENTE com a frase, sem aspas, sem autor, sem introdução.",
     ].join("\n");
 
-    const quote = await askGemini(prompt);
-    return jsonResponse({ quote }, 200, headers);
+    // Se o Gemini falhar (ex.: 503 alta demanda), cai na lista curada — o card
+    // sempre aparece. "source" só para diagnóstico.
+    let quote: string;
+    let source = "ia";
+    try {
+      quote = await askGemini(prompt);
+    } catch (e) {
+      console.error("daily_quote_fallback", (e as Error)?.message);
+      quote = fallbackQuote();
+      source = "curada";
+    }
+    return jsonResponse({ quote, source }, 200, headers);
   } catch (error) {
     return errorResponse(error, headers);
   }
