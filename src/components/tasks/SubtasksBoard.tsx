@@ -60,9 +60,14 @@ export function SubtasksBoard({
         />
         <div className="min-w-0">
           <p className={cn("text-sm font-medium leading-snug", s.done && "text-muted-foreground line-through")}>{s.title}</p>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {task?.title ?? "Tarefa"}{client ? ` · ${client.name}` : ""}
-          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {client && (
+              <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+                {client.name}
+              </span>
+            )}
+            <span className="truncate text-[11px] text-muted-foreground">{task?.title ?? "Tarefa"}</span>
+          </div>
         </div>
       </label>
     );
