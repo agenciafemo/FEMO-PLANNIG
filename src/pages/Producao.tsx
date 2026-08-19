@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Lightbulb, Loader2, UserRound, Workflow } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,10 +7,18 @@ import { useOrganization } from "@/hooks/useOrganization";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
 import {
-  COLUMNS, PIECE_LABEL, STAGE_META, nextStage, type Stage,
+  COLUMNS, EMPTY_ROLE_MAP, PIECE_LABEL, ROLE_LABELS, STAGE_META, assigneeForStage,
+  loadRoleMap, nextStage, saveRoleMap, type RoleKey, type RoleMap, type Stage,
 } from "@/lib/productionPipeline";
+import { Settings2 } from "lucide-react";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = any;
@@ -68,8 +76,11 @@ export default function Producao() {
       if (!next) return;
       let assignee: string | null = null;
       if (next !== "pronto") {
-        const resolve = await loadFunctionAssignees(organizationId!);
-        assignee = resolve(STAGE_META[next].kw);
+        const [roleMap, resolve] = await Promise.all([
+          loadRoleMap(organizationId!),
+          loadFunctionAssignees(organizationId!),
+        ]);
+        assignee = assigneeForStage(next, roleMap, resolve);
       }
       const { error } = await (supabase as AnyClient)
         .from("production_items")
@@ -79,6 +90,26 @@ export default function Producao() {
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["production-board", organizationId] }),
   });
+
+  // Config de responsáveis de produção (quem faz cada papel).
+  const roleMapQuery = useQuery({
+    queryKey: ["prod-roles", organizationId],
+    queryFn: () => loadRoleMap(organizationId!),
+    enabled: !!organizationId,
+  });
+  const [roleDraft, setRoleDraft] = useState<RoleMap>(EMPTY_ROLE_MAP);
+  const [cfgOpen, setCfgOpen] = useState(false);
+  useEffect(() => { if (roleMapQuery.data) setRoleDraft(roleMapQuery.data); }, [roleMapQuery.data]);
+  const saveRoles = useMutation({
+    mutationFn: () => saveRoleMap(organizationId!, user!.id, roleDraft),
+    onSuccess: () => {
+      toast.success("Responsáveis de produção salvos.");
+      setCfgOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["prod-roles", organizationId] });
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const roleKeys: RoleKey[] = ["design", "writing", "editing", "review"];
 
   const visible = onlyMine && user ? items.filter((i) => i.assignee_id === user.id) : items;
   const byColumn = (col: string) => visible.filter((i) => STAGE_META[i.stage]?.column === col);
@@ -96,15 +127,59 @@ export default function Producao() {
               Cada peça anda por etapas. Conclua a sua e ela avança pra próxima pessoa.
             </p>
           </div>
-          <Button
-            type="button"
-            size="sm"
-            variant={onlyMine ? "default" : "outline"}
-            className="gap-2"
-            onClick={() => setOnlyMine((v) => !v)}
-          >
-            <UserRound className="h-4 w-4" /> Só as minhas
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={onlyMine ? "default" : "outline"}
+              className="gap-2"
+              onClick={() => setOnlyMine((v) => !v)}
+            >
+              <UserRound className="h-4 w-4" /> Só as minhas
+            </Button>
+            {canEdit && (
+              <Dialog open={cfgOpen} onOpenChange={setCfgOpen}>
+                <DialogTrigger asChild>
+                  <Button type="button" size="sm" variant="outline" className="gap-2">
+                    <Settings2 className="h-4 w-4" /> Responsáveis
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Responsáveis de produção</DialogTitle>
+                  </DialogHeader>
+                  <p className="text-xs text-muted-foreground">
+                    Quem faz cada papel. Os novos planejamentos usam isso pra atribuir as etapas.
+                  </p>
+                  <div className="mt-3 space-y-3">
+                    {roleKeys.map((rk) => (
+                      <div key={rk} className="space-y-1.5">
+                        <Label className="text-xs">{ROLE_LABELS[rk]}</Label>
+                        <Select
+                          value={roleDraft[rk] ?? "none"}
+                          onValueChange={(v) => setRoleDraft((d) => ({ ...d, [rk]: v === "none" ? null : v }))}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Ninguém" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Ninguém</SelectItem>
+                            {members.map((mem) => (
+                              <SelectItem key={mem.user_id} value={mem.user_id}>{mem.display_name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <Button size="sm" onClick={() => saveRoles.mutate()} disabled={saveRoles.isPending}>
+                      {saveRoles.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                      Salvar
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
+          </div>
         </div>
 
         {isLoading ? (

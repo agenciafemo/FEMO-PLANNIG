@@ -1,4 +1,8 @@
 import type { AssigneeResolver } from "@/lib/subtaskTemplates";
+import { supabase } from "@/integrations/supabase/client";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyClient = any;
 
 // Etapas de produção e como cada peça flui. As palavras-chave casam com o nome
 // da FUNÇÃO da equipe (quem faz a etapa).
@@ -45,6 +49,61 @@ export function nextStage(contentType: string, stage: Stage): Stage | null {
   return i >= 0 && i < p.length - 1 ? p[i + 1] : null;
 }
 
+// ---- Responsáveis de produção (mapa explícito, sem depender de nome de função) ----
+export type RoleKey = "design" | "writing" | "editing" | "review";
+export type RoleMap = Record<RoleKey, string | null>;
+export const EMPTY_ROLE_MAP: RoleMap = { design: null, writing: null, editing: null, review: null };
+
+export const ROLE_LABELS: Record<RoleKey, string> = {
+  design: "Design / Copy (carrossel, post, story)",
+  writing: "Roteiro / Texto (reels, blog)",
+  editing: "Edição de vídeo (reels)",
+  review: "Revisão (opcional)",
+};
+
+export function stageRole(stage: Stage): RoleKey | null {
+  if (stage === "copy" || stage === "design") return "design";
+  if (stage === "roteiro" || stage === "texto") return "writing";
+  if (stage === "edicao") return "editing";
+  if (stage === "revisao") return "review";
+  return null;
+}
+
+export async function loadRoleMap(organizationId: string): Promise<RoleMap> {
+  const { data } = await (supabase as AnyClient)
+    .from("production_role_assignees")
+    .select("design_user_id, writing_user_id, editing_user_id, review_user_id")
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  return {
+    design: data?.design_user_id ?? null,
+    writing: data?.writing_user_id ?? null,
+    editing: data?.editing_user_id ?? null,
+    review: data?.review_user_id ?? null,
+  };
+}
+
+export async function saveRoleMap(organizationId: string, userId: string, map: RoleMap): Promise<void> {
+  const { error } = await (supabase as AnyClient)
+    .from("production_role_assignees")
+    .upsert({
+      organization_id: organizationId,
+      design_user_id: map.design,
+      writing_user_id: map.writing,
+      editing_user_id: map.editing,
+      review_user_id: map.review,
+      updated_by: userId,
+    }, { onConflict: "organization_id" });
+  if (error) throw new Error(error.message);
+}
+
+// Quem faz a etapa: usa o mapa explícito; se vazio, tenta casar por função.
+export function assigneeForStage(stage: Stage, roleMap: RoleMap, resolve: AssigneeResolver | null): string | null {
+  const role = stageRole(stage);
+  if (role && roleMap[role]) return roleMap[role];
+  return resolve ? resolve(STAGE_META[stage].kw) : null;
+}
+
 export type PieceCounts = { static: number; reels: number; carousel: number; story: number; blog: number };
 
 // Cria os itens de produção de um planejamento (1 por peça, na 1ª etapa, já
@@ -53,7 +112,8 @@ export type PieceCounts = { static: number; reels: number; carousel: number; sto
 export function buildProductionItems(
   counts: PieceCounts,
   base: { organization_id: string; planning_id: string; client_id: string; created_by: string },
-  resolve: AssigneeResolver,
+  roleMap: RoleMap,
+  resolve: AssigneeResolver | null,
   writingNotes: string | null,
 ): Array<Record<string, unknown>> {
   const order: Array<keyof PieceCounts> = ["reels", "carousel", "static", "story", "blog"];
@@ -69,7 +129,7 @@ export function buildProductionItems(
         content_type: ct,
         piece_number: i,
         stage,
-        assignee_id: resolve(STAGE_META[stage].kw),
+        assignee_id: assigneeForStage(stage, roleMap, resolve),
         notes: (ct === "reels" || ct === "blog") ? writingNotes : null,
         position: pos++,
       });

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { loadContract } from "@/lib/clientContract";
 import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
-import { buildProductionItems } from "@/lib/productionPipeline";
+import { buildProductionItems, loadRoleMap } from "@/lib/productionPipeline";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -129,46 +129,11 @@ export default function Plannings() {
         if (postsError) throw postsError;
       }
 
-      // Ecossistema Planejamento -> Tarefas: cria 1 tarefa-mãe no quadro do
-      // social mídia, com uma subtarefa por peça de conteúdo. Best-effort — se
-      // falhar (ex.: modo legado sem organização), o planejamento segue normal.
+      // Ecossistema Planejamento -> Produção: gera os itens de produção (peças
+      // que fluem por etapa), já atribuídos pelos responsáveis de produção.
+      // Best-effort — se falhar, o planejamento segue normal.
       try {
         if (organizationId) {
-          const monthName = new Date(parseInt(year), parseInt(month) - 1, 1)
-            .toLocaleDateString("pt-BR", { month: "long" });
-          const monthTitle = monthName.charAt(0).toUpperCase() + monthName.slice(1);
-          const dueDate = new Date(parseInt(year), parseInt(month), 0)
-            .toISOString()
-            .slice(0, 10); // último dia do mês
-
-          // Achar-ou-criar a tarefa-mãe deste planejamento (evita duplicar e
-          // não quebra se rodar de novo).
-          let taskId: string | null = null;
-          const { data: existing } = await supabase
-            .from("tasks").select("id").eq("planning_id", planning.id).maybeSingle();
-          if (existing?.id) {
-            taskId = existing.id;
-          } else {
-            const { data: task, error: taskError } = await supabase
-              .from("tasks")
-              .insert({
-                organization_id: organizationId,
-                client_id: selectedClient,
-                planning_id: planning.id,
-                title: `Planejamento ${monthTitle}/${year}`,
-                description: "Tarefa criada automaticamente a partir do planejamento.",
-                status: "todo",
-                priority: "medium",
-                assignee_id: user!.id,
-                created_by: user!.id,
-                due_date: dueDate,
-              } as any)
-              .select("id")
-              .single();
-            if (taskError) throw taskError;
-            taskId = task.id;
-          }
-
           // Sugestões do mês (datas comemorativas + eventos do cliente) para as
           // peças de escrita (roteiro/texto) — vão na nota do item.
           const m = parseInt(month);
@@ -193,10 +158,14 @@ export default function Plannings() {
             .select("id", { count: "exact", head: true })
             .eq("planning_id", planning.id);
           if (!existingItems) {
-            const resolve = await loadFunctionAssignees(organizationId);
+            const [roleMap, resolve] = await Promise.all([
+              loadRoleMap(organizationId),
+              loadFunctionAssignees(organizationId),
+            ]);
             const items = buildProductionItems(
               { static: postCount, reels: reelsCount, carousel: carouselCount, story: storiesCount, blog: blogCount },
               { organization_id: organizationId, planning_id: planning.id, client_id: selectedClient, created_by: user!.id },
+              roleMap,
               resolve,
               writingNotes,
             );
