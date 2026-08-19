@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { loadContract } from "@/lib/clientContract";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -47,6 +48,24 @@ export default function Plannings() {
   const [carouselCount, setCarouselCount] = useState(0);
   const [storiesCount, setStoriesCount] = useState(0);
   const [blogCount, setBlogCount] = useState(0);
+
+  // Ao escolher um cliente, pré-preenche as quantidades com o CONTRATO dele
+  // (se houver). O usuário ainda pode ajustar/adicionar extras antes de criar.
+  useEffect(() => {
+    if (!selectedClient) return;
+    let cancelled = false;
+    loadContract(selectedClient)
+      .then((c) => {
+        if (cancelled || !c) return;
+        setPostCount(c.qty_static);
+        setReelsCount(c.qty_reels);
+        setCarouselCount(c.qty_carousel);
+        setStoriesCount(c.qty_story);
+        setBlogCount(c.qty_blog);
+      })
+      .catch(() => { /* sem contrato: mantém o que está */ });
+    return () => { cancelled = true; };
+  }, [selectedClient]);
 
   const { data: clients } = useQuery({
     queryKey: ["clients", organizationId],

@@ -404,7 +404,9 @@ export default function Clients() {
                           : client.name.charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <p className="font-bold leading-tight">{client.name}</p>
+                        <Link to={`/clients/${client.id}`} className="font-bold leading-tight hover:text-brand hover:underline">
+                          {client.name}
+                        </Link>
                         {agencyTenure(client.agency_since) && (
                           <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">
                             Na agência há {agencyTenure(client.agency_since)}
