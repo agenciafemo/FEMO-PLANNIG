@@ -20,7 +20,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Copy, ExternalLink, Trash2, ChevronDown, ChevronUp, Calendar, Image, Layers, Pencil, Upload, X } from "lucide-react";
+import { Plus, Copy, ExternalLink, Trash2, ChevronDown, ChevronUp, Calendar, Image, Layers, Pencil, Upload, X, Instagram, Facebook } from "lucide-react";
+import { getClientMetaStatus } from "@/lib/metaRpc";
 import { toast } from "sonner";
 import { Link, useNavigate } from "react-router-dom";
 import { ClientDocuments } from "@/components/client/ClientDocuments";
@@ -109,6 +110,26 @@ export default function Clients() {
       return data as any[];
     },
     enabled: !!user && (isLegacy || !!organizationId),
+  });
+
+  // Status de conexão (Instagram/Facebook) por cliente, para os ícones do card.
+  const clientIds = (clients ?? []).map((c: any) => c.id as string);
+  const { data: connMap } = useQuery({
+    queryKey: ["clients-conn", clientIds.join(",")],
+    queryFn: async () => {
+      const results = await Promise.all(
+        clientIds.map(async (id) => {
+          const rows = await getClientMetaStatus(id).catch(() => []);
+          const chans = rows
+            .filter((r) => r.connection_status === "active" && r.channel_type)
+            .map((r) => r.channel_type as string);
+          return [id, chans] as const;
+        }),
+      );
+      return Object.fromEntries(results) as Record<string, string[]>;
+    },
+    enabled: clientIds.length > 0,
+    staleTime: 5 * 60 * 1000,
   });
 
   const uploadLogo = async (file: File, clientId: string): Promise<string | null> => {
@@ -392,71 +413,51 @@ export default function Clients() {
           {clients.map((client) => {
             const accent = client.accent_color || "#F97316";
             return (
-              <Card key={client.id} className="group relative flex flex-col overflow-hidden transition-shadow hover:shadow-lg">
+              <Card key={client.id} className="group relative overflow-hidden transition-shadow hover:shadow-lg">
                 <div className="h-1.5 w-full" style={{ backgroundColor: accent }} />
 
-                <CardContent className="flex flex-1 flex-col gap-3 p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl text-base font-black text-white shadow-sm" style={{ backgroundColor: accent }}>
-                        {client.logo_url
-                          ? <img src={client.logo_url} alt={client.name} className="h-full w-full object-cover" />
-                          : client.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <Link to={`/clients/${client.id}`} className="font-bold leading-tight hover:text-brand hover:underline">
-                          {client.name}
-                        </Link>
-                        {agencyTenure(client.agency_since) && (
-                          <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">
-                            Na agência há {agencyTenure(client.agency_since)}
-                          </p>
-                        )}
-                        {client.notes && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{client.notes}</p>}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar cliente" onClick={() => openEdit(client)}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setExpandedClient(expandedClient === client.id ? null : client.id)}>
-                        {expandedClient === client.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Excluir cliente" onClick={() => setDeletingClient(client)}>
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                      </Button>
-                    </div>
-                  </div>
+                {/* Ações de gestão flutuam no canto — fora do Link, não navegam. */}
+                <div className="absolute right-2 top-2.5 z-10 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar cliente" onClick={() => openEdit(client)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" title="Excluir cliente" onClick={() => setDeletingClient(client)}>
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </Button>
+                </div>
 
-                  <div className="mt-auto flex flex-wrap gap-1.5">
-                    <Link to={`/clients/${client.id}/plannings`} className="flex-1">
-                      <Button size="sm" className="w-full text-xs" style={{ backgroundColor: accent, borderColor: accent }}>
-                        <Calendar className="mr-1 h-3 w-3" /> Ver Planejamentos
-                      </Button>
-                    </Link>
-                    <Button variant="outline" size="sm" className="flex-1 text-xs" onClick={() => openPlanningDialog(client.id)}>
-                      <Calendar className="mr-1 h-3 w-3" /> Novo
-                    </Button>
-                  </div>
-                  <div className="flex gap-1.5">
-                    <Button variant="ghost" size="sm" className="flex-1 text-xs text-muted-foreground" onClick={() => copyLink(client.public_link_token)}>
-                      <Copy className="mr-1 h-3 w-3" /> Copiar link
-                    </Button>
-                    <Link to={`/c/${client.public_link_token}`} target="_blank" className="flex-1">
-                      <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground">
-                        <ExternalLink className="mr-1 h-3 w-3" /> Abrir
-                      </Button>
-                    </Link>
-                  </div>
-
-                  {expandedClient === client.id && (
-                    <div className="space-y-6 border-t pt-4">
-                      {META_CONNECT_ENABLED && <InstagramConnection clientId={client.id} />}
-                      <ClientReports clientId={client.id} />
-                      <ClientDocuments clientId={client.id} />
+                {/* Card simples: clicar entra na ficha do cliente. */}
+                <Link to={`/clients/${client.id}`} className="block">
+                  <CardContent className="flex items-center gap-3 p-4">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl text-base font-black text-white shadow-sm" style={{ backgroundColor: accent }}>
+                      {client.logo_url
+                        ? <img src={client.logo_url} alt={client.name} className="h-full w-full object-cover" />
+                        : client.name.charAt(0).toUpperCase()}
                     </div>
-                  )}
-                </CardContent>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-bold leading-tight">{client.name}</p>
+                      {agencyTenure(client.agency_since) && (
+                        <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">
+                          Na agência há {agencyTenure(client.agency_since)}
+                        </p>
+                      )}
+                      {/* Status de conexão Instagram / Facebook */}
+                      <div className="mt-1.5 flex items-center gap-2">
+                        {(() => {
+                          const chans = connMap?.[client.id] ?? [];
+                          const connected = chans.length > 0;
+                          return (
+                            <>
+                              <Instagram className={`h-4 w-4 ${chans.includes("instagram") ? "text-brand" : "text-muted-foreground/30"}`} />
+                              <Facebook className={`h-4 w-4 ${chans.includes("facebook_page") ? "text-brand" : "text-muted-foreground/30"}`} />
+                              <span className="text-[11px] text-muted-foreground">{connected ? "Conectado" : "Sem conexão"}</span>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Link>
               </Card>
             );
           })}

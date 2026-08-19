@@ -9,12 +9,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import {
-  ArrowLeft, CalendarClock, Clapperboard, FileText, Film, Image as ImageIcon,
-  LayoutGrid, Loader2, Save, Sparkles,
+  ArrowLeft, CalendarClock, Clapperboard, Copy, ExternalLink, FileText, Film,
+  Image as ImageIcon, LayoutGrid, Loader2, Save, Sparkles,
 } from "lucide-react";
 import {
   EMPTY_CONTRACT, loadContextCompleteness, loadContract, saveContract, type ContentContract,
 } from "@/lib/clientContract";
+import { InstagramConnection } from "@/components/client/InstagramConnection";
+import { ClientReports } from "@/components/client/ClientReports";
+import { ClientDocuments } from "@/components/client/ClientDocuments";
+import { META_CONNECT_ENABLED } from "@/lib/featureFlags";
 
 const CONTRACT_FIELDS = [
   { key: "qty_static", label: "Posts (feed)", icon: ImageIcon },
@@ -34,9 +38,9 @@ export default function ClientDetail() {
     queryKey: ["client-detail", clientId],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("clients").select("id, name, logo_url").eq("id", clientId!).single();
+        .from("clients").select("id, name, logo_url, public_link_token").eq("id", clientId!).single();
       if (error) throw error;
-      return data as { id: string; name: string; logo_url: string | null };
+      return data as { id: string; name: string; logo_url: string | null; public_link_token: string };
     },
     enabled: !!clientId,
   });
@@ -64,6 +68,14 @@ export default function ClientDetail() {
     onError: (e) => toast.error((e as Error).message),
   });
 
+  const copyLink = () => {
+    if (!client?.public_link_token) return;
+    const url = `${window.location.origin}/c/${client.public_link_token}`;
+    navigator.clipboard.writeText(url)
+      .then(() => toast.success("Link do portal copiado!"))
+      .catch(() => toast.error("Não foi possível copiar o link."));
+  };
+
   const totalPieces = CONTRACT_FIELDS.reduce((s, f) => s + (contract[f.key] || 0), 0);
   const pct = ctxQuery.data?.percent ?? 0;
   const pctColor = pct >= 70 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-destructive";
@@ -83,9 +95,22 @@ export default function ClientDetail() {
             {(client?.name ?? "?").slice(0, 2).toUpperCase()}
           </div>
         )}
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-xs text-muted-foreground">Cliente</p>
           <h1 className="truncate text-2xl font-bold">{client?.name ?? "—"}</h1>
+        </div>
+        {/* Portal do cliente: copiar link + abrir */}
+        <div className="flex shrink-0 gap-1.5">
+          <Button size="sm" variant="outline" onClick={copyLink} title="Copiar link do portal">
+            <Copy className="mr-1 h-4 w-4" /> Copiar link
+          </Button>
+          {client?.public_link_token && (
+            <Button asChild size="sm" variant="ghost">
+              <a href={`/c/${client.public_link_token}`} target="_blank" rel="noreferrer">
+                <ExternalLink className="mr-1 h-4 w-4" /> Abrir
+              </a>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -158,6 +183,13 @@ export default function ClientDetail() {
           </Button>
         </div>
       </div>
+
+      {/* Conexões (Instagram / Facebook) */}
+      {META_CONNECT_ENABLED && clientId && <InstagramConnection clientId={clientId} />}
+
+      {/* Relatórios e documentos do cliente */}
+      {clientId && <ClientReports clientId={clientId} />}
+      {clientId && <ClientDocuments clientId={clientId} />}
 
       {/* Atalhos */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
