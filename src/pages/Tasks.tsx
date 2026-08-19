@@ -575,6 +575,11 @@ export default function Tasks() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskRecord | null>(null);
+  // "Nova subtarefa" avulsa: escolhe a tarefa-mãe + título + responsável.
+  const [subtaskDialogOpen, setSubtaskDialogOpen] = useState(false);
+  const [newSubTaskId, setNewSubTaskId] = useState("");
+  const [newSubTitle, setNewSubTitle] = useState("");
+  const [newSubAssignee, setNewSubAssignee] = useState("none");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [clientId, setClientId] = useState("none");
@@ -968,6 +973,30 @@ export default function Tasks() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Não foi possível direcionar a subtarefa"),
   });
 
+  const createStandaloneSubtask = useMutation({
+    mutationFn: async () => {
+      if (!newSubTaskId || !newSubTitle.trim()) throw new Error("Escolha a tarefa e o título");
+      const existing = subtasksByTaskId.get(newSubTaskId) ?? [];
+      const nextPosition = Math.max(-1, ...existing.map((s) => s.position)) + 1;
+      const { error } = await taskSupabase.from<null>("task_subtasks").insert({
+        task_id: newSubTaskId,
+        title: newSubTitle.trim(),
+        position: nextPosition,
+        assignee_id: newSubAssignee === "none" ? null : newSubAssignee,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks-board", organizationId] });
+      queryClient.invalidateQueries({ queryKey: ["my-subtasks"] });
+      setSubtaskDialogOpen(false);
+      setNewSubTitle("");
+      setNewSubAssignee("none");
+      toast.success("Subtarefa criada");
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Não foi possível criar a subtarefa"),
+  });
+
   const toggleTimer = useMutation({
     mutationFn: async (taskId: string) => {
       if (!user) throw new Error("Sessão inválida");
@@ -1162,6 +1191,77 @@ export default function Tasks() {
               <Button className="gap-2" onClick={openCreateTask}>
                 <Plus className="h-4 w-4" /> Nova tarefa
               </Button>
+
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => {
+                  setNewSubTaskId(localTasks[0]?.id ?? "");
+                  setNewSubTitle("");
+                  setNewSubAssignee("none");
+                  setSubtaskDialogOpen(true);
+                }}
+              >
+                <ListChecks className="h-4 w-4" /> Nova subtarefa
+              </Button>
+
+              <Dialog
+                open={subtaskDialogOpen}
+                onOpenChange={(o) => { if (!createStandaloneSubtask.isPending) setSubtaskDialogOpen(o); }}
+              >
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Nova subtarefa</DialogTitle>
+                  </DialogHeader>
+                  <form
+                    className="space-y-4"
+                    onSubmit={(e) => { e.preventDefault(); createStandaloneSubtask.mutate(); }}
+                  >
+                    <div className="space-y-2">
+                      <Label>Tarefa</Label>
+                      <Select value={newSubTaskId} onValueChange={setNewSubTaskId}>
+                        <SelectTrigger><SelectValue placeholder="Escolha a tarefa-mãe" /></SelectTrigger>
+                        <SelectContent>
+                          {localTasks.length === 0 ? (
+                            <div className="px-2 py-1.5 text-xs text-muted-foreground">Crie uma tarefa primeiro.</div>
+                          ) : (
+                            localTasks.map((t) => <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>)
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="new-subtask-title">Título da subtarefa</Label>
+                      <Input
+                        id="new-subtask-title"
+                        value={newSubTitle}
+                        onChange={(e) => setNewSubTitle(e.target.value)}
+                        placeholder="Ex.: Editar vídeo do reel 1"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Responsável (opcional)</Label>
+                      <Select value={newSubAssignee} onValueChange={setNewSubAssignee}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Ninguém</SelectItem>
+                          {(boardQuery.data?.members ?? []).map((m) => (
+                            <SelectItem key={m.userId} value={m.userId}>{m.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        type="submit"
+                        disabled={!newSubTaskId || !newSubTitle.trim() || createStandaloneSubtask.isPending}
+                      >
+                        {createStandaloneSubtask.isPending ? "Criando..." : "Criar subtarefa"}
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
 
               <Dialog
                 open={taskDialogOpen}
