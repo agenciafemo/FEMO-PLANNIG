@@ -101,11 +101,28 @@ export default function Producao() {
   const [cfgOpen, setCfgOpen] = useState(false);
   useEffect(() => { if (roleMapQuery.data) setRoleDraft(roleMapQuery.data); }, [roleMapQuery.data]);
   const saveRoles = useMutation({
-    mutationFn: () => saveRoleMap(organizationId!, user!.id, roleDraft),
+    mutationFn: async () => {
+      await saveRoleMap(organizationId!, user!.id, roleDraft);
+      // Reatribui os itens JÁ existentes conforme os novos responsáveis, sem
+      // precisar recriar o planejamento.
+      const upd = (stages: string[], uid: string | null) =>
+        (supabase as AnyClient)
+          .from("production_items")
+          .update({ assignee_id: uid, updated_by: user!.id })
+          .eq("organization_id", organizationId)
+          .in("stage", stages);
+      await Promise.all([
+        upd(["copy", "design"], roleDraft.design),
+        upd(["roteiro", "texto"], roleDraft.writing),
+        upd(["edicao"], roleDraft.editing),
+        upd(["revisao"], roleDraft.review),
+      ]);
+    },
     onSuccess: () => {
-      toast.success("Responsáveis de produção salvos.");
+      toast.success("Responsáveis salvos e itens reatribuídos.");
       setCfgOpen(false);
       queryClient.invalidateQueries({ queryKey: ["prod-roles", organizationId] });
+      queryClient.invalidateQueries({ queryKey: ["production-board", organizationId] });
     },
     onError: (e) => toast.error((e as Error).message),
   });
