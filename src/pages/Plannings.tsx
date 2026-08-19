@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { loadContract } from "@/lib/clientContract";
+import { buildPlanningSubtasks, loadFunctionAssignees } from "@/lib/subtaskTemplates";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -157,21 +158,14 @@ export default function Plannings() {
             .single();
           if (taskError) throw taskError;
 
-          // Subtarefas: 1 por peça, na ordem do fluxo de produção.
-          const subtaskDefs: Array<[number, string]> = [
-            [reelsCount, "Reels/Roteiro"],
-            [carouselCount, "Carrossel"],
-            [postCount, "Post feed"],
-            [storiesCount, "Story"],
-            [blogCount, "Texto blog"],
-          ];
-          let spos = 0;
-          const subtasksToInsert: any[] = [];
-          for (const [count, label] of subtaskDefs) {
-            for (let i = 1; i <= count; i++) {
-              subtasksToInsert.push({ task_id: task.id, title: `${label} ${i}`, position: spos++ });
-            }
-          }
+          // Subtarefas por ETAPA/FUNÇÃO: cada peça gera subtarefas (roteiro,
+          // arte, edição, legenda...) já direcionadas a quem tem a função.
+          const resolve = await loadFunctionAssignees(organizationId);
+          const subtasksToInsert = buildPlanningSubtasks(
+            { static: postCount, reels: reelsCount, carousel: carouselCount, story: storiesCount, blog: blogCount },
+            task.id,
+            resolve,
+          );
           if (subtasksToInsert.length > 0) {
             await supabase.from("task_subtasks").insert(subtasksToInsert as any);
           }
