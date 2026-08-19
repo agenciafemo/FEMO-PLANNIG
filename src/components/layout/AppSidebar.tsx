@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Users, LayoutGrid, UserPlus, LogOut, Shield, Bell, KeyRound, ListTodo, MessageSquareHeart, Clock3, CalendarDays } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,6 +11,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ProfileDialog } from "@/components/layout/ProfileDialog";
+import { Pencil } from "lucide-react";
 
 const navItems = [
   { to: "/dashboard", icon: LayoutGrid, label: "Dashboard" },
@@ -65,6 +67,32 @@ export function NotificationBell() {
   });
 
   const unreadCount = notifications?.filter((n: any) => !n.read).length ?? 0;
+
+  // Som quando chega notificação nova (além do sininho). Beep curto via Web
+  // Audio — funciona porque a pessoa já interagiu com a página.
+  const prevUnreadRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (prevUnreadRef.current !== null && unreadCount > prevUnreadRef.current) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const Ctx = (window.AudioContext || (window as any).webkitAudioContext);
+        if (Ctx) {
+          const ctx = new Ctx();
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.connect(g); g.connect(ctx.destination);
+          o.type = "sine"; o.frequency.value = 880;
+          g.gain.setValueAtTime(0.0001, ctx.currentTime);
+          g.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.01);
+          g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+          o.start();
+          o.stop(ctx.currentTime + 0.35);
+          o.onended = () => ctx.close();
+        }
+      } catch { /* som é best-effort */ }
+    }
+    prevUnreadRef.current = unreadCount;
+  }, [unreadCount]);
 
   // Na primeira vez que a pessoa abre o app no dia, o painel de notificações
   // abre sozinho (uma vez por dia) para ela conferir o que aconteceu.
@@ -129,6 +157,21 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const isAdmin = useIsAdmin();
   const { role } = useOrganization();
   const canManageTeam = role === "owner" || role === "admin" || role === "manager";
+  const [profileOpen, setProfileOpen] = useState(false);
+
+  // Foto + nome do próprio usuário (para o bloco da conta e a saudação).
+  const { data: profile } = useQuery({
+    queryKey: ["sidebar-profile", user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("full_name, avatar_url")
+        .eq("id", user!.id)
+        .maybeSingle();
+      return (data as { full_name: string | null; avatar_url: string | null } | null) ?? null;
+    },
+    enabled: !!user,
+  });
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-sidebar-border/70 bg-sidebar/95 text-sidebar-foreground shadow-sm backdrop-blur-xl supports-[backdrop-filter]:bg-sidebar/90">
@@ -174,18 +217,30 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
 
       <div className="border-t border-sidebar-border/70 p-3">
         <div className="mb-2 flex items-center gap-3 rounded-xl border border-sidebar-border/70 bg-sidebar-accent/45 px-3 py-2.5 shadow-xs">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-foreground text-xs font-bold text-sidebar">
-            {user?.email?.charAt(0).toUpperCase()}
-          </div>
+          {profile?.avatar_url ? (
+            <img src={profile.avatar_url} alt="Perfil" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+          ) : (
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-foreground text-xs font-bold text-sidebar">
+              {(profile?.full_name || user?.email || "?").charAt(0).toUpperCase()}
+            </div>
+          )}
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-xs font-medium text-sidebar-foreground/90">{user?.email}</span>
+            <span className="truncate text-xs font-medium text-sidebar-foreground/90">{profile?.full_name || user?.email}</span>
             {isAdmin && (
               <span className="mt-0.5 flex items-center gap-1 text-[10px] text-sidebar-foreground/45">
                 <Shield className="h-2.5 w-2.5" /> Admin
               </span>
             )}
           </div>
+          <button
+            onClick={() => setProfileOpen(true)}
+            title="Editar perfil"
+            className="shrink-0 rounded-lg p-1.5 text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
         </div>
+        <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
         <ThemeToggle />
         <button
           onClick={signOut}
