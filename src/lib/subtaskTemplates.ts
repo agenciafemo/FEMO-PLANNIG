@@ -10,24 +10,31 @@ const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCa
 // Reel -> Roteiro (roteirista) + Edição (editor); Post/Carrossel -> Arte
 // (designer) + Legenda (roteirista); Story -> Arte; Blog -> Texto.
 type Step = { label: string; kw: string[] };
+
+// Palavras-chave que casam com o NOME da função da equipe (sem acento, minúsculo).
+// Ajustadas para as funções existentes: Editor, Designer, Social Mídia.
+const KW_EDICAO = ["editor", "edi", "video", "corte", "montag"];       // -> Editor (Edu)
+const KW_ARTE = ["designer", "design", "arte"];                        // -> Designer (Giu)
+const KW_ROTEIRO = ["roteir", "copy", "legenda", "redac", "redat", "escrit", "social", "midia"]; // -> Social Mídia (Nanda)
+
 export const STEP_TEMPLATES: Record<string, { piece: string; steps: Step[] }> = {
   reels: { piece: "Reel", steps: [
-    { label: "Roteiro", kw: ["roteir", "copy", "legenda", "redac", "redat", "escrit"] },
-    { label: "Edição de vídeo", kw: ["edi", "video", "corte", "montag"] },
+    { label: "Roteiro", kw: KW_ROTEIRO },
+    { label: "Edição de vídeo", kw: KW_EDICAO },
   ] },
   carousel: { piece: "Carrossel", steps: [
-    { label: "Arte", kw: ["design", "arte", "social m", "midia", "designer"] },
-    { label: "Legenda", kw: ["roteir", "copy", "legenda", "redac", "redat", "escrit"] },
+    { label: "Arte", kw: KW_ARTE },
+    { label: "Legenda", kw: KW_ROTEIRO },
   ] },
   static: { piece: "Post", steps: [
-    { label: "Arte", kw: ["design", "arte", "social m", "midia", "designer"] },
-    { label: "Legenda", kw: ["roteir", "copy", "legenda", "redac", "redat", "escrit"] },
+    { label: "Arte", kw: KW_ARTE },
+    { label: "Legenda", kw: KW_ROTEIRO },
   ] },
   story: { piece: "Story", steps: [
-    { label: "Arte", kw: ["design", "arte", "social m", "midia", "designer"] },
+    { label: "Arte", kw: KW_ARTE },
   ] },
   blog: { piece: "Blog", steps: [
-    { label: "Texto", kw: ["roteir", "copy", "redac", "redat", "escrit", "blog", "redator"] },
+    { label: "Texto", kw: KW_ROTEIRO },
   ] },
 };
 
