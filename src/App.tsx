@@ -21,6 +21,7 @@ import Vault from "./pages/Vault";
 import Reviews from "./pages/Reviews";
 import Programacao from "./pages/Programacao";
 import Relatorios from "./pages/Relatorios";
+import Producao from "./pages/Producao";
 import Tasks from "./pages/Tasks";
 import TimeClock from "./pages/TimeClock";
 import TeamCollaborators from "./pages/TeamCollaborators";
@@ -154,6 +155,7 @@ const App = () => (
                 <Route path="/programacao" element={<Programacao />} />
                 <Route path="/relatorios" element={<Relatorios />} />
                 <Route path="/tasks" element={<Tasks />} />
+                <Route path="/producao" element={<Producao />} />
                 <Route path="/ponto" element={<TimeClock />} />
                 <Route path="/calendario" element={<Calendario />} />
                 <Route path="/conteudo/base" element={<ContentKnowledge />} />

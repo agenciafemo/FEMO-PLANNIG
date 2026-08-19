@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { loadContract } from "@/lib/clientContract";
-import { buildPlanningSubtasks, loadFunctionAssignees } from "@/lib/subtaskTemplates";
+import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
+import { buildProductionItems } from "@/lib/productionPipeline";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -168,21 +169,40 @@ export default function Plannings() {
             taskId = task.id;
           }
 
-          // Só gera as subtarefas se a tarefa ainda não tiver (evita duplicar).
-          const { count: existingSubs } = await (supabase
-            .from("task_subtasks") as any)
+          // Sugestões do mês (datas comemorativas + eventos do cliente) para as
+          // peças de escrita (roteiro/texto) — vão na nota do item.
+          const m = parseInt(month);
+          const mm = String(m).padStart(2, "0");
+          let writingNotes: string | null = null;
+          try {
+            const [commRes, evtRes] = await Promise.all([
+              (supabase as any).from("commemorative_dates").select("title, day, month").eq("month", m),
+              (supabase as any).from("calendar_events").select("title, event_date")
+                .eq("client_id", selectedClient)
+                .gte("event_date", `${year}-${mm}-01`)
+                .lte("event_date", `${year}-${mm}-31`),
+            ]);
+            const sug: string[] = [];
+            for (const c of (commRes.data ?? [])) sug.push(`${c.title} (${String(c.day).padStart(2, "0")}/${String(c.month).padStart(2, "0")})`);
+            for (const e of (evtRes.data ?? [])) sug.push(`${e.title} (${(e.event_date ?? "").slice(8, 10)}/${(e.event_date ?? "").slice(5, 7)})`);
+            if (sug.length) writingNotes = "Sugestões do mês: " + sug.join(" · ");
+          } catch { /* best-effort */ }
+
+          // Gera os ITENS DE PRODUÇÃO (pipeline por etapa) se ainda não existirem.
+          const { count: existingItems } = await (supabase.from("production_items") as any)
             .select("id", { count: "exact", head: true })
-            .eq("task_id", taskId);
-          if (!existingSubs) {
+            .eq("planning_id", planning.id);
+          if (!existingItems) {
             const resolve = await loadFunctionAssignees(organizationId);
-            const subtasksToInsert = buildPlanningSubtasks(
+            const items = buildProductionItems(
               { static: postCount, reels: reelsCount, carousel: carouselCount, story: storiesCount, blog: blogCount },
-              taskId!,
+              { organization_id: organizationId, planning_id: planning.id, client_id: selectedClient, created_by: user!.id },
               resolve,
+              writingNotes,
             );
-            if (subtasksToInsert.length > 0) {
-              const { error: subErr } = await supabase.from("task_subtasks").insert(subtasksToInsert as any);
-              if (subErr) throw subErr;
+            if (items.length > 0) {
+              const { error: prodErr } = await supabase.from("production_items").insert(items as any);
+              if (prodErr) throw prodErr;
             }
           }
         }
@@ -198,6 +218,7 @@ export default function Plannings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["plannings"] });
       queryClient.invalidateQueries({ queryKey: ["tasks-board"] });
+      queryClient.invalidateQueries({ queryKey: ["production-board"] });
       setOpen(false);
       toast.success("Planejamento criado! Tarefa gerada no quadro do responsável.");
     },
