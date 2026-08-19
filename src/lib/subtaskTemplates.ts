@@ -52,10 +52,14 @@ export async function loadFunctionAssignees(organizationId: string): Promise<Ass
   const firstMemberByTag = new Map<string, string>();
   for (const m of mems) if (!firstMemberByTag.has(m.tag_id)) firstMemberByTag.set(m.tag_id, m.user_id);
 
+  // Prioriza a palavra-chave na ORDEM da lista: procura a 1ª keyword que casa
+  // com alguma função. Assim "roteir"/"copy" (função Roteirista) ganha de
+  // "social" (Social Mídia) quando ambas existem.
   return (keywords) => {
-    for (const tag of tags) {
-      const n = norm(tag.name);
-      if (keywords.some((k) => n.includes(norm(k)))) {
+    for (const k of keywords) {
+      const nk = norm(k);
+      const tag = tags.find((t) => norm(t.name).includes(nk));
+      if (tag) {
         const u = firstMemberByTag.get(tag.id);
         if (u) return u;
       }
