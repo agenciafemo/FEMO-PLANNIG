@@ -48,6 +48,7 @@ const MODULES: ModuleCard[] = [
   { title: "Produção", subtitle: "Peças por etapa", icon: Workflow, to: "/producao", isNew: true },
   { title: "Ponto", subtitle: "Registro de horário", icon: Clock3, to: "/ponto", isNew: true },
   { title: "Calendário", subtitle: "Datas e campanhas", icon: CalendarDays, to: "/calendario", isNew: true },
+  { title: "Agenda da Equipe", subtitle: "Eventos e reuniões", icon: CalendarDays, to: "/agenda-equipe", isNew: true },
   { title: "Estúdio de Conteúdo", subtitle: "Copies e roteiros com IA", icon: Sparkles, to: "/conteudo", isNew: true },
   { title: "Dashboard de Controle", subtitle: "Visão geral da operação", icon: ChartNoAxesCombined, to: "/dashboard-controle", isNew: true, managerOnly: true },
   { title: "Programação", subtitle: "Agendar e publicar", icon: CalendarClock, isNew: true, ...(PROGRAMACAO_ENABLED ? { to: "/programacao" } : { soon: true }) },
