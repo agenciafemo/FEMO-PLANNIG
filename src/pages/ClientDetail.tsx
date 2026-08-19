@@ -7,10 +7,11 @@ import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
   ArrowLeft, CalendarClock, Clapperboard, Copy, ExternalLink, FileText, Film,
-  Image as ImageIcon, LayoutGrid, Loader2, Save, Sparkles,
+  Image as ImageIcon, LayoutGrid, Loader2, Pencil, Save, Sparkles,
 } from "lucide-react";
 import {
   EMPTY_CONTRACT, loadContextCompleteness, loadContract, saveContract, type ContentContract,
@@ -38,9 +39,12 @@ export default function ClientDetail() {
     queryKey: ["client-detail", clientId],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("clients").select("id, name, logo_url, public_link_token").eq("id", clientId!).single();
+        .from("clients").select("id, name, logo_url, public_link_token, notes, accent_color").eq("id", clientId!).single();
       if (error) throw error;
-      return data as { id: string; name: string; logo_url: string | null; public_link_token: string };
+      return data as {
+        id: string; name: string; logo_url: string | null; public_link_token: string;
+        notes: string | null; accent_color: string | null;
+      };
     },
     enabled: !!clientId,
   });
@@ -64,6 +68,54 @@ export default function ClientDetail() {
     onSuccess: () => {
       toast.success("Contrato salvo. Novos planejamentos já usam essas quantidades.");
       queryClient.invalidateQueries({ queryKey: ["client-contract", clientId] });
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
+  // Edição do cliente (nome, notas, cor, foto) — dentro da própria ficha.
+  const [editName, setEditName] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editAccent, setEditAccent] = useState("#F97316");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!client) return;
+    setEditName(client.name);
+    setEditNotes(client.notes ?? "");
+    setEditAccent(client.accent_color ?? "#F97316");
+    setLogoPreview(null);
+    setLogoFile(null);
+  }, [client]);
+
+  const uploadLogo = async (file: File): Promise<string | null> => {
+    const ext = file.name.split(".").pop();
+    const path = `${clientId}/logo.${ext}`;
+    const { error } = await supabase.storage.from("client-logos").upload(path, file, { upsert: true });
+    if (error) { toast.error("Erro ao enviar a foto: " + error.message); return null; }
+    return supabase.storage.from("client-logos").getPublicUrl(path).data.publicUrl;
+  };
+
+  const saveClient = useMutation({
+    mutationFn: async () => {
+      let logoUrl: string | undefined;
+      if (logoFile) {
+        const url = await uploadLogo(logoFile);
+        if (url) logoUrl = `${url}?v=${Date.now()}`; // cache-bust
+      }
+      const patch: Record<string, unknown> = {
+        name: editName.trim(),
+        notes: editNotes.trim() || null,
+        accent_color: editAccent,
+      };
+      if (logoUrl) patch.logo_url = logoUrl;
+      const { error } = await supabase.from("clients").update(patch).eq("id", clientId!);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Cliente atualizado.");
+      setLogoFile(null); setLogoPreview(null);
+      queryClient.invalidateQueries({ queryKey: ["client-detail", clientId] });
+      queryClient.invalidateQueries({ predicate: (q) => q.queryKey.some((k) => typeof k === "string" && /client/i.test(k)) });
     },
     onError: (e) => toast.error((e as Error).message),
   });
@@ -111,6 +163,60 @@ export default function ClientDetail() {
               </a>
             </Button>
           )}
+        </div>
+      </div>
+
+      {/* Dados do cliente (editar + foto) */}
+      <div className="rounded-2xl border border-border bg-card p-5">
+        <div className="mb-3 flex items-center gap-2">
+          <Pencil className="h-4 w-4 text-brand" />
+          <h2 className="text-sm font-semibold">Dados do cliente</h2>
+        </div>
+        <div className="flex flex-col gap-4 sm:flex-row">
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border" style={{ backgroundColor: editAccent }}>
+              {logoPreview || client?.logo_url ? (
+                <img src={logoPreview ?? client!.logo_url!} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <span className="text-xl font-black text-white">{(editName || "?").slice(0, 2).toUpperCase()}</span>
+              )}
+            </div>
+            <label className="cursor-pointer text-xs font-medium text-brand hover:underline">
+              {logoFile ? "Trocar foto" : "Adicionar foto"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) { setLogoFile(f); setLogoPreview(URL.createObjectURL(f)); }
+                }}
+              />
+            </label>
+          </div>
+          <div className="flex-1 space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Nome</Label>
+              <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Notas</Label>
+              <Textarea rows={2} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Detalhes, tom de voz, preferências..." />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Cor do cliente</Label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={editAccent} onChange={(e) => setEditAccent(e.target.value)} className="h-9 w-10 cursor-pointer rounded border-0 bg-transparent" />
+                <Input value={editAccent} onChange={(e) => setEditAccent(e.target.value)} className="w-32" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <Button size="sm" onClick={() => saveClient.mutate()} disabled={saveClient.isPending || !editName.trim()}>
+            {saveClient.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
+            Salvar dados
+          </Button>
         </div>
       </div>
 
