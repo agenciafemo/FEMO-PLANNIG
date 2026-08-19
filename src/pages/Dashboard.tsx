@@ -13,6 +13,7 @@ import {
   Sparkles,
   LayoutGrid,
   ListTodo,
+  Workflow,
   Lock,
   Star,
   Users,
@@ -44,6 +45,7 @@ type ModuleCard = {
 const MODULES: ModuleCard[] = [
   { title: "Clientes", subtitle: "Contas e marcas", icon: Users, to: "/clients" },
   { title: "Tarefas", subtitle: "Quadro da equipe", icon: ListTodo, to: "/tasks", isNew: true },
+  { title: "Produção", subtitle: "Peças por etapa", icon: Workflow, to: "/producao", isNew: true },
   { title: "Ponto", subtitle: "Registro de horário", icon: Clock3, to: "/ponto", isNew: true },
   { title: "Calendário", subtitle: "Datas e campanhas", icon: CalendarDays, to: "/calendario", isNew: true },
   { title: "Estúdio de Conteúdo", subtitle: "Copies e roteiros com IA", icon: Sparkles, to: "/conteudo", isNew: true },
