@@ -140,38 +140,57 @@ export default function Plannings() {
             .toISOString()
             .slice(0, 10); // último dia do mês
 
-          const { data: task, error: taskError } = await supabase
-            .from("tasks")
-            .insert({
-              organization_id: organizationId,
-              client_id: selectedClient,
-              planning_id: planning.id,
-              title: `Planejamento ${monthTitle}/${year}`,
-              description: "Tarefa criada automaticamente a partir do planejamento.",
-              status: "todo",
-              priority: "medium",
-              assignee_id: user!.id,
-              created_by: user!.id,
-              due_date: dueDate,
-            } as any)
-            .select()
-            .single();
-          if (taskError) throw taskError;
+          // Achar-ou-criar a tarefa-mãe deste planejamento (evita duplicar e
+          // não quebra se rodar de novo).
+          let taskId: string | null = null;
+          const { data: existing } = await supabase
+            .from("tasks").select("id").eq("planning_id", planning.id).maybeSingle();
+          if (existing?.id) {
+            taskId = existing.id;
+          } else {
+            const { data: task, error: taskError } = await supabase
+              .from("tasks")
+              .insert({
+                organization_id: organizationId,
+                client_id: selectedClient,
+                planning_id: planning.id,
+                title: `Planejamento ${monthTitle}/${year}`,
+                description: "Tarefa criada automaticamente a partir do planejamento.",
+                status: "todo",
+                priority: "medium",
+                assignee_id: user!.id,
+                created_by: user!.id,
+                due_date: dueDate,
+              } as any)
+              .select("id")
+              .single();
+            if (taskError) throw taskError;
+            taskId = task.id;
+          }
 
-          // Subtarefas por ETAPA/FUNÇÃO: cada peça gera subtarefas (roteiro,
-          // arte, edição, legenda...) já direcionadas a quem tem a função.
-          const resolve = await loadFunctionAssignees(organizationId);
-          const subtasksToInsert = buildPlanningSubtasks(
-            { static: postCount, reels: reelsCount, carousel: carouselCount, story: storiesCount, blog: blogCount },
-            task.id,
-            resolve,
-          );
-          if (subtasksToInsert.length > 0) {
-            await supabase.from("task_subtasks").insert(subtasksToInsert as any);
+          // Só gera as subtarefas se a tarefa ainda não tiver (evita duplicar).
+          const { count: existingSubs } = await (supabase
+            .from("task_subtasks") as any)
+            .select("id", { count: "exact", head: true })
+            .eq("task_id", taskId);
+          if (!existingSubs) {
+            const resolve = await loadFunctionAssignees(organizationId);
+            const subtasksToInsert = buildPlanningSubtasks(
+              { static: postCount, reels: reelsCount, carousel: carouselCount, story: storiesCount, blog: blogCount },
+              taskId!,
+              resolve,
+            );
+            if (subtasksToInsert.length > 0) {
+              const { error: subErr } = await supabase.from("task_subtasks").insert(subtasksToInsert as any);
+              if (subErr) throw subErr;
+            }
           }
         }
       } catch (taskErr) {
-        console.error("Planejamento criado, mas falhou ao gerar a tarefa:", taskErr);
+        // NÃO engole mais em silêncio: avisa o motivo real (ex.: migration
+        // planning_id não aplicada, RLS, etc.).
+        console.error("Falha ao gerar a tarefa do planejamento:", taskErr);
+        toast.error("Planejamento criado, mas a tarefa não: " + (taskErr as Error).message);
       }
 
       return planning;
