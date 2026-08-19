@@ -77,6 +77,7 @@ import { useOrganizationRole } from "@/hooks/useOrganizationRole";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { SubtasksBoard } from "@/components/tasks/SubtasksBoard";
 
 type TaskStatus = "todo" | "doing" | "review" | "done";
 type TaskPriority = "low" | "medium" | "high";
@@ -575,6 +576,8 @@ export default function Tasks() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskRecord | null>(null);
+  // Alterna entre o quadro de tarefas e o quadro dedicado de subtarefas.
+  const [boardView, setBoardView] = useState<"tarefas" | "subtarefas">("tarefas");
   // "Nova subtarefa" avulsa: escolhe a tarefa-mãe + título + responsável.
   const [subtaskDialogOpen, setSubtaskDialogOpen] = useState(false);
   const [newSubTaskId, setNewSubTaskId] = useState("");
@@ -1188,22 +1191,41 @@ export default function Tasks() {
 
           {canEditContent && (
             <>
-              <Button className="gap-2" onClick={openCreateTask}>
-                <Plus className="h-4 w-4" /> Nova tarefa
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex rounded-lg border border-border p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setBoardView("tarefas")}
+                    className={cn("rounded-md px-3 py-1.5 text-sm font-medium transition-colors", boardView === "tarefas" ? "bg-brand text-white" : "text-muted-foreground hover:text-foreground")}
+                  >
+                    Tarefas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBoardView("subtarefas")}
+                    className={cn("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors", boardView === "subtarefas" ? "bg-brand text-white" : "text-muted-foreground hover:text-foreground")}
+                  >
+                    <ListChecks className="h-4 w-4" /> Subtarefas
+                  </button>
+                </div>
 
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={() => {
-                  setNewSubTaskId(localTasks[0]?.id ?? "");
-                  setNewSubTitle("");
-                  setNewSubAssignee("none");
-                  setSubtaskDialogOpen(true);
-                }}
-              >
-                <ListChecks className="h-4 w-4" /> Nova subtarefa
-              </Button>
+                <Button className="gap-2" onClick={openCreateTask}>
+                  <Plus className="h-4 w-4" /> Nova tarefa
+                </Button>
+
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => {
+                    setNewSubTaskId(localTasks[0]?.id ?? "");
+                    setNewSubTitle("");
+                    setNewSubAssignee("none");
+                    setSubtaskDialogOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4" /> Nova subtarefa
+                </Button>
+              </div>
 
               <Dialog
                 open={subtaskDialogOpen}
@@ -1599,6 +1621,8 @@ export default function Tasks() {
           )}
         </div>
 
+        {boardView === "tarefas" ? (
+        <>
         <div className="mb-5 rounded-2xl border border-border/70 bg-card/70 p-3 shadow-sm backdrop-blur-sm">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
             <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
@@ -1766,6 +1790,18 @@ export default function Tasks() {
               ) : null}
             </DragOverlay>
           </DndContext>
+        )}
+        </>
+        ) : (
+          <SubtasksBoard
+            subtasks={boardQuery.data?.subtasks ?? []}
+            tasksById={new Map((localTasks ?? []).map((t) => [t.id, t]))}
+            clientsById={clientsById}
+            members={boardQuery.data?.members ?? []}
+            onlyMineUserId={onlyMineActive ? user?.id ?? null : null}
+            onToggle={(id, taskId, done) => toggleSubtask.mutate({ id, taskId, done })}
+            togglePending={toggleSubtask.isPending}
+          />
         )}
 
         {!canEditContent && !boardQuery.isLoading && !boardQuery.isError && (
