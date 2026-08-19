@@ -13,6 +13,7 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Clients from "./pages/Clients";
+import ClientDetail from "./pages/ClientDetail";
 import Plannings from "./pages/Plannings";
 import PlanningDetail from "./pages/PlanningDetail";
 import Collaborators from "./pages/Collaborators";
@@ -143,6 +144,7 @@ const App = () => (
               >
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/clients" element={<Clients />} />
+                <Route path="/clients/:clientId" element={<ClientDetail />} />
                 <Route path="/plannings" element={<Plannings />} />
                 <Route path="/clients/:clientId/plannings" element={<Plannings />} />
                 <Route path="/plannings/:clientSlug/:monthYear" element={<PlanningDetail />} />
