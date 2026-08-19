@@ -110,6 +110,7 @@ type TaskSubtask = {
   title: string;
   done: boolean;
   position: number;
+  assignee_id: string | null;
 };
 
 type TaskTimeEntry = {
@@ -952,6 +953,21 @@ export default function Tasks() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Não foi possível remover a subtarefa"),
   });
 
+  const setSubtaskAssignee = useMutation({
+    mutationFn: async ({ id, assigneeId }: { id: string; assigneeId: string | null }) => {
+      const { error } = await taskSupabase
+        .from<null>("task_subtasks")
+        .update({ assignee_id: assigneeId })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks-board", organizationId] });
+      queryClient.invalidateQueries({ queryKey: ["my-subtasks"] });
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Não foi possível direcionar a subtarefa"),
+  });
+
   const toggleTimer = useMutation({
     mutationFn: async (taskId: string) => {
       if (!user) throw new Error("Sessão inválida");
@@ -1268,10 +1284,15 @@ export default function Tasks() {
 
                       {editingSubtasks.length > 0 ? (
                         <div className="space-y-1.5">
-                          {editingSubtasks.map((subtask) => (
+                          {editingSubtasks.map((subtask) => {
+                            const subAssignee = subtask.assignee_id ? membersById.get(subtask.assignee_id) : null;
+                            return (
                             <div
                               key={subtask.id}
-                              className="group/subtask flex items-center gap-2 rounded-lg bg-background/70 px-2.5 py-2"
+                              className={cn(
+                                "group/subtask flex items-center gap-2 rounded-lg bg-background/70 px-2.5 py-2",
+                                subtask.assignee_id && "border-l-2 border-brand/60"
+                              )}
                             >
                               <Checkbox
                                 id={`subtask-${subtask.id}`}
@@ -1292,6 +1313,34 @@ export default function Tasks() {
                               >
                                 {subtask.title}
                               </label>
+
+                              {/* Direcionar a subtarefa a uma pessoa */}
+                              <Select
+                                value={subtask.assignee_id ?? "none"}
+                                onValueChange={(v) => setSubtaskAssignee.mutate({ id: subtask.id, assigneeId: v === "none" ? null : v })}
+                              >
+                                <SelectTrigger
+                                  className="h-7 w-auto gap-1 border-none bg-transparent px-1.5 text-xs shadow-none hover:bg-muted focus:ring-0"
+                                  aria-label="Responsável da subtarefa"
+                                  title={subAssignee ? `Responsável: ${subAssignee.name}` : "Direcionar a alguém"}
+                                >
+                                  {subAssignee ? (
+                                    <Avatar className="h-5 w-5">
+                                      <AvatarImage src={subAssignee.avatarUrl ?? undefined} />
+                                      <AvatarFallback className="text-[9px]">{initials(subAssignee.name)}</AvatarFallback>
+                                    </Avatar>
+                                  ) : (
+                                    <UserRound className="h-4 w-4 text-muted-foreground/50" />
+                                  )}
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Ninguém</SelectItem>
+                                  {(boardQuery.data?.members ?? []).map((m) => (
+                                    <SelectItem key={m.userId} value={m.userId}>{m.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -1304,7 +1353,8 @@ export default function Tasks() {
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <p className="rounded-lg border border-dashed border-border/70 px-3 py-4 text-center text-xs text-muted-foreground">
