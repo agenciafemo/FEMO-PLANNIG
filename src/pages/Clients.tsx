@@ -305,9 +305,13 @@ export default function Clients() {
     setPlanningOpen(true);
   };
 
-  const copyLink = (token: string) => {
-    navigator.clipboard.writeText(`${window.location.origin}/c/${token}`);
-    toast.success("Link copiado!");
+  const copyLink = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/c/${token}`);
+      toast.success("Link do planejamento copiado!");
+    } catch {
+      toast.error("Não foi possível copiar o link. Tente novamente.");
+    }
   };
 
   const LogoUploadField = ({
@@ -422,17 +426,6 @@ export default function Clients() {
 
                 {/* Ações de gestão flutuam no canto — fora do Link, não navegam. */}
                 <div className="absolute right-2 top-2.5 z-10 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                  {client.public_link_token && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      title="Copiar link do cliente (portal)"
-                      onClick={() => copyLink(client.public_link_token)}
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
                   <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar cliente" onClick={() => openEdit(client)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
@@ -443,7 +436,7 @@ export default function Clients() {
 
                 {/* Card simples: clicar entra na ficha do cliente. */}
                 <Link to={`/clients/${client.id}`} className="block">
-                  <CardContent className="flex items-center gap-3 p-4">
+                  <CardContent className={`flex items-center gap-3 p-4 ${client.public_link_token ? "pr-36" : ""}`}>
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl text-base font-black text-white shadow-sm" style={{ backgroundColor: accent }}>
                       {client.logo_url
                         ? <img src={client.logo_url} alt={client.name} className="h-full w-full object-cover" />
@@ -473,6 +466,21 @@ export default function Clients() {
                     </div>
                   </CardContent>
                 </Link>
+
+                {client.public_link_token && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="absolute bottom-3 right-3 z-20 h-8 shrink-0 bg-background/95 px-2.5 text-xs shadow-sm"
+                    aria-label={`Copiar link do planejamento de ${client.name}`}
+                    title="Copiar link do planejamento"
+                    onClick={() => void copyLink(client.public_link_token)}
+                  >
+                    <Copy className="mr-1.5 h-3.5 w-3.5" />
+                    Copiar link
+                  </Button>
+                )}
               </Card>
             );
           })}
