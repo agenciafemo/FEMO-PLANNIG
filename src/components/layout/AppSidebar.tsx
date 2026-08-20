@@ -28,18 +28,25 @@ const navItems = [
 export function NotificationBell() {
   const queryClient = useQueryClient();
   const { organizationId, isLegacy } = useOrganization();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
 
   // TODO(pending-schema-check): "notifications" não está confirmada no
   // schema real (types.ts). Tratamos como tabela não confiável: qualquer
   // falha (tabela inexistente, coluna organization_id ausente etc.) deve
   // resultar em sino vazio, nunca em erro visível ou quebra da tela.
+  // Cada notificação tem um destinatário (user_id). Mostramos só as MINHAS
+  // (user_id = eu) mais as gerais/broadcast (user_id nulo). Assim ninguém vê —
+  // nem ouve — a notificação de outra pessoa. Ex.: evento da equipe só avisa
+  // quem foi marcado nele.
+  const mineOrBroadcast = user?.id ? `user_id.eq.${user.id},user_id.is.null` : "user_id.is.null";
   const { data: notifications } = useQuery({
-    queryKey: ["notifications", organizationId],
+    queryKey: ["notifications", organizationId, user?.id],
     queryFn: async () => {
       try {
         let query = supabase.from("notifications" as any).select("*") as any;
         if (!isLegacy) query = query.eq("organization_id", organizationId!);
+        query = query.or(mineOrBroadcast);
         const { data, error } = await query.order("created_at", { ascending: false }).limit(20);
         if (error) return [];
         return (data ?? []) as any[];
@@ -57,13 +64,14 @@ export function NotificationBell() {
       try {
         let query = (supabase.from("notifications" as any) as any).update({ read: true }).eq("read", false);
         if (!isLegacy) query = query.eq("organization_id", organizationId!);
+        query = query.or(mineOrBroadcast);
         await query;
       } catch {
         // Silencioso: sino de notificações é best-effort enquanto a tabela
         // não estiver confirmada no banco real.
       }
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications", organizationId] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications", organizationId, user?.id] }),
   });
 
   const unreadCount = notifications?.filter((n: any) => !n.read).length ?? 0;
