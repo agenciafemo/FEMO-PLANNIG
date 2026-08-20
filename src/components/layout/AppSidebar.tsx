@@ -68,28 +68,59 @@ export function NotificationBell() {
 
   const unreadCount = notifications?.filter((n: any) => !n.read).length ?? 0;
 
-  // Som quando chega notificação nova (além do sininho). Beep curto via Web
-  // Audio — funciona porque a pessoa já interagiu com a página.
+  // Som quando chega notificação nova (além do sininho). Dois beeps curtos via
+  // Web Audio. Reaproveita um único AudioContext e o "acorda" (resume) porque
+  // os navegadores bloqueiam áudio até a pessoa interagir com a página.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const audioCtxRef = useRef<any>(null);
   const prevUnreadRef = useRef<number | null>(null);
+
+  const playChime = () => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const Ctx = (window.AudioContext || (window as any).webkitAudioContext);
+      if (!Ctx) return;
+      if (!audioCtxRef.current) audioCtxRef.current = new Ctx();
+      const ctx = audioCtxRef.current;
+      if (ctx.state === "suspended") ctx.resume();
+      const now = ctx.currentTime;
+      // Duas notinhas (ré-agudo → sol) para soar como um "toque".
+      [ [880, 0], [1174, 0.16] ].forEach(([freq, at]) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.type = "sine"; o.frequency.value = freq as number;
+        const t = now + (at as number);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+        o.start(t);
+        o.stop(t + 0.24);
+      });
+    } catch { /* som é best-effort */ }
+  };
+
+  // Mantém o AudioContext "acordado" assim que a pessoa interage (1x basta).
   useEffect(() => {
-    if (prevUnreadRef.current !== null && unreadCount > prevUnreadRef.current) {
+    const wake = () => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const Ctx = (window.AudioContext || (window as any).webkitAudioContext);
-        if (Ctx) {
-          const ctx = new Ctx();
-          const o = ctx.createOscillator();
-          const g = ctx.createGain();
-          o.connect(g); g.connect(ctx.destination);
-          o.type = "sine"; o.frequency.value = 880;
-          g.gain.setValueAtTime(0.0001, ctx.currentTime);
-          g.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.01);
-          g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
-          o.start();
-          o.stop(ctx.currentTime + 0.35);
-          o.onended = () => ctx.close();
-        }
-      } catch { /* som é best-effort */ }
+        if (Ctx && !audioCtxRef.current) audioCtxRef.current = new Ctx();
+        if (audioCtxRef.current?.state === "suspended") audioCtxRef.current.resume();
+      } catch { /* ignore */ }
+    };
+    window.addEventListener("pointerdown", wake, { once: true });
+    window.addEventListener("keydown", wake, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", wake);
+      window.removeEventListener("keydown", wake);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (prevUnreadRef.current !== null && unreadCount > prevUnreadRef.current) {
+      playChime();
     }
     prevUnreadRef.current = unreadCount;
   }, [unreadCount]);
@@ -123,8 +154,14 @@ export function NotificationBell() {
         </button>
       </PopoverTrigger>
       <PopoverContent side="bottom" align="end" className="w-80 p-0">
-        <div className="border-b px-4 py-3">
+        <div className="flex items-center justify-between border-b px-4 py-3">
           <p className="text-sm font-semibold">Notificações</p>
+          <button
+            onClick={() => playChime()}
+            className="rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            🔊 Testar som
+          </button>
         </div>
         <div className="max-h-80 overflow-y-auto">
           {!notifications || notifications.length === 0 ? (
