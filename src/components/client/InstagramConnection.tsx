@@ -15,7 +15,9 @@ import {
 
 // Onde o Facebook devolve o navegador após o OAuth. O callback anexa
 // ?meta_status=pending&connection_id=...&client_id=... a esta rota.
-const RETURN_PATH = "/clients";
+// Retornar do OAuth PARA A PÁGINA DO CLIENTE (onde este componente vive) — na
+// lista /clients o componente não é montado e a seleção de página se perderia.
+const returnPathFor = (clientId: string) => `/clients/${clientId}`;
 
 // Erros de sessão comuns a todas as ações Meta → mensagem clara de re-login.
 function sessionErrorMessage(error: unknown): string | null {
@@ -92,7 +94,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
 
   const connect = useMutation({
     mutationFn: async () => {
-      const url = await startMetaOAuth(clientId, RETURN_PATH);
+      const url = await startMetaOAuth(clientId, returnPathFor(clientId));
       window.location.href = url; // navega para o Facebook
     },
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao iniciar conexão: " + (e as Error).message),
@@ -104,7 +106,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   const reconnectPending = useMutation({
     mutationFn: async () => {
       if (effectivePendingId) await disconnectMeta(effectivePendingId);
-      const url = await startMetaOAuth(clientId, RETURN_PATH);
+      const url = await startMetaOAuth(clientId, returnPathFor(clientId));
       window.location.href = url;
     },
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao reconectar: " + (e as Error).message),
