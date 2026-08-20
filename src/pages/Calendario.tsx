@@ -63,7 +63,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
-type ClientOption = { id: string; name: string };
+type ClientOption = { id: string; name: string; segment?: string | null };
 
 type DatabaseError = { code?: string; message: string };
 type QueryResult<T> = { data: T[] | null; error: DatabaseError | null };
@@ -99,6 +99,7 @@ type CatalogRow = {
   color?: string | null;
   active?: boolean | null;
   client_id?: string | null;
+  segment?: string | null;
 };
 
 type EventRow = {
@@ -286,12 +287,20 @@ function resolveCatalogDate(row: CatalogRow, year: number): Date | null {
   return null;
 }
 
-function normalizeCatalog(rows: CatalogRow[], year: number, clientId: string): CalendarItem[] {
+function normalizeCatalog(
+  rows: CatalogRow[],
+  year: number,
+  clientId: string,
+  clientSegment: string | null,
+): CalendarItem[] {
   return rows.flatMap((row) => {
     if (row.active === false || row.recurring === false) return [];
     // Datas por cliente só aparecem no calendário daquele cliente; datas sem
     // client_id (catálogo global ou geral da org) aparecem para todos.
     if (row.client_id != null && row.client_id !== clientId) return [];
+    // Datas de um segmento só aparecem para clientes daquele segmento. Datas
+    // sem segmento (universais/comerciais) aparecem para todos.
+    if (row.segment != null && row.segment !== clientSegment) return [];
     const date = resolveCatalogDate(row, year);
     const title = row.title ?? row.name;
     if (!date || !title) return [];
@@ -352,14 +361,18 @@ function normalizeEvents(rows: EventRow[], clientId: string): CalendarItem[] {
   });
 }
 
-async function getCommemorativeDates(year: number, clientId: string): Promise<CalendarItem[]> {
+async function getCommemorativeDates(
+  year: number,
+  clientId: string,
+  clientSegment: string | null,
+): Promise<CalendarItem[]> {
   const current = await calendarDb.from<CatalogRow>("commemorative_dates").select("*");
-  if (!current.error) return normalizeCatalog(current.data ?? [], year, clientId);
+  if (!current.error) return normalizeCatalog(current.data ?? [], year, clientId, clientSegment);
   if (!isMissingRelation(current.error)) throw current.error;
 
   const legacy = await calendarDb.from<CatalogRow>("marketing_calendar_dates").select("*");
   if (legacy.error) throw legacy.error;
-  return normalizeCatalog(legacy.data ?? [], year, clientId);
+  return normalizeCatalog(legacy.data ?? [], year, clientId, clientSegment);
 }
 
 async function createCommemorativeDate(input: {
@@ -621,12 +634,14 @@ export default function Calendario() {
   const clientsQuery = useQuery({
     queryKey: ["calendar-clients", organizationId],
     queryFn: async () => {
+      // select("*") para trazer o segment se a coluna já existir (tolerante a
+      // ambientes onde a migration ainda não rodou).
       const { data, error } = await calendarDb.from<ClientOption>("clients")
-        .select("id, name")
+        .select("*")
         .eq("organization_id", organizationId!)
         .order("name");
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []).map((c) => ({ id: c.id, name: c.name, segment: c.segment ?? null }));
     },
     enabled: !!user && !!organizationId,
   });
@@ -636,10 +651,12 @@ export default function Calendario() {
     clientsQuery.data?.some((client) => client.id === storedClientId)
       ? storedClientId
       : clientsQuery.data?.[0]?.id ?? "";
+  const selectedClientSegment =
+    clientsQuery.data?.find((client) => client.id === selectedClientId)?.segment ?? null;
 
   const catalogQuery = useQuery({
-    queryKey: ["calendar-commemorative-dates", organizationId, selectedClientId, visibleMonth.getFullYear()],
-    queryFn: () => getCommemorativeDates(visibleMonth.getFullYear(), selectedClientId),
+    queryKey: ["calendar-commemorative-dates", organizationId, selectedClientId, selectedClientSegment, visibleMonth.getFullYear()],
+    queryFn: () => getCommemorativeDates(visibleMonth.getFullYear(), selectedClientId, selectedClientSegment),
     enabled: !!organizationId,
   });
 
@@ -666,12 +683,12 @@ export default function Calendario() {
   const upcomingStartYear = today.getFullYear();
   const upcomingEndYear = upcomingEnd.getFullYear();
   const upcomingCatalogQuery = useQuery({
-    queryKey: ["calendar-upcoming-commemorative-dates", organizationId, selectedClientId, upcomingStartYear, upcomingEndYear],
+    queryKey: ["calendar-upcoming-commemorative-dates", organizationId, selectedClientId, selectedClientSegment, upcomingStartYear, upcomingEndYear],
     queryFn: async () => {
       const years = upcomingStartYear === upcomingEndYear
         ? [upcomingStartYear]
         : [upcomingStartYear, upcomingEndYear];
-      const results = await Promise.all(years.map((y) => getCommemorativeDates(y, selectedClientId)));
+      const results = await Promise.all(years.map((y) => getCommemorativeDates(y, selectedClientId, selectedClientSegment)));
       return results.flat();
     },
     enabled: !!organizationId,

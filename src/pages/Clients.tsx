@@ -20,6 +20,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CLIENT_SEGMENTS } from "@/lib/clientSegments";
 import { Plus, Copy, ExternalLink, Trash2, ChevronDown, ChevronUp, Calendar, Image, Layers, Pencil, Upload, X, Instagram, Facebook } from "lucide-react";
 import { getClientMetaStatus } from "@/lib/metaRpc";
 import { toast } from "sonner";
@@ -76,6 +77,7 @@ export default function Clients() {
   const [editNotes, setEditNotes] = useState("");
   const [editAgencySince, setEditAgencySince] = useState("");
   const [editAccentColor, setEditAccentColor] = useState("#F97316");
+  const [editSegment, setEditSegment] = useState<string>("none");
   const [editLogoFile, setEditLogoFile] = useState<File | null>(null);
   const [editLogoPreview, setEditLogoPreview] = useState<string | null>(null);
   const editLogoRef = useRef<HTMLInputElement>(null);
@@ -200,6 +202,7 @@ export default function Clients() {
         accent_color: editAccentColor,
         logo_url: logoUrl,
         agency_since: editAgencySince || null,
+        segment: editSegment === "none" ? null : editSegment,
       } as any).eq("id", editingClient.id);
       if (error) throw error;
     },
@@ -289,6 +292,7 @@ export default function Clients() {
     setEditNotes(client.notes || "");
     setEditAgencySince(client.agency_since || "");
     setEditAccentColor(client.accent_color || "#F97316");
+    setEditSegment(client.segment || "none");
     setEditLogoFile(null);
     setEditLogoPreview(client.logo_url || null);
   };
@@ -520,6 +524,21 @@ export default function Clients() {
               {editAgencySince && (
                 <p className="text-xs text-muted-foreground">Na agência há {agencyTenure(editAgencySince)}.</p>
               )}
+            </div>
+            <div className="space-y-2">
+              <Label>Segmento (define as datas do calendário)</Label>
+              <Select value={editSegment} onValueChange={setEditSegment}>
+                <SelectTrigger><SelectValue placeholder="Sem segmento" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem segmento</SelectItem>
+                  {CLIENT_SEGMENTS.map((seg) => (
+                    <SelectItem key={seg.key} value={seg.key}>{seg.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                O calendário deste cliente mostra as datas do segmento escolhido + as comerciais gerais.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Cor de destaque</Label>
