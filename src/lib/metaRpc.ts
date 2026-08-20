@@ -81,9 +81,11 @@ async function freshAccessToken(): Promise<string> {
     const { data: refreshed } = await supabase.auth.refreshSession();
     const newToken = refreshed.session?.access_token;
     if (newToken) return newToken;
-    if (!token) throw new MetaFunctionError("session_expired");
+    // Não conseguiu renovar: NÃO envia um token expirado (daria 401 no
+    // servidor). Sinaliza sessão expirada para a UI pedir novo login.
+    throw new MetaFunctionError("session_expired");
   }
-  return token!;
+  return token;
 }
 
 async function invokeFn<T>(name: string, body: Record<string, unknown>): Promise<T> {

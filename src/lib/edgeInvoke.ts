@@ -25,7 +25,8 @@ async function freshAccessToken(): Promise<string | null> {
   // Renova se não há token ou se falta menos de 60s para expirar.
   if (!token || expiresAtMs < Date.now() + 60_000) {
     const { data: refreshed } = await supabase.auth.refreshSession();
-    return refreshed.session?.access_token ?? token ?? null;
+    // Se não renovou, devolve null (não envia token expirado) → session_expired.
+    return refreshed.session?.access_token ?? null;
   }
   return token;
 }
