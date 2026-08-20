@@ -8,6 +8,32 @@ import type {
 
 const META_ADMIN_ROLES = new Set(["owner", "admin", "manager"]);
 
+// Exceção cirúrgica: quem tem a função de trabalho "Tráfego Pago" pode
+// gerenciar as conexões Meta (conectar/reconectar/desconectar), mesmo sem ser
+// admin/manager. Não concede nenhum outro acesso. Espelha a regra SQL de
+// meta_can_manage_connection.
+async function userManagesTraffic(
+  admin: SupabaseClient,
+  organizationId: string,
+  userId: string,
+): Promise<boolean> {
+  const { data: fns } = await admin
+    .from("team_member_functions")
+    .select("tag_id")
+    .eq("organization_id", organizationId)
+    .eq("user_id", userId);
+  const tagIds = (fns ?? []).map((f: { tag_id: string }) => f.tag_id);
+  if (tagIds.length === 0) return false;
+  const { data: tags } = await admin
+    .from("team_function_tags")
+    .select("name")
+    .eq("organization_id", organizationId)
+    .in("id", tagIds);
+  return (tags ?? []).some((t: { name: string | null }) =>
+    /tr[aá]fego/i.test(t.name ?? "")
+  );
+}
+
 export function generateOAuthState(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   const binary = String.fromCharCode(...bytes);
@@ -64,9 +90,12 @@ export async function requireClientManager(
     .eq("user_id", userId)
     .maybeSingle();
   if (memberError) throw new HttpError(500, "membership_lookup_failed");
-  if (
-    !member || member.status !== "active" || !META_ADMIN_ROLES.has(member.role)
-  ) {
+  if (!member || member.status !== "active") {
+    throw new HttpError(403, "meta_management_forbidden");
+  }
+  const allowed = META_ADMIN_ROLES.has(member.role) ||
+    await userManagesTraffic(admin, client.organization_id, userId);
+  if (!allowed) {
     throw new HttpError(403, "meta_management_forbidden");
   }
   return { organizationId: client.organization_id };
