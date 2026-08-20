@@ -127,14 +127,9 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="/invite/:token"
-                element={
-                  <RequireMultiOrgFlag>
-                    <AcceptInvite />
-                  </RequireMultiOrgFlag>
-                }
-              />
+              {/* Convite por link: funciona mesmo em modo single-org (a página
+                  faz seu próprio fluxo de login + aceite via RPC). */}
+              <Route path="/invite/:token" element={<AcceptInvite />} />
               <Route
                 element={
                   <ProtectedRoute>

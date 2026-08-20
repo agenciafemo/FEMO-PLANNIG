@@ -239,6 +239,10 @@ export default function TeamCollaborators() {
   const canManage = role === "owner" || role === "admin";
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteCargo, setInviteCargo] = useState<Cargo>(CARGOS[3]); // Designer (membro) por padrão
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [editingTag, setEditingTag] = useState<FunctionTag | null>(null);
   const [deletingTag, setDeletingTag] = useState<FunctionTag | null>(null);
   const [tagName, setTagName] = useState("");
@@ -255,6 +259,27 @@ export default function TeamCollaborators() {
     queryClient.invalidateQueries({ queryKey: teamQueryKey }),
     queryClient.invalidateQueries({ queryKey: ["my-functions", organizationId] }),
   ]);
+
+  const inviteMutation = useMutation({
+    mutationFn: async () => {
+      const email = inviteEmail.trim();
+      if (!email) throw new Error("Informe um e-mail.");
+      const { data, error } = await teamSupabase.rpc<{ token: string } | { token: string }[]>(
+        "create_organization_invitation",
+        { _organization_id: organizationId!, _email: email, _role: inviteCargo.role },
+      );
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.token) throw new Error("Não foi possível gerar o link do convite.");
+      return `${window.location.origin}/invite/${row.token}`;
+    },
+    onSuccess: (link) => {
+      setInviteLink(link);
+      toast.success("Convite criado! Copie o link e envie para a pessoa.");
+    },
+    onError: (error: { message?: string }) =>
+      toast.error(error.message ?? "Não foi possível criar o convite."),
+  });
 
   const cargoMutation = useMutation({
     mutationFn: async ({ userId, cargo }: { userId: string; cargo: Cargo }) => {
@@ -407,10 +432,16 @@ export default function TeamCollaborators() {
           subtitle="Veja a equipe, os cargos e as funções de trabalho de cada pessoa."
           breadcrumb={[{ label: "Equipe" }]}
           actions={canManage ? (
-            <Button variant="outline" onClick={() => setCatalogOpen(true)}>
-              <Tags className="mr-2 h-4 w-4" />
-              Gerenciar funções
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => { setInviteLink(null); setInviteEmail(""); setInviteOpen(true); }}>
+                <Mail className="mr-2 h-4 w-4" />
+                Convidar membro
+              </Button>
+              <Button variant="outline" onClick={() => setCatalogOpen(true)}>
+                <Tags className="mr-2 h-4 w-4" />
+                Gerenciar funções
+              </Button>
+            </div>
           ) : undefined}
         />
 
@@ -710,6 +741,84 @@ export default function TeamCollaborators() {
       </AlertDialog>
 
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
+
+      <Dialog open={inviteOpen} onOpenChange={(open) => { setInviteOpen(open); if (!open) setInviteLink(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Convidar membro</DialogTitle>
+            <DialogDescription>
+              Gere um link de convite. A pessoa precisa entrar com <strong>este mesmo e-mail</strong> para aceitar.
+            </DialogDescription>
+          </DialogHeader>
+
+          {inviteLink ? (
+            <div className="space-y-3">
+              <Label>Link do convite</Label>
+              <div className="flex gap-2">
+                <Input readOnly value={inviteLink} className="font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => { navigator.clipboard?.writeText(inviteLink); toast.success("Link copiado!"); }}
+                >
+                  Copiar
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Envie este link para <strong>{inviteEmail}</strong>. Ele expira em 14 dias.
+              </p>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="ghost" onClick={() => { setInviteLink(null); setInviteEmail(""); }}>Novo convite</Button>
+                <Button onClick={() => setInviteOpen(false)}>Fechar</Button>
+              </div>
+            </div>
+          ) : (
+            <form
+              className="space-y-4"
+              onSubmit={(event) => { event.preventDefault(); inviteMutation.mutate(); }}
+            >
+              <div className="space-y-2">
+                <Label htmlFor="invite-email">E-mail</Label>
+                <Input
+                  id="invite-email"
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(event) => setInviteEmail(event.target.value)}
+                  placeholder="pessoa@empresa.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Cargo</Label>
+                <div className="flex flex-wrap gap-2">
+                  {CARGOS.filter((cargo) => cargo.role !== "owner").map((cargo) => (
+                    <button
+                      key={cargo.label}
+                      type="button"
+                      onClick={() => setInviteCargo(cargo)}
+                      className={cn(
+                        "rounded-full border px-3 py-1.5 text-sm transition-colors",
+                        inviteCargo.label === cargo.label
+                          ? "border-brand bg-brand-soft text-brand"
+                          : "border-border/70 text-muted-foreground hover:bg-muted",
+                      )}
+                    >
+                      {cargo.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {inviteCargo.access === "full" ? "Acesso total à operação." : "Acesso de membro (mesma visão da equipe)."}
+                </p>
+              </div>
+              <div className="flex justify-end">
+                <Button type="submit" disabled={inviteMutation.isPending || !inviteEmail.trim()}>
+                  {inviteMutation.isPending ? "Gerando…" : "Gerar link de convite"}
+                </Button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
