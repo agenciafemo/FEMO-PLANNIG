@@ -182,9 +182,23 @@ SELECT org.id, s.title, s.month, s.day, s.category, true, s.recurrence_rule, s.s
 FROM seed s CROSS JOIN org
 WHERE NOT EXISTS (
   SELECT 1 FROM public.commemorative_dates d
-  WHERE d.organization_id = org.id
-    AND lower(btrim(d.title)) = lower(btrim(s.title))
+  WHERE lower(btrim(d.title)) = lower(btrim(s.title))
     AND d.recurrence_rule = s.recurrence_rule
-    AND coalesce(d.segment, '') = coalesce(s.segment, '')
     AND d.client_id IS NULL
+    AND (
+      -- Uma data universal global já atende todas as organizações; não crie
+      -- uma segunda cópia da mesma data dentro da organização.
+      (
+        s.segment IS NULL
+        AND d.segment IS NULL
+        AND (d.organization_id IS NULL OR d.organization_id = org.id)
+      )
+      OR
+      -- Datas segmentadas pertencem à organização e continuam isoladas dela.
+      (
+        s.segment IS NOT NULL
+        AND d.organization_id = org.id
+        AND d.segment = s.segment
+      )
+    )
 );
