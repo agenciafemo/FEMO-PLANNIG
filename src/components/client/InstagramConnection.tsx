@@ -17,6 +17,15 @@ import {
 // ?meta_status=pending&connection_id=...&client_id=... a esta rota.
 const RETURN_PATH = "/clients";
 
+// Erros de sessão comuns a todas as ações Meta → mensagem clara de re-login.
+function sessionErrorMessage(error: unknown): string | null {
+  const reason = error instanceof MetaFunctionError ? error.reasonCode : (error as Error)?.message ?? "";
+  if (reason === "session_expired" || reason === "invalid_user_session" || reason === "authentication_required") {
+    return "Sua sessão expirou. Recarregue a página (F5) ou entre novamente e tente de novo.";
+  }
+  return null;
+}
+
 function pagesErrorMessage(error: unknown): string {
   const reason = error instanceof MetaFunctionError ? error.reasonCode : "";
   if (
@@ -86,7 +95,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
       const url = await startMetaOAuth(clientId, RETURN_PATH);
       window.location.href = url; // navega para o Facebook
     },
-    onError: (e: unknown) => toast.error("Erro ao iniciar conexão: " + (e as Error).message),
+    onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao iniciar conexão: " + (e as Error).message),
   });
 
   // Uma conexão pendente ocupa o único slot permitido por cliente. Para
@@ -98,7 +107,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
       const url = await startMetaOAuth(clientId, RETURN_PATH);
       window.location.href = url;
     },
-    onError: (e: unknown) => toast.error("Erro ao reconectar: " + (e as Error).message),
+    onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao reconectar: " + (e as Error).message),
   });
 
   const finalize = useMutation({

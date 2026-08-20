@@ -64,8 +64,34 @@ export class MetaFunctionError extends Error {
  * Invoca uma Edge Function e, em erro HTTP, tenta extrair o `reason_code`
  * sanitizado do corpo (as funções devolvem { ok:false, reason_code }).
  */
+/**
+ * Garante um access_token válido antes de chamar a Edge Function. Abas
+ * abertas há muito tempo podem carregar um token expirado; aqui renovamos
+ * proativamente (e passamos o token novo no header), evitando o 401
+ * `invalid_user_session`. Se não houver como renovar, sinaliza sessão
+ * expirada para a UI orientar o novo login.
+ */
+async function freshAccessToken(): Promise<string> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const session = sessionData.session;
+  const token = session?.access_token;
+  const expiresAtMs = (session?.expires_at ?? 0) * 1000;
+  // Renova se não há token ou se falta menos de 60s para expirar.
+  if (!token || expiresAtMs < Date.now() + 60_000) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    const newToken = refreshed.session?.access_token;
+    if (newToken) return newToken;
+    if (!token) throw new MetaFunctionError("session_expired");
+  }
+  return token!;
+}
+
 async function invokeFn<T>(name: string, body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke(name, { body });
+  const accessToken = await freshAccessToken();
+  const { data, error } = await supabase.functions.invoke(name, {
+    body,
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
   if (error) {
     let reason: string | undefined;
     try {
