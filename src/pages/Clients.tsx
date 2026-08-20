@@ -418,6 +418,17 @@ export default function Clients() {
 
                 {/* Ações de gestão flutuam no canto — fora do Link, não navegam. */}
                 <div className="absolute right-2 top-2.5 z-10 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  {client.public_link_token && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title="Copiar link do cliente (portal)"
+                      onClick={() => copyLink(client.public_link_token)}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar cliente" onClick={() => openEdit(client)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
