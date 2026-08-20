@@ -100,6 +100,19 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao iniciar conexão: " + (e as Error).message),
   });
 
+  // Reconectar a partir de reauth_required/error: só pode existir UMA conexão
+  // viva por cliente (índice único no banco). Então desconectamos a atual ANTES
+  // de iniciar o novo OAuth — senão o retorno da Meta falha ao gravar a conexão
+  // (pending_connection_create_failed).
+  const reconnect = useMutation({
+    mutationFn: async () => {
+      if (connectionId) await disconnectMeta(connectionId);
+      const url = await startMetaOAuth(clientId, returnPathFor(clientId));
+      window.location.href = url;
+    },
+    onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao reconectar: " + (e as Error).message),
+  });
+
   // Uma conexão pendente ocupa o único slot permitido por cliente. Para
   // refazer o OAuth, primeiro a encerramos pela Edge Function (que valida a
   // permissão do usuário) e só então iniciamos uma autorização nova.
@@ -176,10 +189,12 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
             <Button
               size="sm"
               className="mt-2"
-              disabled={connect.isPending}
-              onClick={() => connect.mutate()}
+              disabled={reconnect.isPending}
+              onClick={() => reconnect.mutate()}
             >
-              <Link2 className="mr-1.5 h-3.5 w-3.5" /> Reconectar
+              {reconnect.isPending
+                ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                : <Link2 className="mr-1.5 h-3.5 w-3.5" />} Reconectar
             </Button>
           )}
         </div>
