@@ -344,10 +344,20 @@ async function createCommemorativeDate(input: {
   // Global = 1 linha sem cliente; específicos = 1 linha por cliente escolhido.
   const targets: (string | null)[] = draft.scope === "global" ? [null] : draft.clientIds;
   for (const clientId of targets) {
-    const { error } = await calendarDb.from<CatalogRow>("commemorative_dates").insert({
+    let { error } = await calendarDb.from<CatalogRow>("commemorative_dates").insert({
       ...base,
       client_id: clientId,
     });
+    // Bancos antigos podem não ter a coluna `color` (a cor é derivada da
+    // categoria na leitura). Se for esse o caso, refaz o insert sem ela.
+    if (error && needsLegacyEventPayload(error)) {
+      const { color: _omitColor, ...baseNoColor } = base;
+      void _omitColor;
+      ({ error } = await calendarDb.from<CatalogRow>("commemorative_dates").insert({
+        ...baseNoColor,
+        client_id: clientId,
+      }));
+    }
     // Ignora duplicata (a data já existe para aquele cliente) e segue.
     if (error && error.code !== "23505") throw error;
   }
