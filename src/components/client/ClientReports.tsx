@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdge } from "@/lib/edgeInvoke";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
@@ -94,7 +95,7 @@ export function ClientReports({ clientId }: ClientReportsProps) {
   const analyzeWithAI = async (reportId: string, pdfUrl: string) => {
     setAnalyzing(reportId);
     try {
-      const { data, error } = await supabase.functions.invoke("analyze-report", {
+      const { data, error } = await invokeEdge<{ aiSummary?: string; error?: string }>("analyze-report", {
         body: { pdfUrl },
       });
       if (error) throw error;

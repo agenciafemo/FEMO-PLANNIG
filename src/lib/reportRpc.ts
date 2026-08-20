@@ -2,7 +2,7 @@
 // generate-report (que guarda a chave do Gemini como secret e lê os dados via
 // RLS). Nenhuma chave ou lógica de IA vive no frontend.
 
-import { supabase } from "@/integrations/supabase/client";
+import { invokeEdge } from "@/lib/edgeInvoke";
 
 export interface ReportResult {
   analysis: string;
@@ -30,7 +30,7 @@ export async function generateReport(input: {
   to?: string; // ISO
   insights?: MetaInsights | null; // métricas já buscadas, para a IA analisar
 }): Promise<ReportResult> {
-  const { data, error } = await supabase.functions.invoke("generate-report", {
+  const { data, error } = await invokeEdge("generate-report", {
     body: {
       client_id: input.clientId,
       from: input.from,
@@ -101,7 +101,7 @@ export async function getMetaInsights(input: {
   compareFrom?: string;
   compareTo?: string;
 }): Promise<MetaInsights> {
-  const { data, error } = await supabase.functions.invoke("meta-insights", {
+  const { data, error } = await invokeEdge("meta-insights", {
     body: {
       client_id: input.clientId,
       from: input.from,

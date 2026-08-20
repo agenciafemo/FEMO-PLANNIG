@@ -3,6 +3,7 @@
 // O mapa cliente->conta vive na tabela client_ad_accounts (RLS por org).
 
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdge } from "@/lib/edgeInvoke";
 
 export interface AdAccount {
   account_id: string; // numérico, sem "act_"
@@ -45,7 +46,7 @@ export interface AdsInsights {
 
 // Lista as contas de anúncios que o token da agência enxerga (teste + mapa).
 export async function listAdAccounts(): Promise<AdAccount[]> {
-  const { data, error } = await supabase.functions.invoke("meta-ads-insights", {
+  const { data, error } = await invokeEdge("meta-ads-insights", {
     body: { mode: "accounts" },
   });
   if (error) throw error;
@@ -60,7 +61,7 @@ export async function getAdsInsights(input: {
   to?: string; // YYYY-MM-DD
   datePreset?: string;
 }): Promise<AdsInsights> {
-  const { data, error } = await supabase.functions.invoke("meta-ads-insights", {
+  const { data, error } = await invokeEdge("meta-ads-insights", {
     body: {
       mode: "insights",
       client_id: input.clientId,

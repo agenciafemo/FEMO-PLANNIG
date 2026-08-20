@@ -8,6 +8,7 @@
 // ============================================================================
 
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdge } from "@/lib/edgeInvoke";
 
 export interface ScheduledPost {
   id: string;
@@ -94,7 +95,7 @@ export async function runPublishWorker(): Promise<{
   published: number;
   failed: number;
 }> {
-  const { data, error } = await supabase.functions.invoke("meta-publish", { body: {} });
+  const { data, error } = await invokeEdge("meta-publish", { body: {} });
   if (error) throw error;
   return data as { processed: number; published: number; failed: number };
 }
