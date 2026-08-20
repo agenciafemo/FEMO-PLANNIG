@@ -398,6 +398,8 @@ async function createCommemorativeDate(input: {
 
   // Criação. Global = 1 linha sem cliente; específicos = 1 linha por cliente.
   const targets: (string | null)[] = draft.scope === "global" ? [null] : draft.clientIds;
+  let inserted = 0;
+  let duplicates = 0;
   for (const clientId of targets) {
     let { error } = await calendarDb.from<CatalogRow>("commemorative_dates").insert({
       ...base,
@@ -413,8 +415,15 @@ async function createCommemorativeDate(input: {
         client_id: clientId,
       }));
     }
-    // Ignora duplicata (a data já existe para aquele cliente) e segue.
-    if (error && error.code !== "23505") throw error;
+    if (error) {
+      if (error.code === "23505") { duplicates++; continue; } // já existe
+      throw error;
+    }
+    inserted++;
+  }
+  // Nada inserido e havia duplicata → avisa em vez de fingir sucesso.
+  if (inserted === 0 && duplicates > 0) {
+    throw new Error("Essa data já existe para o(s) cliente(s) selecionado(s).");
   }
 }
 
@@ -747,8 +756,15 @@ export default function Calendario() {
       if (!draft.title.trim()) throw new Error("Informe o título da data.");
       await createCommemorativeDate({ organizationId, draft });
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, draft) => {
       await refreshCatalog();
+      // O calendário mostra UM cliente por vez. Se a data foi criada para
+      // cliente(s) específico(s) e a visão atual é outra, muda para o primeiro
+      // cliente escolhido — senão a data "some" (fica no calendário dele).
+      if (!draft.id && draft.scope === "clients" && draft.clientIds.length > 0 && organizationId
+          && !draft.clientIds.includes(selectedClientId)) {
+        setSelectedByOrganization({ ...selectedByOrganization, [organizationId]: draft.clientIds[0] });
+      }
       toast.success("Data salva no calendário.");
       setDateDraft(null);
     },
