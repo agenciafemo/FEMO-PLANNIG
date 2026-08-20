@@ -1,6 +1,6 @@
 import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Edit3, Plus, Tags, Trash2, UserRound, UsersRound, X } from "lucide-react";
+import { Check, ChevronDown, Edit3, Mail, Plus, Tags, Trash2, UserRound, UsersRound, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState, PageHeader } from "@/components/common";
@@ -29,11 +29,35 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { ProfileDialog } from "@/components/layout/ProfileDialog";
 
 type OrganizationRole = "owner" | "admin" | "manager" | "editor" | "viewer";
+
+// Cargos que aparecem na "tag" do topo. O acesso deriva do cargo: Proprietário,
+// Gestor e Head têm acesso total (owner/admin); Designer, Social mídia e Editor
+// são membros (editor) e enxergam a mesma coisa. O rótulo específico fica em
+// job_title (por isso os três "membros" continuam distinguíveis na tela).
+type Cargo = { label: string; role: OrganizationRole; access: "full" | "member" };
+const CARGOS: Cargo[] = [
+  { label: "Proprietário", role: "owner", access: "full" },
+  { label: "Gestor", role: "admin", access: "full" },
+  { label: "Head", role: "admin", access: "full" },
+  { label: "Designer", role: "editor", access: "member" },
+  { label: "Social mídia", role: "editor", access: "member" },
+  { label: "Editor", role: "editor", access: "member" },
+];
+
+function cargoFor(member: { job_title: string | null; role: OrganizationRole }): Cargo {
+  return (
+    CARGOS.find((c) => c.label === (member.job_title ?? "")) ??
+    CARGOS.find((c) => c.role === member.role) ??
+    CARGOS[CARGOS.length - 1]
+  );
+}
 
 type DirectoryMember = {
   user_id: string;
@@ -207,9 +231,14 @@ function FunctionChip({
 }
 
 export default function TeamCollaborators() {
-  const { organizationId } = useOrganization();
+  const { organizationId, role } = useOrganization();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
+  // Só Proprietário/Gestor/Head (owner/admin) editam cargos e funções. Os demais
+  // veem a tela em modo leitura. Cada pessoa edita apenas o PRÓPRIO perfil.
+  const canManage = role === "owner" || role === "admin";
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [editingTag, setEditingTag] = useState<FunctionTag | null>(null);
   const [deletingTag, setDeletingTag] = useState<FunctionTag | null>(null);
   const [tagName, setTagName] = useState("");
@@ -226,6 +255,22 @@ export default function TeamCollaborators() {
     queryClient.invalidateQueries({ queryKey: teamQueryKey }),
     queryClient.invalidateQueries({ queryKey: ["my-functions", organizationId] }),
   ]);
+
+  const cargoMutation = useMutation({
+    mutationFn: async ({ userId, cargo }: { userId: string; cargo: Cargo }) => {
+      const { error } = await teamSupabase.from<unknown>("organization_members")
+        .update({ role: cargo.role, job_title: cargo.label })
+        .eq("organization_id", organizationId!)
+        .eq("user_id", userId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      invalidateTeam();
+      toast.success("Cargo atualizado.");
+    },
+    onError: (error: { message?: string }) =>
+      toast.error(error.message ?? "Não foi possível mudar o cargo. Verifique sua permissão."),
+  });
 
   const assignmentMutation = useMutation({
     mutationFn: async ({ userId, tagId, assigned }: { userId: string; tagId: string; assigned: boolean }) => {
@@ -358,15 +403,15 @@ export default function TeamCollaborators() {
     <div className="nrt-surface -mx-4 -mt-4 min-h-screen px-4 pb-16 pt-6 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-8">
       <div className="mx-auto max-w-[1100px] space-y-6">
         <PageHeader
-          title="Equipe / Colaboradores"
-          subtitle="Atribua uma ou mais funções de trabalho a cada pessoa da equipe."
-          breadcrumb={[{ label: "Gestão da equipe" }, { label: "Colaboradores" }]}
-          actions={(
+          title="Equipe"
+          subtitle="Veja a equipe, os cargos e as funções de trabalho de cada pessoa."
+          breadcrumb={[{ label: "Equipe" }]}
+          actions={canManage ? (
             <Button variant="outline" onClick={() => setCatalogOpen(true)}>
               <Tags className="mr-2 h-4 w-4" />
               Gerenciar funções
             </Button>
-          )}
+          ) : undefined}
         />
 
         <div className="rounded-2xl border border-border/70 bg-card/70 p-4 shadow-sm sm:p-5">
@@ -374,7 +419,7 @@ export default function TeamCollaborators() {
             <div>
               <h2 className="text-base font-semibold">Colaboradores ativos</h2>
               <p className="text-sm text-muted-foreground">
-                As funções organizam o trabalho e não alteram as permissões de acesso.
+                O cargo (tag do topo) define o acesso; as funções organizam o trabalho.
               </p>
             </div>
             {!teamQuery.isLoading && (
@@ -402,15 +447,63 @@ export default function TeamCollaborators() {
                       </AvatarFallback>
                     </Avatar>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold">{member.display_name}</p>
+                      <p className="truncate font-semibold">
+                        {member.display_name}
+                        {member.user_id === user?.id && (
+                          <span className="ml-1.5 text-xs font-normal text-muted-foreground">(você)</span>
+                        )}
+                      </p>
                       <p className="truncate text-sm text-muted-foreground">
-                        {member.job_title || ROLE_LABELS[member.role]}
+                        {cargoFor(member).access === "full" ? "Acesso total" : "Membro"}
                       </p>
                     </div>
-                    <span className="rounded-full border border-border/70 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {ROLE_LABELS[member.role]}
-                    </span>
+                    {canManage ? (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-brand/50 hover:text-foreground">
+                            {cargoFor(member).label}
+                            <ChevronDown className="h-3 w-3" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-52 p-1">
+                          <p className="px-2 py-1 text-[11px] font-medium text-muted-foreground">Cargo</p>
+                          {CARGOS.map((cargo) => {
+                            const active = cargoFor(member).label === cargo.label;
+                            return (
+                              <button
+                                key={cargo.label}
+                                type="button"
+                                disabled={cargoMutation.isPending}
+                                onClick={() => cargoMutation.mutate({ userId: member.user_id, cargo })}
+                                className={cn(
+                                  "flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
+                                  active && "bg-muted/60",
+                                )}
+                              >
+                                <span>{cargo.label}</span>
+                                <span className="flex items-center gap-1.5">
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {cargo.access === "full" ? "acesso total" : "membro"}
+                                  </span>
+                                  {active && <Check className="h-4 w-4 text-brand" />}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </PopoverContent>
+                      </Popover>
+                    ) : (
+                      <span className="rounded-full border border-border/70 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        {cargoFor(member).label}
+                      </span>
+                    )}
                   </div>
+
+                  {member.user_id === user?.id && (
+                    <Button variant="outline" size="sm" className="w-full" onClick={() => setProfileOpen(true)}>
+                      <Edit3 className="mr-2 h-4 w-4" /> Editar meu perfil
+                    </Button>
+                  )}
 
                   <div className="space-y-2.5">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
@@ -422,15 +515,18 @@ export default function TeamCollaborators() {
                           key={tag.id}
                           tag={tag}
                           disabled={assignmentMutation.isPending}
-                          onRemove={() => assignmentMutation.mutate({
+                          onRemove={canManage ? () => assignmentMutation.mutate({
                             userId: member.user_id,
                             tagId: tag.id,
                             assigned: true,
-                          })}
+                          }) : undefined}
                         />
                       ))}
+                      {!canManage && member.functions.length === 0 && (
+                        <span className="text-xs text-muted-foreground/60">Sem funções</span>
+                      )}
 
-                      <Popover>
+                      {canManage && <Popover>
                         <PopoverTrigger asChild>
                           <Button variant="outline" size="sm" className="h-7 rounded-full border-dashed text-xs">
                             <Plus className="mr-1 h-3.5 w-3.5" />
@@ -473,7 +569,7 @@ export default function TeamCollaborators() {
                             </div>
                           )}
                         </PopoverContent>
-                      </Popover>
+                      </Popover>}
                     </div>
                   </div>
                 </CardContent>
@@ -612,6 +708,8 @@ export default function TeamCollaborators() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
     </div>
   );
 }

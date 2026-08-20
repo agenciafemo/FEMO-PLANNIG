@@ -55,7 +55,7 @@ const MODULES: ModuleCard[] = [
   { title: "Relatórios", subtitle: "Análise com IA", icon: BarChart3, isNew: true, ...(RELATORIOS_ENABLED ? { to: "/relatorios" } : { soon: true }) },
   { title: "NPS", subtitle: "Satisfação dos clientes", icon: Star, to: "/reviews" },
   { title: "Cofre", subtitle: "Acessos e senhas", icon: Lock, to: "/vault" },
-  { title: "Equipe / Colaboradores", subtitle: "Funções da equipe", icon: Users2, to: "/team/collaborators", managerOnly: true },
+  { title: "Equipe", subtitle: "Pessoas, cargos e funções", icon: Users2, to: "/team/collaborators" },
 ];
 
 export default function Dashboard() {

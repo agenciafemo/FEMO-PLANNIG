@@ -170,14 +170,9 @@ const App = () => (
                     </RequireTeamManager>
                   }
                 />
-                <Route
-                  path="/team/collaborators"
-                  element={
-                    <RequireTeamManager>
-                      <TeamCollaborators />
-                    </RequireTeamManager>
-                  }
-                />
+                {/* Equipe: todos os membros podem ver. A edição de cargos/funções
+                    é gated dentro da própria página (só owner/admin). */}
+                <Route path="/team/collaborators" element={<TeamCollaborators />} />
               </Route>
               <Route path="*" element={<NotFound />} />
                 </Routes>
