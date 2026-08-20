@@ -130,6 +130,14 @@ type CalendarItem = {
   allDay?: boolean;
   startTime?: string;
   endTime?: string;
+  // Dados brutos da data comemorativa (para editar/excluir).
+  commemorative?: {
+    month: number | null;
+    day: number | null;
+    category: string;
+    clientId: string | null;
+    recurrence: string;
+  };
 };
 
 type CalendarEventType = "personalizado" | "campanha" | "comemorativa";
@@ -149,6 +157,7 @@ type EventDraft = {
 // Cadastro de uma data comemorativa/aniversário no catálogo (recorrente todo
 // ano). Escopo "global" = toda a agência; "cliente" = só o cliente atual.
 type CommemorativeDateDraft = {
+  id?: string; // presente = edição de uma data existente
   title: string;
   month: number;
   day: number;
@@ -156,7 +165,24 @@ type CommemorativeDateDraft = {
   scope: "global" | "clients";
   clientIds: string[];
   color: string;
+  // Recorrência: "fixed" = dia/mês fixos; demais = datas móveis (o sistema
+  // calcula o dia certo a cada ano automaticamente).
+  recurrence: string;
 };
+
+// Opções de recorrência expostas na UI. As móveis usam apenas a coluna
+// recurrence_rule (o resolver calcula o dia), sem depender de colunas extras.
+const RECURRENCE_OPTIONS: { value: string; label: string; movable: boolean }[] = [
+  { value: "fixed", label: "Data fixa (dia e mês)", movable: false },
+  { value: "easter", label: "Páscoa (móvel)", movable: true },
+  { value: "good_friday", label: "Sexta-feira Santa (móvel)", movable: true },
+  { value: "carnival", label: "Carnaval (móvel)", movable: true },
+  { value: "corpus_christi", label: "Corpus Christi (móvel)", movable: true },
+  { value: "mothers_day", label: "Dia das Mães (2º dom. de maio)", movable: true },
+  { value: "fathers_day", label: "Dia dos Pais (2º dom. de agosto)", movable: true },
+  { value: "black_friday", label: "Black Friday (4ª sexta de nov.)", movable: true },
+];
+const isMovableRule = (rule: string) => rule !== "fixed" && rule !== "fixed_date";
 
 // Rascunho de tarefa criada a partir de uma data/evento do calendário.
 type TaskDraft = {
@@ -239,6 +265,8 @@ function resolveCatalogDate(row: CatalogRow, year: number): Date | null {
   }
 
   if (rule === "easter") return easterSunday(year);
+  if (rule === "good_friday") return addDays(easterSunday(year), -2);
+  if (rule === "corpus_christi") return addDays(easterSunday(year), 60);
   if (rule === "carnival") return addDays(easterSunday(year), -47);
   if (rule === "mothers_day") return nthWeekday(year, 5, 7, 2);
   if (rule === "fathers_day") return nthWeekday(year, 8, 7, 2);
@@ -270,11 +298,19 @@ function normalizeCatalog(rows: CatalogRow[], year: number, clientId: string): C
     const category = row.category?.toLowerCase() ?? "sazonal";
     return [{
       id: `date-${row.id}-${year}`,
+      recordId: row.id,
       title,
       date,
       category,
       color: row.color ?? CATEGORY_COLORS[category] ?? CATEGORY_COLORS.sazonal,
       kind: "commemorative" as const,
+      commemorative: {
+        month: row.month ?? null,
+        day: row.day ?? null,
+        category,
+        clientId: row.client_id ?? null,
+        recurrence: row.recurrence_rule ?? row.recurrence_kind ?? "fixed",
+      },
     }];
   });
 }
@@ -338,10 +374,29 @@ async function createCommemorativeDate(input: {
     day: draft.day,
     category: draft.category,
     recurring: true,
-    recurrence_rule: "fixed",
+    recurrence_rule: draft.recurrence || "fixed",
     color: draft.color,
   };
-  // Global = 1 linha sem cliente; específicos = 1 linha por cliente escolhido.
+
+  // Edição: atualiza a linha existente (mantém o escopo/cliente atual).
+  if (draft.id) {
+    const { organization_id: _org, ...updatable } = base;
+    void _org;
+    let { error } = await calendarDb.from<CatalogRow>("commemorative_dates")
+      .update(updatable)
+      .eq("id", draft.id);
+    if (error && needsLegacyEventPayload(error)) {
+      const { color: _omitColor, ...noColor } = updatable;
+      void _omitColor;
+      ({ error } = await calendarDb.from<CatalogRow>("commemorative_dates")
+        .update(noColor)
+        .eq("id", draft.id));
+    }
+    if (error) throw error;
+    return;
+  }
+
+  // Criação. Global = 1 linha sem cliente; específicos = 1 linha por cliente.
   const targets: (string | null)[] = draft.scope === "global" ? [null] : draft.clientIds;
   for (const clientId of targets) {
     let { error } = await calendarDb.from<CatalogRow>("commemorative_dates").insert({
@@ -361,6 +416,11 @@ async function createCommemorativeDate(input: {
     // Ignora duplicata (a data já existe para aquele cliente) e segue.
     if (error && error.code !== "23505") throw error;
   }
+}
+
+async function deleteCommemorativeDate(id: string): Promise<void> {
+  const { error } = await calendarDb.from<CatalogRow>("commemorative_dates").delete().eq("id", id);
+  if (error) throw error;
 }
 
 type Assignee = {
@@ -689,7 +749,7 @@ export default function Calendario() {
     },
     onSuccess: async () => {
       await refreshCatalog();
-      toast.success("Data adicionada ao calendário.");
+      toast.success("Data salva no calendário.");
       setDateDraft(null);
     },
     onError: (error: Error) => toast.error(error.message),
@@ -763,8 +823,39 @@ export default function Calendario() {
       scope: selectedClientId ? "clients" : "global",
       clientIds: selectedClientId ? [selectedClientId] : [],
       color: CATEGORY_COLORS.aniversario,
+      recurrence: "fixed",
     });
   };
+
+  // Abre o diálogo para EDITAR uma data comemorativa existente.
+  const openEditDate = (item: CalendarItem) => {
+    if (!item.recordId || !item.commemorative) return;
+    const c = item.commemorative;
+    const category = (["aniversario", "personalizada", "nacional", "varejo", "sazonal"].includes(c.category)
+      ? c.category
+      : "sazonal") as CommemorativeDateDraft["category"];
+    setDateDraft({
+      id: item.recordId,
+      title: item.title,
+      month: c.month ?? item.date.getMonth() + 1,
+      day: c.day ?? item.date.getDate(),
+      category,
+      scope: c.clientId ? "clients" : "global",
+      clientIds: c.clientId ? [c.clientId] : [],
+      color: item.color,
+      recurrence: c.recurrence || "fixed",
+    });
+  };
+
+  const deleteCommemorative = useMutation({
+    mutationFn: (id: string) => deleteCommemorativeDate(id),
+    onSuccess: async () => {
+      await refreshCatalog();
+      toast.success("Data removida do calendário.");
+      setDateDraft(null);
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
 
   const saveTask = useMutation({
     mutationFn: async (draft: TaskDraft) => {
@@ -1029,9 +1120,19 @@ export default function Calendario() {
                                 <span className="truncate">{item.title}</span>
                               </button>
                             ) : (
-                              <div key={item.id} title={title} className={itemClass} style={itemStyle}>
+                              <button
+                                key={item.id}
+                                type="button"
+                                title={title}
+                                className={cn(itemClass, "hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand")}
+                                style={itemStyle}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openEditDate(item);
+                                }}
+                              >
                                 <span className="truncate">{item.title}</span>
-                              </div>
+                              </button>
                             );
                           })}
                           {hiddenCount > 0 && (
@@ -1319,7 +1420,7 @@ export default function Calendario() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Adicionar data comemorativa</DialogTitle>
+            <DialogTitle>{dateDraft?.id ? "Editar data comemorativa" : "Adicionar data comemorativa"}</DialogTitle>
           </DialogHeader>
 
           {dateDraft && (
@@ -1343,34 +1444,55 @@ export default function Calendario() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="calendar-date-day">Dia</Label>
-                  <Input
-                    id="calendar-date-day"
-                    type="number"
-                    min={1}
-                    max={31}
-                    value={dateDraft.day}
-                    onChange={(event) => setDateDraft({ ...dateDraft, day: Number(event.target.value) })}
-                    required
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="calendar-date-month">Mês</Label>
-                  <Select
-                    value={String(dateDraft.month)}
-                    onValueChange={(value) => setDateDraft({ ...dateDraft, month: Number(value) })}
-                  >
-                    <SelectTrigger id="calendar-date-month"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {MONTHS.map((month, index) => (
-                        <SelectItem key={month} value={String(index + 1)}>{month}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="calendar-date-recurrence">Quando acontece</Label>
+                <Select
+                  value={dateDraft.recurrence}
+                  onValueChange={(value) => setDateDraft({ ...dateDraft, recurrence: value })}
+                >
+                  <SelectTrigger id="calendar-date-recurrence"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {RECURRENCE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+
+              {isMovableRule(dateDraft.recurrence) ? (
+                <p className="rounded-lg bg-brand-soft/40 px-3 py-2 text-[11px] text-brand">
+                  Data móvel: o sistema calcula o dia certo automaticamente a cada ano.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="calendar-date-day">Dia</Label>
+                    <Input
+                      id="calendar-date-day"
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={dateDraft.day}
+                      onChange={(event) => setDateDraft({ ...dateDraft, day: Number(event.target.value) })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="calendar-date-month">Mês</Label>
+                    <Select
+                      value={String(dateDraft.month)}
+                      onValueChange={(value) => setDateDraft({ ...dateDraft, month: Number(value) })}
+                    >
+                      <SelectTrigger id="calendar-date-month"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {MONTHS.map((month, index) => (
+                          <SelectItem key={month} value={String(index + 1)}>{month}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
@@ -1395,6 +1517,7 @@ export default function Calendario() {
                   <Label htmlFor="calendar-date-scope">Aparece em</Label>
                   <Select
                     value={dateDraft.scope}
+                    disabled={!!dateDraft.id}
                     onValueChange={(scope: "global" | "clients") => setDateDraft({ ...dateDraft, scope })}
                   >
                     <SelectTrigger id="calendar-date-scope"><SelectValue /></SelectTrigger>
@@ -1406,7 +1529,13 @@ export default function Calendario() {
                 </div>
               </div>
 
-              {dateDraft.scope === "clients" && (
+              {dateDraft.id && (
+                <p className="text-[11px] text-muted-foreground">
+                  Para mudar onde a data aparece, exclua e crie novamente.
+                </p>
+              )}
+
+              {dateDraft.scope === "clients" && !dateDraft.id && (
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <Label>Clientes ({dateDraft.clientIds.length} selecionado{dateDraft.clientIds.length === 1 ? "" : "s"})</Label>
@@ -1452,25 +1581,35 @@ export default function Calendario() {
                 </div>
               )}
 
-              <p className="text-[11px] text-muted-foreground">
-                A data se repete automaticamente todo ano no dia escolhido.
-              </p>
-
-              <div className="flex justify-end gap-2 pt-1">
-                <Button type="button" variant="outline" onClick={() => setDateDraft(null)} disabled={saveCommemorativeDate.isPending}>
-                  Cancelar
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={
-                    saveCommemorativeDate.isPending ||
-                    !dateDraft.title.trim() ||
-                    (dateDraft.scope === "clients" && dateDraft.clientIds.length === 0)
-                  }
-                >
-                  {saveCommemorativeDate.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Adicionar
-                </Button>
+              <div className="flex items-center justify-between gap-2 pt-1">
+                {dateDraft.id ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    disabled={deleteCommemorative.isPending || saveCommemorativeDate.isPending}
+                    onClick={() => deleteCommemorative.mutate(dateDraft.id!)}
+                  >
+                    {deleteCommemorative.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                    Excluir
+                  </Button>
+                ) : <span />}
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" onClick={() => setDateDraft(null)} disabled={saveCommemorativeDate.isPending}>
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={
+                      saveCommemorativeDate.isPending ||
+                      !dateDraft.title.trim() ||
+                      (dateDraft.scope === "clients" && !dateDraft.id && dateDraft.clientIds.length === 0)
+                    }
+                  >
+                    {saveCommemorativeDate.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {dateDraft.id ? "Salvar" : "Adicionar"}
+                  </Button>
+                </div>
               </div>
             </form>
           )}
