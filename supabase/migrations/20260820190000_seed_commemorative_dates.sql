@@ -2,9 +2,9 @@
 -- SEED do calendário comercial (interpretado das listas por segmento).
 --   • segment = NULL  -> data UNIVERSAL (aparece para todos os clientes).
 --   • segment = 'x'   -> só para clientes daquele segmento.
---   • Dia das Mães / Dia dos Pais = MÓVEIS (recurrence_rule), o sistema calcula
---     o 2º domingo a cada ano. month/day ficam só como referência.
--- Idempotente: não duplica (anti-join por título + segmento na mesma org).
+--   • Datas MÓVEIS usam recurrence_rule e devem ter month/day NULL, conforme
+--     commemorative_dates_valid_fixed_date. O sistema calcula a data por ano.
+-- Idempotente: não duplica (anti-join por título normalizado + regra + segmento).
 -- Roda na org que tem mais clientes (a FEMO).
 -- ============================================================================
 
@@ -20,16 +20,16 @@ seed(title, month, day, category, recurrence_rule, segment) AS (
   VALUES
     -- ===== UNIVERSAIS (todos os clientes) =====
     ('Dia Internacional da Mulher', 3, 8, 'varejo', 'fixed', NULL),
-    ('Dia das Mães', 5, 10, 'varejo', 'mothers_day', NULL),
+    ('Dia das Mães', NULL, NULL, 'varejo', 'mothers_day', NULL),
     ('Dia dos Namorados', 6, 12, 'varejo', 'fixed', NULL),
-    ('Dia dos Pais', 8, 9, 'varejo', 'fathers_day', NULL),
+    ('Dia dos Pais', NULL, NULL, 'varejo', 'fathers_day', NULL),
     ('Dia do Cliente', 9, 15, 'varejo', 'fixed', NULL),
     ('Dia das Crianças', 10, 12, 'varejo', 'fixed', NULL),
     ('Natal', 12, 25, 'varejo', 'fixed', NULL),
     ('Réveillon', 12, 31, 'varejo', 'fixed', NULL),
-    ('Páscoa', 4, 5, 'sazonal', 'easter', NULL),
-    ('Carnaval', 2, 17, 'sazonal', 'carnival', NULL),
-    ('Black Friday', 11, 28, 'varejo', 'black_friday', NULL),
+    ('Páscoa', NULL, NULL, 'sazonal', 'easter', NULL),
+    ('Carnaval', NULL, NULL, 'sazonal', 'carnival', NULL),
+    ('Black Friday', NULL, NULL, 'varejo', 'black_friday', NULL),
 
     -- ===== MÉDICOS / SAÚDE =====
     ('Dia Mundial contra o Câncer', 2, 4, 'nacional', 'fixed', 'medicos'),
@@ -183,7 +183,8 @@ FROM seed s CROSS JOIN org
 WHERE NOT EXISTS (
   SELECT 1 FROM public.commemorative_dates d
   WHERE d.organization_id = org.id
-    AND d.title = s.title
+    AND lower(btrim(d.title)) = lower(btrim(s.title))
+    AND d.recurrence_rule = s.recurrence_rule
     AND coalesce(d.segment, '') = coalesce(s.segment, '')
     AND d.client_id IS NULL
 );
