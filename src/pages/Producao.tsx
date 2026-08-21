@@ -39,6 +39,8 @@ type Step = {
   done: boolean;
   scheduled_at: string | null;
   outcome: string | null;
+  reason_codes: string[] | null;
+  reason_note: string | null;
   assignee_id: string | null;
 };
 
@@ -58,6 +60,15 @@ type Member = { user_id: string; display_name: string; avatar_url: string | null
 type ClientRow = { id: string; name: string };
 
 const GROUP_ORDER = ["reels", "carousel", "static", "story", "blog", "extra"];
+
+// Rótulos dos motivos — tanto os internos quanto os que o cliente escolhe no portal.
+const REASON_LABELS: Record<string, string> = {
+  legenda_video: "Legenda do vídeo", legenda_post: "Legenda do post",
+  design: "Erro de design", portugues: "Erro de português", edicao: "Edição",
+  pauta: "Pauta / tema", abordagem: "Abordagem", texto: "Texto / escrita",
+  legenda: "Erro de legenda", estrategia: "Mudança de estratégia",
+  pedido_cliente: "Pedido do cliente",
+};
 
 const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho",
   "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
@@ -126,7 +137,7 @@ export default function Producao() {
     queryKey: ["production-items", organizationId],
     queryFn: async () => {
       const { data, error } = await (supabase as AnyClient).from("production_items")
-        .select("id, content_type, piece_number, title, client_id, planning_id, notes, position, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, assignee_id)")
+        .select("id, content_type, piece_number, title, client_id, planning_id, notes, position, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, reason_codes, reason_note, assignee_id)")
         .eq("organization_id", organizationId!)
         .order("position");
       if (error) throw new Error(error.message);
@@ -542,6 +553,28 @@ export default function Producao() {
                                 </Link>
                               )}
                             </div>
+
+                            {/* Correção pedida pelo cliente */}
+                            {(() => {
+                              const rep = steps.find((s) => s.outcome === "reprovado");
+                              if (!rep) return null;
+                              const codes = rep.reason_codes ?? [];
+                              return (
+                                <div className="mb-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-2.5 py-2">
+                                  <p className="text-[11px] font-semibold text-destructive">
+                                    Correção pedida em “{rep.label}”
+                                  </p>
+                                  {codes.length > 0 && (
+                                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                      {codes.map((c) => REASON_LABELS[c] ?? c).join(" · ")}
+                                    </p>
+                                  )}
+                                  {rep.reason_note && (
+                                    <p className="mt-1 text-[11px] italic text-foreground/80">“{rep.reason_note}”</p>
+                                  )}
+                                </div>
+                              );
+                            })()}
 
                             {piece.notes && (
                               <p className="mb-2.5 rounded-lg bg-brand-soft/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">

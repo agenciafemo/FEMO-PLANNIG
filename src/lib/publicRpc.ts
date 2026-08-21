@@ -225,6 +225,31 @@ export function insertReportComment(
   });
 }
 
+/** Categorias que o cliente escolhe ao pedir correção (o quadro de produção
+ *  usa isso para devolver o trabalho à pessoa certa). */
+export const REVISION_REASONS: { code: string; label: string }[] = [
+  { code: "legenda_video", label: "Legenda do vídeo" },
+  { code: "legenda_post", label: "Legenda do post" },
+  { code: "design", label: "Erro de design" },
+  { code: "portugues", label: "Erro de português" },
+  { code: "edicao", label: "Edição" },
+];
+
+/** O cliente pede correção informando onde está o erro. */
+export function requestPostRevision(
+  token: string,
+  postId: string,
+  reasons: string[],
+  note?: string,
+): Promise<Post> {
+  return callWrite<Post>("public_request_post_revision", {
+    _token: token,
+    _post_id: postId,
+    _reasons: reasons,
+    _note: note ?? null,
+  });
+}
+
 export function updatePostStatus(token: string, postId: string, newStatus: string): Promise<Post> {
   return callWrite<Post>("public_update_post_status", {
     _token: token,

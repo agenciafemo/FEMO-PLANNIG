@@ -9,7 +9,11 @@ import {
   deletePostComment,
   insertEditSuggestion,
   updatePostStatus as updatePostStatusRpc,
+  requestPostRevision,
+  REVISION_REASONS,
 } from "@/lib/publicRpc";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PUBLIC_AUDIO_ENABLED } from "@/lib/featureFlags";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -79,6 +83,23 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
       toast.success(status === "approved" ? "Post aprovado!" : "Post marcado para revisão!");
     },
     onError: () => toast.error("Erro ao atualizar status"),
+  });
+
+  // Pedido de correção: o cliente diz ONDE está o erro e isso devolve o
+  // trabalho para a pessoa responsável no quadro de produção.
+  const [revOpen, setRevOpen] = useState(false);
+  const [revReasons, setRevReasons] = useState<string[]>([]);
+  const [revNote, setRevNote] = useState("");
+
+  const requestRevision = useMutation({
+    mutationFn: () => requestPostRevision(clientToken, postId, revReasons, revNote),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["public-post", postId] });
+      queryClient.invalidateQueries({ queryKey: ["public-posts"] });
+      setRevOpen(false);
+      toast.success("Correção enviada para a equipe!");
+    },
+    onError: () => toast.error("Não foi possível enviar a correção"),
   });
 
   const addComment = useMutation({
@@ -216,14 +237,74 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
         <Button
           className="flex-1"
           variant={post.status === "needs_revision" ? "default" : "outline"}
-          onClick={() => updatePostStatus.mutate(post.status === "needs_revision" ? "pending" : "needs_revision")}
+          onClick={() => {
+            if (post.status === "needs_revision") {
+              updatePostStatus.mutate("pending");
+            } else {
+              setRevReasons([]); setRevNote(""); setRevOpen(true);
+            }
+          }}
           disabled={updatePostStatus.isPending}
           style={post.status === "needs_revision" ? { backgroundColor: "#dc2626", color: "white" } : {}}
         >
           <XCircle className="mr-2 h-5 w-5" />
-          {post.status === "needs_revision" ? "Em Revisão ✗" : "Pedir Revisão"}
+          {post.status === "needs_revision" ? "Em Revisão ✗" : "Pedir Correção"}
         </Button>
       </div>
+
+      {/* O que precisa corrigir — a escolha vai direto para a equipe certa */}
+      <Dialog open={revOpen} onOpenChange={setRevOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>O que precisa corrigir?</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Escolha onde está o problema. Isso vai direto para a pessoa responsável.
+            </p>
+            <div className="space-y-1.5">
+              {REVISION_REASONS.map((r) => {
+                const marcado = revReasons.includes(r.code);
+                return (
+                  <button
+                    key={r.code}
+                    type="button"
+                    onClick={() => setRevReasons((prev) =>
+                      marcado ? prev.filter((c) => c !== r.code) : [...prev, r.code])}
+                    className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                      marcado ? "border-red-500/60 bg-red-500/10" : "border-border hover:bg-muted/50"
+                    }`}
+                  >
+                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                      marcado ? "border-red-600 bg-red-600 text-white" : "border-muted-foreground/40"
+                    }`}>
+                      {marcado && <CheckCircle className="h-3 w-3" />}
+                    </span>
+                    {r.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Quer explicar? (opcional)</Label>
+              <Textarea
+                rows={3}
+                value={revNote}
+                onChange={(e) => setRevNote(e.target.value)}
+                placeholder="Ex.: trocar a cor do fundo do segundo slide"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setRevOpen(false)}>Cancelar</Button>
+              <Button
+                disabled={revReasons.length === 0 || requestRevision.isPending}
+                onClick={() => requestRevision.mutate()}
+                style={{ backgroundColor: "#dc2626", color: "white" }}
+              >
+                Enviar correção
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Media */}
       {isCarousel ? (
