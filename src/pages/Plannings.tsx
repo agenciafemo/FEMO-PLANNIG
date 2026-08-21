@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { loadContract } from "@/lib/clientContract";
 import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
-import { buildProductionItems, buildStepRows, loadRoleMap } from "@/lib/productionPipeline";
+import { buildProductionItems, buildStepRows, loadPipelines, loadRoleMap } from "@/lib/productionPipeline";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -163,9 +163,10 @@ export default function Plannings() {
             .select("id", { count: "exact", head: true })
             .eq("planning_id", planning.id);
           if (!existingItems) {
-            const [roleMap, resolve] = await Promise.all([
+            const [roleMap, resolve, pipelines] = await Promise.all([
               loadRoleMap(organizationId),
               loadFunctionAssignees(organizationId),
+              loadPipelines(organizationId),
             ]);
             const items = buildProductionItems(
               { static: postCount, reels: reelsCount, carousel: carouselCount, story: storiesCount, blog: blogCount },
@@ -173,6 +174,7 @@ export default function Plannings() {
               roleMap,
               resolve,
               writingNotes,
+              pipelines,
             );
             // Liga cada peça ao post correspondente: dentro do mesmo tipo, a
             // enésima peça corresponde ao enésimo post.
@@ -200,7 +202,7 @@ export default function Plannings() {
 
               const stepRows = ((created ?? []) as Array<{
                 id: string; organization_id: string; content_type: string;
-              }>).flatMap((item) => buildStepRows(item, roleMap, resolve));
+              }>).flatMap((item) => buildStepRows(item, roleMap, resolve, pipelines));
               if (stepRows.length > 0) {
                 const { error: stepErr } = await db
                   .from("production_item_steps").insert(stepRows);

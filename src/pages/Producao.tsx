@@ -23,8 +23,8 @@ import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
 import {
   EMPTY_ROLE_MAP, PIECE_LABEL, ROLE_LABELS, STEP_KIND_LABELS, assigneeForRole,
   isCustomStep, loadRoleMap, newCustomKey, pieceProgress, reasonsFor, saveRoleMap,
-  stepsFor, stepsToReopen,
-  type RoleKey, type RoleMap, type StepKind,
+  stepsFor, stepsToReopen, EDITABLE_PIECE_TYPES, loadPipelines, savePipeline, resetPipeline,
+  type RoleKey, type RoleMap, type StepDef, type StepKind,
 } from "@/lib/productionPipeline";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,7 +90,17 @@ export default function Producao() {
   const [selectedClient, setSelectedClient] = useState<string>("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [configOpen, setConfigOpen] = useState(false);
+  const [modelosOpen, setModelosOpen] = useState(false);
+  const [modeloTipo, setModeloTipo] = useState<string>("reels");
+  const [modeloDraft, setModeloDraft] = useState<StepDef[]>([]);
   const [roleDraft, setRoleDraft] = useState<RoleMap>(EMPTY_ROLE_MAP);
+
+  // Modelos de etapas da organização (tipos sem modelo salvo caem no padrão).
+  const { data: pipelines = null } = useQuery({
+    queryKey: ["prod-pipelines", organizationId],
+    queryFn: () => loadPipelines(organizationId!),
+    enabled: !!organizationId,
+  });
 
   const { data: clients = [] } = useQuery({
     queryKey: ["prod-clients", organizationId],
@@ -250,7 +260,7 @@ export default function Producao() {
       if (error) throw new Error(error.message);
 
       // Reabre as etapas responsáveis pelo motivo apontado.
-      const keys = stepsToReopen(gate.item.content_type, gate.step.step_key, gateReasons);
+      const keys = stepsToReopen(gate.item.content_type, gate.step.step_key, gateReasons, pipelines);
       const alvo = (gate.item.production_item_steps ?? []).filter((s) => keys.includes(s.step_key));
       if (alvo.length === 0) return { reabertas: 0 };
 
@@ -318,7 +328,7 @@ export default function Producao() {
         content_type: nova.tipo,
         piece_number: base + k + 1,
         title: isExtra ? nova.titulo.trim() : null,
-        stage: stepsFor(nova.tipo)[0]?.key ?? "concluir",
+        stage: stepsFor(nova.tipo, pipelines)[0]?.key ?? "concluir",
         position: 9000 + base + k,
       }));
 
@@ -327,7 +337,7 @@ export default function Producao() {
       if (error) throw new Error(error.message);
 
       const steps = ((created ?? []) as Array<{ id: string; organization_id: string; content_type: string }>)
-        .flatMap((item) => stepsFor(item.content_type).map((s, index) => ({
+        .flatMap((item) => stepsFor(item.content_type, pipelines).map((s, index) => ({
           organization_id: item.organization_id,
           item_id: item.id,
           step_key: s.key,
@@ -397,6 +407,36 @@ export default function Producao() {
   });
 
   // ---- Config de responsáveis ----
+  const openModelos = (tipo = modeloTipo) => {
+    setModeloTipo(tipo);
+    setModeloDraft(stepsFor(tipo, pipelines).map((s) => ({ ...s })));
+    setModelosOpen(true);
+  };
+
+  const saveModelo = useMutation({
+    mutationFn: async () => {
+      if (modeloDraft.some((s) => !s.label.trim())) throw new Error("Toda etapa precisa de um nome.");
+      if (modeloDraft.length === 0) throw new Error("O modelo precisa de ao menos uma etapa.");
+      await savePipeline(organizationId!, user!.id, modeloTipo, modeloDraft);
+    },
+    onSuccess: () => {
+      toast.success(`Modelo de ${PIECE_LABEL[modeloTipo]} salvo. Vale para as próximas peças.`);
+      setModelosOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["prod-pipelines", organizationId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const restaurarModelo = useMutation({
+    mutationFn: () => resetPipeline(organizationId!, modeloTipo),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["prod-pipelines", organizationId] });
+      setModeloDraft(stepsFor(modeloTipo, null).map((s) => ({ ...s })));
+      toast.success("Modelo padrão restaurado.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const openConfig = async () => {
     if (!organizationId) return;
     setRoleDraft(await loadRoleMap(organizationId));
@@ -439,6 +479,9 @@ export default function Producao() {
             </Button>
             <Button variant="outline" className="gap-2" onClick={openConfig}>
               <Settings2 className="h-4 w-4" /> Responsáveis
+            </Button>
+            <Button variant="outline" className="gap-2" onClick={() => openModelos()}>
+              <Workflow className="h-4 w-4" /> Modelos de etapas
             </Button>
           </div>
         </div>
@@ -917,6 +960,141 @@ export default function Producao() {
               <Button onClick={() => saveConfig.mutate()} disabled={saveConfig.isPending}>
                 {saveConfig.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Salvar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modelos de etapas por tipo de peça */}
+      <Dialog open={modelosOpen} onOpenChange={setModelosOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>Modelos de etapas</DialogTitle></DialogHeader>
+          <p className="-mt-1 text-sm text-muted-foreground">
+            Estas são as etapas com que cada peça nasce. Alterar o modelo vale para as
+            PRÓXIMAS peças — as que já existem continuam como estão.
+          </p>
+
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Tipo de peça</Label>
+              <Select value={modeloTipo} onValueChange={(v) => openModelos(v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {EDITABLE_PIECE_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>{PIECE_LABEL[t]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="max-h-[45vh] space-y-2 overflow-y-auto pr-1">
+              {modeloDraft.map((step, index) => (
+                <div key={step.key} className="rounded-lg border border-border/70 bg-card/50 p-2.5">
+                  <div className="flex items-start gap-2">
+                    <div className="flex flex-col pt-1">
+                      <button
+                        type="button"
+                        className="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
+                        disabled={index === 0}
+                        aria-label="Mover para cima"
+                        onClick={() => setModeloDraft((d) => {
+                          const n = [...d];
+                          [n[index - 1], n[index]] = [n[index], n[index - 1]];
+                          return n;
+                        })}
+                      >
+                        <ChevronDown className="h-4 w-4 rotate-180" />
+                      </button>
+                      <button
+                        type="button"
+                        className="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
+                        disabled={index === modeloDraft.length - 1}
+                        aria-label="Mover para baixo"
+                        onClick={() => setModeloDraft((d) => {
+                          const n = [...d];
+                          [n[index], n[index + 1]] = [n[index + 1], n[index]];
+                          return n;
+                        })}
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="flex-1 space-y-2">
+                      <Input
+                        value={step.label}
+                        placeholder="Nome da etapa"
+                        onChange={(e) => setModeloDraft((d) =>
+                          d.map((s, i) => (i === index ? { ...s, label: e.target.value } : s)))}
+                      />
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Select
+                          value={step.kind}
+                          onValueChange={(v) => setModeloDraft((d) =>
+                            d.map((s, i) => (i === index ? { ...s, kind: v as StepKind } : s)))}
+                        >
+                          <SelectTrigger className="sm:flex-1"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {(Object.keys(STEP_KIND_LABELS) as StepKind[]).map((k) => (
+                              <SelectItem key={k} value={k}>{STEP_KIND_LABELS[k]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={step.role ?? "none"}
+                          onValueChange={(v) => setModeloDraft((d) =>
+                            d.map((s, i) => (i === index ? { ...s, role: v === "none" ? null : (v as RoleKey) } : s)))}
+                        >
+                          <SelectTrigger className="sm:flex-1"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">
+                              <span className="text-muted-foreground">Sem responsável automático</span>
+                            </SelectItem>
+                            {(Object.keys(ROLE_LABELS) as RoleKey[]).map((r) => (
+                              <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="pt-1 text-muted-foreground transition-colors hover:text-destructive"
+                      aria-label="Remover etapa"
+                      onClick={() => setModeloDraft((d) => d.filter((_, i) => i !== index))}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => setModeloDraft((d) => [
+                ...d, { key: newCustomKey(), label: "", kind: "check", role: null },
+              ])}
+            >
+              <Plus className="h-4 w-4" /> Adicionar etapa
+            </Button>
+
+            <div className="flex flex-wrap justify-between gap-2 pt-1">
+              <Button
+                variant="ghost"
+                onClick={() => restaurarModelo.mutate()}
+                disabled={restaurarModelo.isPending}
+              >
+                {restaurarModelo.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Restaurar padrão
+              </Button>
+              <Button onClick={() => saveModelo.mutate()} disabled={saveModelo.isPending}>
+                {saveModelo.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Salvar modelo
               </Button>
             </div>
           </div>
