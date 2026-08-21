@@ -71,8 +71,11 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  -- media_urls é jsonb em produção (era TEXT[] no schema antigo). Comparar a
+  -- representação em texto funciona nos dois casos: '[]' (jsonb vazio),
+  -- '{}' (array vazio) e nulo contam como "sem mídia".
   v_media   := (COALESCE(btrim(NEW.cover_image_url), '') <> '')
-               OR (COALESCE(array_length(NEW.media_urls, 1), 0) > 0);
+               OR (COALESCE(NEW.media_urls::text, '') NOT IN ('', '[]', '{}', 'null'));
   v_video   := COALESCE(btrim(NEW.video_url), '') <> '';
   v_caption := COALESCE(btrim(NEW.caption), '') <> '';
   v_any     := v_media OR v_video OR v_caption;
@@ -119,12 +122,12 @@ WHERE s.item_id = i.id
   AND s.done = false
   AND (
        (s.step_key = 'design' AND ((COALESCE(btrim(p.cover_image_url), '') <> '')
-                                   OR (COALESCE(array_length(p.media_urls, 1), 0) > 0)))
+                                   OR (COALESCE(p.media_urls::text, '') NOT IN ('', '[]', '{}', 'null'))))
     OR (s.step_key = 'edicao' AND COALESCE(btrim(p.video_url), '') <> '')
     OR (s.step_key IN ('legenda', 'legenda_capa') AND COALESCE(btrim(p.caption), '') <> '')
     OR (s.step_key = 'enviar_planejamento' AND (
           (COALESCE(btrim(p.cover_image_url), '') <> '')
-          OR (COALESCE(array_length(p.media_urls, 1), 0) > 0)
+          OR (COALESCE(p.media_urls::text, '') NOT IN ('', '[]', '{}', 'null'))
           OR (COALESCE(btrim(p.video_url), '') <> '')
           OR (COALESCE(btrim(p.caption), '') <> '')))
     OR (s.step_key = 'revisao' AND p.status IN ('pending', 'approved'))
