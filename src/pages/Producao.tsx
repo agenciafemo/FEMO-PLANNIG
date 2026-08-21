@@ -211,7 +211,13 @@ export default function Producao() {
         .eq("id", step.id);
       if (error) throw new Error(error.message);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] }),
+    onSuccess: (_d, vars) => {
+      toast.success(vars.value
+        ? "Captação marcada e lançada na Agenda da Equipe."
+        : "Captação desmarcada (removida da agenda).");
+      queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] });
+      queryClient.invalidateQueries({ queryKey: ["team-events", organizationId] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -629,6 +635,9 @@ export default function Producao() {
                                       <Input
                                         type="datetime-local"
                                         className="h-6 w-[165px] px-1.5 text-[11px]"
+                                        title={step.scheduled_at
+                                          ? "Já está na Agenda da Equipe"
+                                          : "Ao marcar a data, entra na Agenda da Equipe"}
                                         value={step.scheduled_at ? step.scheduled_at.slice(0, 16) : ""}
                                         onChange={(e) => setCaptacao.mutate({ step, value: e.target.value })}
                                       />
