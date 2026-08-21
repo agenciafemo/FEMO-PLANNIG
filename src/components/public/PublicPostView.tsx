@@ -568,6 +568,19 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
             </Button>
           </div>
 
+          {/* O comentário é o lugar natural onde o cliente reclama — então o
+              pedido de correção formal também fica ao alcance aqui. */}
+          {post.status !== "needs_revision" && (
+            <button
+              type="button"
+              onClick={() => { setRevReasons([]); setRevNote(commentText); setRevOpen(true); }}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-red-500/40 px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-500/10"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Precisa de correção? Diga onde está o erro
+            </button>
+          )}
+
           {/* Audio comment — adiado: oculto enquanto PUBLIC_AUDIO_ENABLED = false */}
           {PUBLIC_AUDIO_ENABLED && (
           <div className="flex flex-wrap items-center gap-2">
