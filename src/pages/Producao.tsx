@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarClock, Check, ChevronDown, ChevronRight, CircleCheck, Flag,
-  Loader2, Send, Settings2, UserRound, Workflow,
+  Loader2, Plus, Send, Settings2, UserRound, Workflow, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,8 +20,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { cn } from "@/lib/utils";
 import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
 import {
-  EMPTY_ROLE_MAP, PIECE_LABEL, ROLE_LABELS, loadRoleMap, pieceProgress, saveRoleMap,
-  type RoleKey, type RoleMap,
+  EMPTY_ROLE_MAP, PIECE_LABEL, ROLE_LABELS, STEP_KIND_LABELS, assigneeForRole,
+  isCustomStep, loadRoleMap, newCustomKey, pieceProgress, saveRoleMap, stepsFor,
+  type RoleKey, type RoleMap, type StepKind,
 } from "@/lib/productionPipeline";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,6 +44,7 @@ type Item = {
   id: string;
   content_type: string;
   piece_number: number;
+  title: string | null;
   client_id: string | null;
   planning_id: string | null;
   notes: string | null;
@@ -53,7 +55,7 @@ type Item = {
 type Member = { user_id: string; display_name: string; avatar_url: string | null };
 type ClientRow = { id: string; name: string };
 
-const GROUP_ORDER = ["reels", "carousel", "static", "story", "blog"];
+const GROUP_ORDER = ["reels", "carousel", "static", "story", "blog", "extra"];
 
 const KIND_ICON = {
   check: CircleCheck,
@@ -98,7 +100,7 @@ export default function Producao() {
     queryKey: ["production-items", organizationId],
     queryFn: async () => {
       const { data, error } = await (supabase as AnyClient).from("production_items")
-        .select("id, content_type, piece_number, client_id, planning_id, notes, position, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, assignee_id)")
+        .select("id, content_type, piece_number, title, client_id, planning_id, notes, position, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, assignee_id)")
         .eq("organization_id", organizationId!)
         .order("position");
       if (error) throw new Error(error.message);
@@ -171,6 +173,113 @@ export default function Producao() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // ---- Nova produção (peça avulsa ou tarefa extra, para qualquer cliente) ----
+  const [novaOpen, setNovaOpen] = useState(false);
+  const [nova, setNova] = useState({ clientId: "", tipo: "extra", titulo: "", qtd: "1" });
+
+  const criarProducao = useMutation({
+    mutationFn: async () => {
+      const clientId = nova.clientId || activeClient;
+      if (!clientId) throw new Error("Escolha o cliente.");
+      const isExtra = nova.tipo === "extra";
+      if (isExtra && !nova.titulo.trim()) throw new Error("Dê um nome à tarefa extra.");
+      const qtd = isExtra ? 1 : Math.max(1, Math.min(20, Number(nova.qtd) || 1));
+
+      const roleMap = await loadRoleMap(organizationId!);
+      const resolve = await loadFunctionAssignees(organizationId!);
+      const db = supabase as AnyClient;
+
+      // Continua a numeração das peças daquele tipo, para o mesmo cliente.
+      const usados = items
+        .filter((i) => i.client_id === clientId && i.content_type === nova.tipo)
+        .map((i) => i.piece_number);
+      const base = usados.length ? Math.max(...usados) : 0;
+
+      const rows = Array.from({ length: qtd }, (_, k) => ({
+        organization_id: organizationId!,
+        client_id: clientId,
+        planning_id: null,
+        content_type: nova.tipo,
+        piece_number: base + k + 1,
+        title: isExtra ? nova.titulo.trim() : null,
+        stage: stepsFor(nova.tipo)[0]?.key ?? "concluir",
+        position: 9000 + base + k,
+      }));
+
+      const { data: created, error } = await db.from("production_items")
+        .insert(rows).select("id, organization_id, content_type");
+      if (error) throw new Error(error.message);
+
+      const steps = ((created ?? []) as Array<{ id: string; organization_id: string; content_type: string }>)
+        .flatMap((item) => stepsFor(item.content_type).map((s, index) => ({
+          organization_id: item.organization_id,
+          item_id: item.id,
+          step_key: s.key,
+          label: s.label,
+          kind: s.kind,
+          position: index,
+          done: false,
+          assignee_id: assigneeForRole(s.role, roleMap, resolve),
+        })));
+      if (steps.length > 0) {
+        const { error: stepErr } = await db.from("production_item_steps").insert(steps);
+        if (stepErr) throw new Error(stepErr.message);
+      }
+      return clientId;
+    },
+    onSuccess: (clientId) => {
+      toast.success("Adicionado à produção.");
+      setNovaOpen(false);
+      setNova({ clientId: "", tipo: "extra", titulo: "", qtd: "1" });
+      setSelectedClient(clientId);
+      queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // ---- Acrescentar / remover etapa de uma peça ----
+  const [stepOpen, setStepOpen] = useState<Item | null>(null);
+  const [novaEtapa, setNovaEtapa] = useState<{ label: string; kind: StepKind; assignee: string }>(
+    { label: "", kind: "check", assignee: "none" },
+  );
+
+  const addStep = useMutation({
+    mutationFn: async () => {
+      if (!stepOpen) return;
+      if (!novaEtapa.label.trim()) throw new Error("Dê um nome à etapa.");
+      const atuais = stepOpen.production_item_steps ?? [];
+      const pos = atuais.length ? Math.max(...atuais.map((s) => s.position)) + 1 : 0;
+      const { error } = await (supabase as AnyClient).from("production_item_steps").insert({
+        organization_id: organizationId!,
+        item_id: stepOpen.id,
+        step_key: newCustomKey(),
+        label: novaEtapa.label.trim(),
+        kind: novaEtapa.kind,
+        position: pos,
+        done: false,
+        assignee_id: novaEtapa.assignee === "none" ? null : novaEtapa.assignee,
+      });
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      toast.success("Etapa acrescentada.");
+      setStepOpen(null);
+      setNovaEtapa({ label: "", kind: "check", assignee: "none" });
+      queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const removeStep = useMutation({
+    mutationFn: async (step: Step) => {
+      const { error } = await (supabase as AnyClient)
+        .from("production_item_steps").delete().eq("id", step.id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] }),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   // ---- Config de responsáveis ----
   const openConfig = async () => {
     if (!organizationId) return;
@@ -206,9 +315,14 @@ export default function Producao() {
               Todas as etapas de cada peça já estão aqui — marque conforme conclui, em qualquer ordem.
             </p>
           </div>
-          <Button variant="outline" className="gap-2" onClick={openConfig}>
-            <Settings2 className="h-4 w-4" /> Responsáveis
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button className="gap-2" onClick={() => { setNova((n) => ({ ...n, clientId: activeClient })); setNovaOpen(true); }}>
+              <Plus className="h-4 w-4" /> Adicionar produção
+            </Button>
+            <Button variant="outline" className="gap-2" onClick={openConfig}>
+              <Settings2 className="h-4 w-4" /> Responsáveis
+            </Button>
+          </div>
         </div>
 
         {/* Resumo geral: onde está o gargalo de cada cliente */}
@@ -306,7 +420,9 @@ export default function Producao() {
                           <div key={piece.id} className="p-4">
                             <div className="mb-2.5 flex items-center gap-2">
                               <span className="text-sm font-medium">
-                                {PIECE_LABEL[piece.content_type] ?? piece.content_type} {piece.piece_number}
+                                {piece.title
+                                  ? piece.title
+                                  : `${PIECE_LABEL[piece.content_type] ?? piece.content_type} ${piece.piece_number}`}
                               </span>
                               <span className="text-xs text-muted-foreground tabular-nums">
                                 {pp.done}/{pp.total}
@@ -374,9 +490,27 @@ export default function Producao() {
                                         </AvatarFallback>
                                       </Avatar>
                                     )}
+
+                                    {/* Etapas acrescentadas pela equipe podem ser removidas */}
+                                    {isCustomStep(step.step_key) && (
+                                      <button
+                                        onClick={() => removeStep.mutate(step)}
+                                        title="Remover esta etapa"
+                                        className="rounded p-0.5 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    )}
                                   </div>
                                 );
                               })}
+
+                              <button
+                                onClick={() => { setStepOpen(piece); setNovaEtapa({ label: "", kind: "check", assignee: "none" }); }}
+                                className="flex items-center gap-1 rounded-lg border border-dashed border-border px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:border-brand/50 hover:text-foreground"
+                              >
+                                <Plus className="h-3.5 w-3.5" /> Etapa
+                              </button>
                             </div>
                           </div>
                         );
@@ -389,6 +523,131 @@ export default function Producao() {
           </div>
         )}
       </div>
+
+      {/* Adicionar produção: peça avulsa ou tarefa extra, para qualquer cliente */}
+      <Dialog open={novaOpen} onOpenChange={setNovaOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Adicionar produção</DialogTitle></DialogHeader>
+          <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); criarProducao.mutate(); }}>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Cliente</Label>
+              <Select value={nova.clientId} onValueChange={(v) => setNova({ ...nova, clientId: v })}>
+                <SelectTrigger><SelectValue placeholder="Escolha o cliente" /></SelectTrigger>
+                <SelectContent>
+                  {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Funciona para qualquer cliente, mesmo sem planejamento criado.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Tipo</Label>
+              <Select value={nova.tipo} onValueChange={(v) => setNova({ ...nova, tipo: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="extra">Tarefa extra</SelectItem>
+                  <SelectItem value="reels">Reel</SelectItem>
+                  <SelectItem value="carousel">Carrossel</SelectItem>
+                  <SelectItem value="static">Post</SelectItem>
+                  <SelectItem value="story">Story</SelectItem>
+                  <SelectItem value="blog">Blog</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {nova.tipo === "extra" ? (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Nome da tarefa</Label>
+                <Input
+                  value={nova.titulo}
+                  onChange={(e) => setNova({ ...nova, titulo: e.target.value })}
+                  placeholder="Ex.: Gravação institucional"
+                  autoFocus
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Nasce com uma etapa. Use “+ Etapa” no quadro para montar o processo dela.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Quantas peças</Label>
+                <Input
+                  type="number" min={1} max={20}
+                  value={nova.qtd}
+                  onChange={(e) => setNova({ ...nova, qtd: e.target.value })}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Cada peça já vem com todas as etapas do tipo escolhido.
+                </p>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="outline" onClick={() => setNovaOpen(false)}>Cancelar</Button>
+              <Button type="submit" disabled={criarProducao.isPending}>
+                {criarProducao.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Adicionar
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Acrescentar etapa a uma peça */}
+      <Dialog open={!!stepOpen} onOpenChange={(v) => { if (!v) setStepOpen(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Nova etapa</DialogTitle></DialogHeader>
+          <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); addStep.mutate(); }}>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Nome da etapa</Label>
+              <Input
+                value={novaEtapa.label}
+                onChange={(e) => setNovaEtapa({ ...novaEtapa, label: e.target.value })}
+                placeholder="Ex.: Aprovação interna"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Tipo de etapa</Label>
+              <Select
+                value={novaEtapa.kind}
+                onValueChange={(v: StepKind) => setNovaEtapa({ ...novaEtapa, kind: v })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(STEP_KIND_LABELS) as StepKind[]).map((k) => (
+                    <SelectItem key={k} value={k}>{STEP_KIND_LABELS[k]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Responsável</Label>
+              <Select
+                value={novaEtapa.assignee}
+                onValueChange={(v) => setNovaEtapa({ ...novaEtapa, assignee: v })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Ninguém</SelectItem>
+                  {members.map((m) => (
+                    <SelectItem key={m.user_id} value={m.user_id}>{m.display_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="outline" onClick={() => setStepOpen(null)}>Cancelar</Button>
+              <Button type="submit" disabled={addStep.isPending}>
+                {addStep.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Acrescentar
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Responsáveis por função */}
       <Dialog open={configOpen} onOpenChange={setConfigOpen}>

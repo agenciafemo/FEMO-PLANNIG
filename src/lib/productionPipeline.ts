@@ -73,6 +73,24 @@ export const PIPELINES: Record<string, StepDef[]> = {
     S("enviar_planejamento", "Enviar para o planejamento", "acao", "design"),
     S("aprov_cliente", "Aprovação do cliente", "gate", "review"),
   ],
+  // Trabalho que não vem de um planejamento. Nasce enxuta — a equipe acrescenta
+  // as etapas que aquela tarefa precisar.
+  extra: [
+    S("concluir", "Concluir", "check", null),
+  ],
+};
+
+// Etapas acrescentadas pela equipe têm a chave começando em 'custom_' — é o que
+// permite removê-las sem tocar nas etapas do modelo.
+export const CUSTOM_PREFIX = "custom_";
+export const isCustomStep = (key: string) => key.startsWith(CUSTOM_PREFIX);
+export const newCustomKey = () => `${CUSTOM_PREFIX}${Date.now().toString(36)}`;
+
+export const STEP_KIND_LABELS: Record<StepKind, string> = {
+  check: "Tarefa simples (feito / não feito)",
+  data: "Com data marcada (ex.: captação)",
+  gate: "Aprovação (aprovado / reprovado)",
+  acao: "Ação (executa algo)",
 };
 
 export function stepsFor(contentType: string): StepDef[] {
@@ -185,6 +203,7 @@ export function assigneeForRole(
 // ---------------------------------------------------------------------------
 export const PIECE_LABEL: Record<string, string> = {
   carousel: "Carrossel", static: "Post", story: "Story", reels: "Reel", blog: "Blog",
+  extra: "Tarefa extra",
 };
 
 export type PieceCounts = { static: number; reels: number; carousel: number; story: number; blog: number };
