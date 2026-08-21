@@ -22,7 +22,8 @@ import { cn } from "@/lib/utils";
 import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
 import {
   EMPTY_ROLE_MAP, PIECE_LABEL, ROLE_LABELS, STEP_KIND_LABELS, assigneeForRole,
-  isCustomStep, loadRoleMap, newCustomKey, pieceProgress, saveRoleMap, stepsFor,
+  isCustomStep, loadRoleMap, newCustomKey, pieceProgress, reasonsFor, saveRoleMap,
+  stepsFor, stepsToReopen,
   type RoleKey, type RoleMap, type StepKind,
 } from "@/lib/productionPipeline";
 
@@ -132,6 +133,11 @@ export default function Producao() {
       return (data ?? []) as Item[];
     },
     enabled: !!organizationId,
+    // O planejamento marca etapas por gatilho no banco, então o quadro precisa
+    // buscar de novo ao voltar para a aba (o padrão global não refaz).
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
   });
 
   // ---- Resumo por cliente (onde está o gargalo da operação) ----
@@ -195,6 +201,74 @@ export default function Producao() {
       if (error) throw new Error(error.message);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] }),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // ---- Portões: aprovar ou reprovar com motivo ----
+  // Reprovar não é só uma etiqueta: ele DEVOLVE o trabalho, desmarcando a etapa
+  // que causou o problema e avisando quem precisa refazer.
+  const [gate, setGate] = useState<{ item: Item; step: Step } | null>(null);
+  const [gateReasons, setGateReasons] = useState<string[]>([]);
+  const [gateNote, setGateNote] = useState("");
+
+  const resolveGate = useMutation({
+    mutationFn: async (decision: "aprovado" | "reprovado") => {
+      if (!gate) return;
+      const db = supabase as AnyClient;
+
+      if (decision === "aprovado") {
+        const { error } = await db.from("production_item_steps").update({
+          done: true, outcome: "aprovado", done_by: user!.id,
+          done_at: new Date().toISOString(), reason_codes: null, reason_note: null,
+        }).eq("id", gate.step.id);
+        if (error) throw new Error(error.message);
+        return { reabertas: 0 };
+      }
+
+      if (gateReasons.length === 0) throw new Error("Escolha ao menos um motivo.");
+      const { error } = await db.from("production_item_steps").update({
+        done: false, outcome: "reprovado", done_by: user!.id, done_at: null,
+        reason_codes: gateReasons, reason_note: gateNote.trim() || null,
+      }).eq("id", gate.step.id);
+      if (error) throw new Error(error.message);
+
+      // Reabre as etapas responsáveis pelo motivo apontado.
+      const keys = stepsToReopen(gate.item.content_type, gate.step.step_key, gateReasons);
+      const alvo = (gate.item.production_item_steps ?? []).filter((s) => keys.includes(s.step_key));
+      if (alvo.length === 0) return { reabertas: 0 };
+
+      await db.from("production_item_steps")
+        .update({ done: false, done_at: null })
+        .in("id", alvo.map((s) => s.id));
+
+      // Avisa quem precisa refazer.
+      const motivos = gateReasons
+        .map((c) => reasonsFor(gate.step.step_key).find((r) => r.code === c)?.label ?? c)
+        .join(", ");
+      const cliente = clients.find((c) => c.id === gate.item.client_id)?.name ?? "";
+      const notifs = alvo
+        .filter((s) => s.assignee_id)
+        .map((s) => ({
+          organization_id: organizationId!,
+          user_id: s.assignee_id,
+          title: `↩️ Refazer: ${s.label}`,
+          body: `${cliente} · ${motivos}`,
+          type: "production_reopen",
+          read: false,
+        }));
+      if (notifs.length > 0) {
+        try { await db.from("notifications").insert(notifs); } catch { /* best-effort */ }
+      }
+      return { reabertas: alvo.length };
+    },
+    onSuccess: (res) => {
+      const n = res?.reabertas ?? 0;
+      toast.success(n > 0
+        ? `Devolvido: ${n} ${n === 1 ? "etapa reaberta" : "etapas reabertas"} e responsáveis avisados.`
+        : "Registrado.");
+      setGate(null); setGateReasons([]); setGateNote("");
+      queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -485,13 +559,23 @@ export default function Producao() {
                                     key={step.id}
                                     className={cn(
                                       "flex items-center gap-1.5 rounded-lg border px-2 py-1.5 transition-colors",
-                                      step.done
-                                        ? "border-success/40 bg-success/10"
-                                        : "border-border/70 bg-background hover:border-brand/40",
+                                      step.outcome === "reprovado"
+                                        ? "border-destructive/50 bg-destructive/10"
+                                        : step.done
+                                          ? "border-success/40 bg-success/10"
+                                          : "border-border/70 bg-background hover:border-brand/40",
                                     )}
                                   >
                                     <button
-                                      onClick={() => toggleStep.mutate(step)}
+                                      onClick={() => {
+                                        // Portões abrem a decisão (aprovar / reprovar com motivo).
+                                        if (step.kind === "gate") {
+                                          setGate({ item: piece, step });
+                                          setGateReasons([]); setGateNote("");
+                                        } else {
+                                          toggleStep.mutate(step);
+                                        }
+                                      }}
                                       disabled={toggleStep.isPending}
                                       className="flex items-center gap-1.5"
                                       title={who ? `Responsável: ${who.display_name}` : "Sem responsável"}
@@ -558,6 +642,83 @@ export default function Producao() {
           </div>
         )}
       </div>
+
+      {/* Portão: aprovar ou reprovar com motivo */}
+      <Dialog open={!!gate} onOpenChange={(v) => { if (!v) setGate(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>{gate?.step.label}</DialogTitle></DialogHeader>
+          {gate && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Ao reprovar, as etapas responsáveis pelo motivo voltam a ficar em aberto
+                e quem precisa refazer é avisado.
+              </p>
+
+              <div className="space-y-2">
+                <Label className="text-xs">Motivo da reprovação</Label>
+                <div className="space-y-1">
+                  {reasonsFor(gate.step.step_key).map((r) => {
+                    const marcado = gateReasons.includes(r.code);
+                    return (
+                      <button
+                        key={r.code}
+                        type="button"
+                        onClick={() => setGateReasons((prev) =>
+                          marcado ? prev.filter((c) => c !== r.code) : [...prev, r.code])}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-sm transition-colors",
+                          marcado ? "border-destructive/50 bg-destructive/10" : "border-border/70 hover:bg-muted/50",
+                        )}
+                      >
+                        <span className={cn(
+                          "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                          marcado ? "border-destructive bg-destructive text-white" : "border-muted-foreground/40",
+                        )}>
+                          {marcado && <Check className="h-3 w-3" />}
+                        </span>
+                        <span className="flex-1">{r.label}</span>
+                        {r.reopen.length === 0 && (
+                          <span className="text-[10px] text-muted-foreground">não é retrabalho</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Observação (opcional)</Label>
+                <Input
+                  value={gateNote}
+                  onChange={(e) => setGateNote(e.target.value)}
+                  placeholder="O que precisa mudar"
+                />
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2 pt-1">
+                <Button type="button" variant="ghost" onClick={() => setGate(null)}>Cancelar</Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  disabled={resolveGate.isPending}
+                  onClick={() => resolveGate.mutate("reprovado")}
+                >
+                  {resolveGate.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Reprovar e devolver
+                </Button>
+                <Button
+                  type="button"
+                  disabled={resolveGate.isPending}
+                  onClick={() => resolveGate.mutate("aprovado")}
+                >
+                  Aprovar
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Adicionar produção: peça avulsa ou tarefa extra, para qualquer cliente */}
       <Dialog open={novaOpen} onOpenChange={setNovaOpen}>
