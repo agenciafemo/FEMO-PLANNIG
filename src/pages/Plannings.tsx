@@ -40,7 +40,15 @@ type ClientGroup = {
   clientId: string;
   name: string;
   accent: string;
+  /** Vazio = cliente sem nenhum planejamento criado. */
   plannings: PlanningRow[];
+};
+
+type ClientRow = {
+  id: string;
+  name: string;
+  accent_color?: string | null;
+  traffic_only?: boolean | null;
 };
 
 const STATUS_FILTERS: { key: StatusFilter; label: string; color: string }[] = [
@@ -279,11 +287,37 @@ export default function Plannings() {
       grupo.plannings.sort((a, b) => b.year - a.year || b.month - a.month);
     }
 
+    // Cliente que nunca teve planejamento nenhum também aparece — é assim que
+    // se vê quem foi esquecido. Só entra quando a lista está mostrando tudo:
+    // sob filtro de status ou mês, um bloco vazio mentiria (o cliente pode ter
+    // planejamentos, só nenhum que case com o filtro).
+    const semNenhum = statusFilter === "all" && filterMonth === "all";
+    if (semNenhum) {
+      const temAlgum = new Set(((plannings ?? []) as PlanningRow[]).map((p) => p.client_id));
+      for (const c of (clients ?? []) as ClientRow[]) {
+        if (temAlgum.has(c.id) || porCliente.has(c.id)) continue;
+        // Quem só faz tráfego pago não tem planejamento de conteúdo por
+        // definição: apareceria para sempre como pendência que nunca resolve.
+        if (c.traffic_only) continue;
+        if (filterClient !== "all" && filterClient !== c.id) continue;
+        porCliente.set(c.id, {
+          clientId: c.id,
+          name: c.name,
+          accent: c.accent_color || "#ef5a2b",
+          plannings: [],
+        });
+      }
+    }
+
     return [...porCliente.values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
-  }, [plannings, statusFilter, filterClient, filterMonth]);
+  }, [plannings, clients, statusFilter, filterClient, filterMonth]);
+
+  const comPlanejamento = grupos.filter((g) => g.plannings.length > 0);
+  const todosAbertos = comPlanejamento.length > 0
+    && comPlanejamento.every((g) => gruposAbertos.includes(g.clientId));
 
   // Com um cliente só na tela, manter fechado seria só um clique a mais.
-  const abrirTudo = grupos.length === 1;
+  const abrirTudo = comPlanejamento.length === 1;
   const isGrupoAberto = (clientId: string) => abrirTudo || gruposAbertos.includes(clientId);
   const toggleGrupo = (clientId: string) =>
     setGruposAbertos(gruposAbertos.includes(clientId)
@@ -450,16 +484,18 @@ export default function Plannings() {
           </button>
         )}
 
-        {grupos.length > 1 && (
+        {/* Só conta quem tem o que expandir: bloco de cliente sem planejamento
+            não abre, leva direto para criar. */}
+        {comPlanejamento.length > 1 && (
           <Button
             variant="ghost"
             size="sm"
             className="ml-auto gap-1.5 text-xs"
             onClick={() => setGruposAbertos(
-              gruposAbertos.length === grupos.length ? [] : grupos.map((g) => g.clientId),
+              todosAbertos ? [] : comPlanejamento.map((g) => g.clientId),
             )}
           >
-            {gruposAbertos.length === grupos.length
+            {todosAbertos
               ? <><ChevronsDownUp className="h-3.5 w-3.5" /> Recolher todos</>
               : <><ChevronsUpDown className="h-3.5 w-3.5" /> Expandir todos</>}
           </Button>
@@ -473,30 +509,46 @@ export default function Plannings() {
       ) : grupos.length > 0 ? (
         <div className="space-y-2.5">
           {grupos.map((grupo) => {
-            const aberto = isGrupoAberto(grupo.clientId);
+            const vazio = grupo.plannings.length === 0;
+            const aberto = !vazio && isGrupoAberto(grupo.clientId);
             const recente = grupo.plannings[0];
             return (
-            <Card key={grupo.clientId} className="overflow-hidden">
-              <div className="h-1 w-full" style={{ backgroundColor: grupo.accent }} />
+            <Card key={grupo.clientId} className={`overflow-hidden ${vazio ? "border-dashed" : ""}`}>
+              <div className="h-1 w-full" style={{ backgroundColor: vazio ? "transparent" : grupo.accent }} />
 
-              {/* Cabeçalho do cliente: resume sem precisar abrir. */}
+              {/* Cabeçalho do cliente: resume sem precisar abrir. Cliente sem
+                  nenhum planejamento não tem o que expandir — o clique leva
+                  direto para criar o primeiro, já com ele selecionado. */}
               <button
                 type="button"
-                onClick={() => toggleGrupo(grupo.clientId)}
-                aria-expanded={aberto}
+                onClick={() => {
+                  if (!vazio) return toggleGrupo(grupo.clientId);
+                  setSelectedClient(grupo.clientId);
+                  setOpen(true);
+                }}
+                aria-expanded={vazio ? undefined : aberto}
                 className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-muted/40"
               >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white shadow-sm" style={{ backgroundColor: grupo.accent }}>
+                <div
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold shadow-sm ${vazio ? "text-muted-foreground" : "text-white"}`}
+                  style={{ backgroundColor: vazio ? "transparent" : grupo.accent, border: vazio ? `2px dashed ${grupo.accent}` : undefined }}
+                >
                   {grupo.name.charAt(0)}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold">{grupo.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {grupo.plannings.length} {grupo.plannings.length === 1 ? "planejamento" : "planejamentos"}
-                    {recente && <> · último em {MONTHS[recente.month - 1]} {recente.year}</>}
-                  </p>
+                  <p className={`truncate font-semibold ${vazio ? "text-muted-foreground" : ""}`}>{grupo.name}</p>
+                  {vazio ? (
+                    <p className="text-sm font-medium text-warning">Nenhum planejamento criado</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      {grupo.plannings.length} {grupo.plannings.length === 1 ? "planejamento" : "planejamentos"}
+                      {recente && <> · último em {MONTHS[recente.month - 1]} {recente.year}</>}
+                    </p>
+                  )}
                 </div>
-                <ChevronDown className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${aberto ? "rotate-180" : ""}`} />
+                {vazio
+                  ? <span className="flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium"><Plus className="h-3.5 w-3.5" /> Criar</span>
+                  : <ChevronDown className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${aberto ? "rotate-180" : ""}`} />}
               </button>
 
               {aberto && (
