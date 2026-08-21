@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { loadContract } from "@/lib/clientContract";
 import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
-import { buildProductionItems, loadRoleMap } from "@/lib/productionPipeline";
+import { buildProductionItems, buildStepRows, loadRoleMap } from "@/lib/productionPipeline";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -170,8 +170,24 @@ export default function Plannings() {
               writingNotes,
             );
             if (items.length > 0) {
-              const { error: prodErr } = await supabase.from("production_items").insert(items as any);
+              // Insere as peças e, com os ids devolvidos, cria as ETAPAS de cada
+              // uma (checklist). A peça só é útil no quadro com as etapas.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const db = supabase as any;
+              const { data: created, error: prodErr } = await db
+                .from("production_items")
+                .insert(items)
+                .select("id, organization_id, content_type");
               if (prodErr) throw prodErr;
+
+              const stepRows = ((created ?? []) as Array<{
+                id: string; organization_id: string; content_type: string;
+              }>).flatMap((item) => buildStepRows(item, roleMap, resolve));
+              if (stepRows.length > 0) {
+                const { error: stepErr } = await db
+                  .from("production_item_steps").insert(stepRows);
+                if (stepErr) throw stepErr;
+              }
             }
           }
         }

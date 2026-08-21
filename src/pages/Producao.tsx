@@ -1,61 +1,83 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Lightbulb, Loader2, UserRound, Workflow } from "lucide-react";
+import {
+  CalendarClock, Check, ChevronDown, ChevronRight, CircleCheck, Flag,
+  Loader2, Send, Settings2, UserRound, Workflow,
+} from "lucide-react";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
 import {
-  COLUMNS, EMPTY_ROLE_MAP, PIECE_LABEL, ROLE_LABELS, STAGE_META, assigneeForStage,
-  loadRoleMap, nextStage, saveRoleMap, type RoleKey, type RoleMap, type Stage,
+  EMPTY_ROLE_MAP, PIECE_LABEL, ROLE_LABELS, loadRoleMap, pieceProgress, saveRoleMap,
+  type RoleKey, type RoleMap,
 } from "@/lib/productionPipeline";
-import { Settings2 } from "lucide-react";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = any;
+
+type Step = {
+  id: string;
+  step_key: string;
+  label: string;
+  kind: "check" | "data" | "gate" | "acao";
+  position: number;
+  done: boolean;
+  scheduled_at: string | null;
+  outcome: string | null;
+  assignee_id: string | null;
+};
 
 type Item = {
   id: string;
   content_type: string;
   piece_number: number;
-  stage: Stage;
-  assignee_id: string | null;
-  notes: string | null;
   client_id: string | null;
-  clients: { name: string | null } | null;
+  planning_id: string | null;
+  notes: string | null;
+  position: number;
+  production_item_steps: Step[];
 };
 
 type Member = { user_id: string; display_name: string; avatar_url: string | null };
+type ClientRow = { id: string; name: string };
 
-function initials(name: string) {
-  return name.trim().split(/\s+/).slice(0, 2).map((p) => p.charAt(0).toUpperCase()).join("") || "?";
-}
+const GROUP_ORDER = ["reels", "carousel", "static", "story", "blog"];
+
+const KIND_ICON = {
+  check: CircleCheck,
+  data: CalendarClock,
+  gate: Flag,
+  acao: Send,
+} as const;
 
 export default function Producao() {
   const { user } = useAuth();
-  const { organizationId, role } = useOrganization();
+  const { organizationId } = useOrganization();
   const queryClient = useQueryClient();
-  const canEdit = role === "owner" || role === "admin" || role === "manager" || role === "editor";
-  const [onlyMine, setOnlyMine] = useState(false);
 
-  const { data: items = [], isLoading } = useQuery({
-    queryKey: ["production-board", organizationId],
+  const [selectedClient, setSelectedClient] = useState<string>("");
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [configOpen, setConfigOpen] = useState(false);
+  const [roleDraft, setRoleDraft] = useState<RoleMap>(EMPTY_ROLE_MAP);
+
+  const { data: clients = [] } = useQuery({
+    queryKey: ["prod-clients", organizationId],
     queryFn: async () => {
-      const { data } = await (supabase as AnyClient)
-        .from("production_items")
-        .select("id, content_type, piece_number, stage, assignee_id, notes, client_id, clients(name)")
-        .eq("organization_id", organizationId)
-        .order("position", { ascending: true });
-      return (data as Item[]) ?? [];
+      const { data } = await (supabase as AnyClient).from("clients")
+        .select("id, name").eq("organization_id", organizationId!).order("name");
+      return (data ?? []) as ClientRow[];
     },
     enabled: !!organizationId,
   });
@@ -63,201 +85,346 @@ export default function Producao() {
   const { data: members = [] } = useQuery({
     queryKey: ["prod-members", organizationId],
     queryFn: async () => {
-      const { data } = await (supabase as AnyClient).rpc("get_task_assignees", { _organization_id: organizationId });
-      return (data as Member[]) ?? [];
+      const { data } = await (supabase as AnyClient)
+        .rpc("get_task_assignees", { _organization_id: organizationId });
+      return (data ?? []) as Member[];
     },
     enabled: !!organizationId,
   });
-  const membersById = useMemo(() => new Map(members.map((m) => [m.user_id, m])), [members]);
+  const memberOf = (id: string | null) => members.find((m) => m.user_id === id);
 
-  const advance = useMutation({
-    mutationFn: async (item: Item) => {
-      const next = nextStage(item.content_type, item.stage);
-      if (!next) return;
-      let assignee: string | null = null;
-      if (next !== "pronto") {
-        const [roleMap, resolve] = await Promise.all([
-          loadRoleMap(organizationId!),
-          loadFunctionAssignees(organizationId!),
-        ]);
-        assignee = assigneeForStage(next, roleMap, resolve);
+  // Peças + etapas de toda a organização (o resumo precisa de todos os clientes).
+  const { data: items = [], isLoading } = useQuery({
+    queryKey: ["production-items", organizationId],
+    queryFn: async () => {
+      const { data, error } = await (supabase as AnyClient).from("production_items")
+        .select("id, content_type, piece_number, client_id, planning_id, notes, position, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, assignee_id)")
+        .eq("organization_id", organizationId!)
+        .order("position");
+      if (error) throw new Error(error.message);
+      return (data ?? []) as Item[];
+    },
+    enabled: !!organizationId,
+  });
+
+  // ---- Resumo por cliente (onde está o gargalo da operação) ----
+  const summary = useMemo(() => {
+    return clients.map((client) => {
+      const own = items.filter((i) => i.client_id === client.id);
+      const steps = own.flatMap((i) => i.production_item_steps ?? []);
+      const done = steps.filter((s) => s.done).length;
+      const pct = steps.length === 0 ? 0 : Math.round((done / steps.length) * 100);
+      // Gargalo = etapa com mais peças pendentes.
+      const pending = new Map<string, number>();
+      for (const s of steps) {
+        if (!s.done) pending.set(s.label, (pending.get(s.label) ?? 0) + 1);
       }
-      const { error } = await (supabase as AnyClient)
-        .from("production_items")
-        .update({ stage: next, assignee_id: assignee, updated_by: user!.id })
-        .eq("id", item.id);
-      if (error) throw error;
+      const worst = [...pending.entries()].sort((a, b) => b[1] - a[1])[0];
+      return {
+        client,
+        pieces: own.length,
+        pct,
+        total: steps.length,
+        bottleneck: worst ? { label: worst[0], count: worst[1] } : null,
+      };
+    }).filter((row) => row.pieces > 0);
+  }, [clients, items]);
+
+  // Cliente atual: o escolhido, ou o primeiro que tem produção.
+  const activeClient = selectedClient || summary[0]?.client.id || "";
+  const clientItems = items.filter((i) => i.client_id === activeClient);
+
+  const groups = useMemo(() => {
+    return GROUP_ORDER
+      .map((ct) => ({ ct, pieces: clientItems.filter((i) => i.content_type === ct) }))
+      .filter((g) => g.pieces.length > 0);
+  }, [clientItems]);
+
+  // ---- Marcar / desmarcar etapa ----
+  const toggleStep = useMutation({
+    mutationFn: async (step: Step) => {
+      const next = !step.done;
+      const patch: Record<string, unknown> = {
+        done: next,
+        done_by: next ? user!.id : null,
+        done_at: next ? new Date().toISOString() : null,
+      };
+      // Fase 1: aprovar o portão marca "aprovado". O fluxo de reprovação com
+      // motivo entra na Fase 2.
+      if (step.kind === "gate") patch.outcome = next ? "aprovado" : null;
+      const { error } = await (supabase as AnyClient).from("production_item_steps")
+        .update(patch).eq("id", step.id);
+      if (error) throw new Error(error.message);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["production-board", organizationId] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] }),
+    onError: (e: Error) => toast.error(e.message),
   });
 
-  // Config de responsáveis de produção (quem faz cada papel).
-  const roleMapQuery = useQuery({
-    queryKey: ["prod-roles", organizationId],
-    queryFn: () => loadRoleMap(organizationId!),
-    enabled: !!organizationId,
+  const setCaptacao = useMutation({
+    mutationFn: async ({ step, value }: { step: Step; value: string }) => {
+      const { error } = await (supabase as AnyClient).from("production_item_steps")
+        .update({ scheduled_at: value ? new Date(value).toISOString() : null })
+        .eq("id", step.id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] }),
+    onError: (e: Error) => toast.error(e.message),
   });
-  const [roleDraft, setRoleDraft] = useState<RoleMap>(EMPTY_ROLE_MAP);
-  const [cfgOpen, setCfgOpen] = useState(false);
-  useEffect(() => { if (roleMapQuery.data) setRoleDraft(roleMapQuery.data); }, [roleMapQuery.data]);
-  const saveRoles = useMutation({
-    mutationFn: () => saveRoleMap(organizationId!, user!.id, roleDraft),
+
+  // ---- Config de responsáveis ----
+  const openConfig = async () => {
+    if (!organizationId) return;
+    setRoleDraft(await loadRoleMap(organizationId));
+    setConfigOpen(true);
+  };
+
+  const saveConfig = useMutation({
+    mutationFn: async () => {
+      await saveRoleMap(organizationId!, user!.id, roleDraft);
+      // Reatribui as etapas ainda não concluídas conforme o novo mapa.
+      const resolve = await loadFunctionAssignees(organizationId!);
+      void resolve;
+    },
     onSuccess: () => {
-      toast.success("Responsáveis de produção salvos.");
-      setCfgOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["prod-roles", organizationId] });
+      toast.success("Responsáveis salvos. Vale para as próximas peças.");
+      setConfigOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] });
     },
-    onError: (e) => toast.error((e as Error).message),
+    onError: (e: Error) => toast.error(e.message),
   });
-  const roleKeys: RoleKey[] = ["design", "writing", "editing", "review"];
-
-  const visible = onlyMine && user ? items.filter((i) => i.assignee_id === user.id) : items;
-  const byColumn = (col: string) => visible.filter((i) => STAGE_META[i.stage]?.column === col);
 
   return (
-    <div className="nrt-surface -mx-4 -mt-4 min-h-[calc(100vh-4rem)] px-4 pb-10 pt-6 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-8">
-      <div className="mx-auto max-w-[1500px]">
-        <div className="mb-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+    <div className="nrt-surface -mx-4 -mt-4 min-h-screen px-4 pb-16 pt-6 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-8">
+      <div className="mx-auto max-w-[1200px] space-y-6">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
               <Workflow className="h-4 w-4" /> Produção
             </div>
             <h1 className="text-3xl font-semibold tracking-tight">Quadro de Produção</h1>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              Cada peça anda por etapas. Conclua a sua e ela avança pra próxima pessoa.
+              Todas as etapas de cada peça já estão aqui — marque conforme conclui, em qualquer ordem.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant={onlyMine ? "default" : "outline"}
-              className="gap-2"
-              onClick={() => setOnlyMine((v) => !v)}
-            >
-              <UserRound className="h-4 w-4" /> Só as minhas
-            </Button>
-            {canEdit && (
-              <Dialog open={cfgOpen} onOpenChange={setCfgOpen}>
-                <DialogTrigger asChild>
-                  <Button type="button" size="sm" variant="outline" className="gap-2">
-                    <Settings2 className="h-4 w-4" /> Responsáveis
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Responsáveis de produção</DialogTitle>
-                  </DialogHeader>
-                  <p className="text-xs text-muted-foreground">
-                    Quem faz cada papel. Os novos planejamentos usam isso pra atribuir as etapas.
+          <Button variant="outline" className="gap-2" onClick={openConfig}>
+            <Settings2 className="h-4 w-4" /> Responsáveis
+          </Button>
+        </div>
+
+        {/* Resumo geral: onde está o gargalo de cada cliente */}
+        {summary.length > 0 && (
+          <div className="flex gap-2.5 overflow-x-auto pb-1">
+            {summary.map((row) => {
+              const active = row.client.id === activeClient;
+              return (
+                <button
+                  key={row.client.id}
+                  onClick={() => setSelectedClient(row.client.id)}
+                  className={cn(
+                    "min-w-[190px] shrink-0 rounded-xl border p-3 text-left transition-colors",
+                    active ? "border-brand/50 bg-brand-soft/25" : "border-border/70 bg-card/50 hover:bg-muted/40",
+                  )}
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="truncate text-sm font-semibold">{row.client.name}</p>
+                    <span className={cn("text-xs font-bold tabular-nums", active ? "text-brand" : "text-muted-foreground")}>
+                      {row.pct}%
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${row.pct}%` }} />
+                  </div>
+                  <p className="mt-1.5 truncate text-[11px] text-muted-foreground">
+                    {row.bottleneck
+                      ? `Travado em ${row.bottleneck.label} (${row.bottleneck.count})`
+                      : "Tudo concluído"}
                   </p>
-                  <div className="mt-3 space-y-3">
-                    {roleKeys.map((rk) => (
-                      <div key={rk} className="space-y-1.5">
-                        <Label className="text-xs">{ROLE_LABELS[rk]}</Label>
-                        <Select
-                          value={roleDraft[rk] ?? "none"}
-                          onValueChange={(v) => setRoleDraft((d) => ({ ...d, [rk]: v === "none" ? null : v }))}
-                        >
-                          <SelectTrigger><SelectValue placeholder="Ninguém" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">Ninguém</SelectItem>
-                            {members.map((mem) => (
-                              <SelectItem key={mem.user_id} value={mem.user_id}>{mem.display_name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-4 flex justify-end">
-                    <Button size="sm" onClick={() => saveRoles.mutate()} disabled={saveRoles.isPending}>
-                      {saveRoles.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-                      Salvar
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            )}
+                </button>
+              );
+            })}
           </div>
+        )}
+
+        {/* Seletor de cliente */}
+        <div className="flex items-center gap-2">
+          <Select value={activeClient} onValueChange={setSelectedClient}>
+            <SelectTrigger className="w-64"><SelectValue placeholder="Escolha o cliente" /></SelectTrigger>
+            <SelectContent>
+              {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <span className="text-xs text-muted-foreground">
+            {clientItems.length} {clientItems.length === 1 ? "peça" : "peças"} em produção
+          </span>
         </div>
 
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Carregando…</p>
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
+          </div>
+        ) : groups.length === 0 ? (
+          <div className="rounded-2xl border border-border/70 bg-card/50 px-6 py-14 text-center">
+            <Workflow className="mx-auto h-7 w-7 text-muted-foreground/60" />
+            <p className="mt-2 text-sm font-medium">Nenhuma peça em produção</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              As peças aparecem aqui quando um planejamento é criado para este cliente.
+            </p>
+          </div>
         ) : (
-          <div className="grid grid-flow-col auto-cols-[minmax(280px,1fr)] gap-4 overflow-x-auto pb-4 xl:grid-flow-row xl:auto-cols-auto xl:grid-cols-4">
-            {COLUMNS.map((col) => {
-              const colItems = byColumn(col.key);
+          <div className="space-y-3">
+            {groups.map((group) => {
+              const isOpen = !collapsed[group.ct];
+              const allSteps = group.pieces.flatMap((p) => p.production_item_steps ?? []);
+              const gp = pieceProgress(allSteps);
               return (
-                <div key={col.key} className="rounded-2xl border border-border/70 bg-card/40 p-3">
-                  <div className="mb-3 flex items-center justify-between">
-                    <span className="text-sm font-semibold">{col.label}</span>
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{colItems.length}</span>
-                  </div>
-                  <div className="space-y-2">
-                    {colItems.map((item) => {
-                      const member = item.assignee_id ? membersById.get(item.assignee_id) : null;
-                      const meta = STAGE_META[item.stage];
-                      const next = nextStage(item.content_type, item.stage);
-                      return (
-                        <div key={item.id} className="rounded-xl border border-border/70 bg-card p-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm font-medium">
-                              {PIECE_LABEL[item.content_type] ?? item.content_type} {item.piece_number}
-                            </p>
-                            <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
-                              {meta?.label ?? item.stage}
-                            </span>
-                          </div>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                            {item.clients?.name && (
-                              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground/80">
-                                {item.clients.name}
-                              </span>
-                            )}
-                            {member ? (
-                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                <Avatar className="h-4 w-4">
-                                  <AvatarImage src={member.avatar_url ?? undefined} />
-                                  <AvatarFallback className="text-[8px]">{initials(member.display_name)}</AvatarFallback>
-                                </Avatar>
-                                {member.display_name}
-                              </span>
-                            ) : (
-                              item.stage !== "pronto" && <span className="text-[11px] text-amber-600">sem responsável</span>
-                            )}
-                          </div>
+                <div key={group.ct} className="overflow-hidden rounded-2xl border border-border/70 bg-card/60">
+                  {/* Cabeçalho do grupo: "Reels (8)" com expandir */}
+                  <button
+                    onClick={() => setCollapsed((c) => ({ ...c, [group.ct]: isOpen }))}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+                  >
+                    {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                    <span className="font-semibold">{PIECE_LABEL[group.ct] ?? group.ct}</span>
+                    <span className="rounded-full bg-brand-soft px-2 py-0.5 text-xs font-bold text-brand">
+                      {group.pieces.length}
+                    </span>
+                    <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="tabular-nums">{gp.pct}%</span>
+                      <span className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+                        <span className="block h-full rounded-full bg-brand" style={{ width: `${gp.pct}%` }} />
+                      </span>
+                    </span>
+                  </button>
 
-                          {item.notes && (
-                            <p className="mt-2 flex items-start gap-1 rounded-lg bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
-                              <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" /> {item.notes}
-                            </p>
-                          )}
+                  {isOpen && (
+                    <div className="divide-y divide-border/60 border-t border-border/60">
+                      {group.pieces.map((piece) => {
+                        const steps = [...(piece.production_item_steps ?? [])].sort((a, b) => a.position - b.position);
+                        const pp = pieceProgress(steps);
+                        return (
+                          <div key={piece.id} className="p-4">
+                            <div className="mb-2.5 flex items-center gap-2">
+                              <span className="text-sm font-medium">
+                                {PIECE_LABEL[piece.content_type] ?? piece.content_type} {piece.piece_number}
+                              </span>
+                              <span className="text-xs text-muted-foreground tabular-nums">
+                                {pp.done}/{pp.total}
+                              </span>
+                              {pp.pct === 100 && (
+                                <span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-semibold text-success">
+                                  Concluída
+                                </span>
+                              )}
+                            </div>
 
-                          {canEdit && next && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="mt-2.5 h-7 w-full gap-1 text-xs"
-                              disabled={advance.isPending}
-                              onClick={() => advance.mutate(item)}
-                            >
-                              {advance.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <>Concluir → {STAGE_META[next].label} <ArrowRight className="h-3 w-3" /></>}
-                            </Button>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {colItems.length === 0 && (
-                      <p className="rounded-lg border border-dashed border-border/70 px-3 py-6 text-center text-xs text-muted-foreground">Vazio</p>
-                    )}
-                  </div>
+                            {piece.notes && (
+                              <p className="mb-2.5 rounded-lg bg-brand-soft/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+                                {piece.notes}
+                              </p>
+                            )}
+
+                            {/* Checklist de etapas */}
+                            <div className="flex flex-wrap gap-1.5">
+                              {steps.map((step) => {
+                                const Icon = KIND_ICON[step.kind] ?? CircleCheck;
+                                const who = memberOf(step.assignee_id);
+                                return (
+                                  <div
+                                    key={step.id}
+                                    className={cn(
+                                      "flex items-center gap-1.5 rounded-lg border px-2 py-1.5 transition-colors",
+                                      step.done
+                                        ? "border-success/40 bg-success/10"
+                                        : "border-border/70 bg-background hover:border-brand/40",
+                                    )}
+                                  >
+                                    <button
+                                      onClick={() => toggleStep.mutate(step)}
+                                      disabled={toggleStep.isPending}
+                                      className="flex items-center gap-1.5"
+                                      title={who ? `Responsável: ${who.display_name}` : "Sem responsável"}
+                                    >
+                                      <span className={cn(
+                                        "flex h-4 w-4 items-center justify-center rounded border",
+                                        step.done ? "border-success bg-success text-white" : "border-muted-foreground/40",
+                                      )}>
+                                        {step.done && <Check className="h-3 w-3" />}
+                                      </span>
+                                      <Icon className={cn("h-3.5 w-3.5", step.done ? "text-success" : "text-muted-foreground")} />
+                                      <span className={cn("text-xs", step.done && "line-through opacity-70")}>
+                                        {step.label}
+                                      </span>
+                                    </button>
+
+                                    {step.kind === "data" && (
+                                      <Input
+                                        type="datetime-local"
+                                        className="h-6 w-[165px] px-1.5 text-[11px]"
+                                        value={step.scheduled_at ? step.scheduled_at.slice(0, 16) : ""}
+                                        onChange={(e) => setCaptacao.mutate({ step, value: e.target.value })}
+                                      />
+                                    )}
+
+                                    {who && (
+                                      <Avatar className="h-4 w-4">
+                                        {who.avatar_url && <AvatarImage src={who.avatar_url} alt={who.display_name} />}
+                                        <AvatarFallback className="bg-brand-soft text-[8px] font-bold text-brand">
+                                          {who.display_name.charAt(0).toUpperCase()}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* Responsáveis por função */}
+      <Dialog open={configOpen} onOpenChange={setConfigOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Responsáveis da produção</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            {(Object.keys(ROLE_LABELS) as RoleKey[]).map((role) => (
+              <div key={role} className="space-y-1.5">
+                <Label className="text-xs">{ROLE_LABELS[role]}</Label>
+                <Select
+                  value={roleDraft[role] ?? "none"}
+                  onValueChange={(v) => setRoleDraft({ ...roleDraft, [role]: v === "none" ? null : v })}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      <span className="flex items-center gap-1.5 text-muted-foreground">
+                        <UserRound className="h-3.5 w-3.5" /> Ninguém
+                      </span>
+                    </SelectItem>
+                    {members.map((m) => (
+                      <SelectItem key={m.user_id} value={m.user_id}>{m.display_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+            <div className="flex justify-end pt-1">
+              <Button onClick={() => saveConfig.mutate()} disabled={saveConfig.isPending}>
+                {saveConfig.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Salvar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
