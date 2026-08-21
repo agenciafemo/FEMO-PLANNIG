@@ -227,13 +227,19 @@ export function insertReportComment(
 
 /** Categorias que o cliente escolhe ao pedir correção (o quadro de produção
  *  usa isso para devolver o trabalho à pessoa certa). */
-export const REVISION_REASONS: { code: string; label: string }[] = [
-  { code: "legenda_video", label: "Legenda do vídeo" },
-  { code: "legenda_post", label: "Legenda do post" },
-  { code: "design", label: "Erro de design" },
+export const REVISION_REASONS: { code: string; label: string; types?: string[] }[] = [
+  { code: "legenda_video", label: "Legenda do vídeo", types: ["reels"] },
+  { code: "legenda_post", label: "Legenda do post", types: ["static", "carousel", "story"] },
+  { code: "design", label: "Erro de design", types: ["static", "carousel", "story", "reels"] },
   { code: "portugues", label: "Erro de português" },
-  { code: "edicao", label: "Edição" },
+  { code: "edicao", label: "Edição", types: ["reels"] },
 ];
+
+/** Só oferece ao cliente o que faz sentido para aquele tipo de post — não faz
+ *  sentido pedir "erro de edição" num post estático. */
+export function revisionReasonsFor(contentType: string | null | undefined) {
+  return REVISION_REASONS.filter((r) => !r.types || r.types.includes(contentType ?? ""));
+}
 
 /** O cliente pede correção informando onde está o erro. */
 export function requestPostRevision(

@@ -10,7 +10,7 @@ import {
   insertEditSuggestion,
   updatePostStatus as updatePostStatusRpc,
   requestPostRevision,
-  REVISION_REASONS,
+  revisionReasonsFor,
 } from "@/lib/publicRpc";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -261,7 +261,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
               Escolha onde está o problema. Isso vai direto para a pessoa responsável.
             </p>
             <div className="space-y-1.5">
-              {REVISION_REASONS.map((r) => {
+              {revisionReasonsFor(post.content_type).map((r) => {
                 const marcado = revReasons.includes(r.code);
                 return (
                   <button
