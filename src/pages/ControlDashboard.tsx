@@ -44,6 +44,12 @@ type Status = "todo" | "doing" | "review" | "done";
 type Kind = "entrada" | "saida_almoco" | "volta_almoco" | "saida";
 type DashboardPeriod = "week" | "month";
 type TaskRow = { status: Status; due_date: string; updated_at: string; assignee_id: string };
+// Tarefa extra do Quadro de Produção (peça avulsa, fora de planejamento).
+type ExtraRow = {
+  updated_at: string;
+  assignee_id: string | null;
+  production_item_steps: { done: boolean; assignee_id: string | null }[];
+};
 type Punch = { user_id: string; punched_at: string; kind: Kind };
 type Absence = { user_id: string; start_date: string; end_date: string };
 type Client = { id: string; name: string };
@@ -215,6 +221,19 @@ export default function ControlDashboard() {
       return data ?? [];
     }, enabled: !!organizationId,
   });
+  // Tarefas extras da Produção entram nos mesmos indicadores das tarefas do
+  // quadro. Não têm prazo, então nunca contam como atrasadas.
+  const extras = useQuery({
+    queryKey: ["control-dashboard", "extras", organizationId, today],
+    queryFn: async () => {
+      const { data, error } = await db.from<ExtraRow>("production_items")
+        .select("updated_at,assignee_id,production_item_steps(done,assignee_id)")
+        .eq("organization_id", organizationId).eq("content_type", "extra");
+      if (error) throw error;
+      return data ?? [];
+    }, enabled: !!organizationId,
+  });
+
   const capacity = useQuery({
     queryKey: ["control-dashboard", "team-capacity", organizationId],
     queryFn: async () => {
@@ -313,24 +332,53 @@ export default function ControlDashboard() {
     (capacity.data?.assignments ?? []).filter((item) => item.tag_id === activeFunction).map((item) => item.user_id),
   ), [activeFunction, capacity.data?.assignments]);
   const filteredTasks = useMemo(() => (tasks.data ?? []).filter((row) => !functionMemberIds || functionMemberIds.has(row.assignee_id)), [functionMemberIds, tasks.data]);
+  // Cada tarefa extra vira uma "tarefa" equivalente: o status sai do quanto das
+  // suas etapas já foi concluído, e o responsável é o da peça (ou o da primeira
+  // etapa em aberto, quando a peça não tem um).
+  const normalizedExtras = useMemo(() => (extras.data ?? []).map((row) => {
+    const steps = row.production_item_steps ?? [];
+    const doneCount = steps.filter((step) => step.done).length;
+    const status: Status = steps.length > 0 && doneCount === steps.length
+      ? "done" : doneCount > 0 ? "doing" : "todo";
+    return {
+      status,
+      updated_at: row.updated_at,
+      assignee_id: row.assignee_id
+        ?? steps.find((step) => !step.done)?.assignee_id
+        ?? steps[0]?.assignee_id ?? null,
+    };
+  }), [extras.data]);
+  const filteredExtras = useMemo(() => normalizedExtras.filter(
+    (row) => !functionMemberIds || (row.assignee_id != null && functionMemberIds.has(row.assignee_id)),
+  ), [functionMemberIds, normalizedExtras]);
+
   const task = useMemo(() => {
     const distribution: Record<Status, number> = { todo: 0, doing: 0, review: 0, done: 0 };
     filteredTasks.forEach((row) => distribution[row.status]++);
+    filteredExtras.forEach((row) => distribution[row.status]++);
     return {
-      open: filteredTasks.filter((row) => row.status !== "done").length,
+      open: filteredTasks.filter((row) => row.status !== "done").length
+        + filteredExtras.filter((row) => row.status !== "done").length,
+      // Tarefa extra não tem prazo, então nunca entra no atraso.
       overdue: filteredTasks.filter((row) => row.status !== "done" && row.due_date < today).length,
-      completed: filteredTasks.filter((row) => row.status === "done" && row.updated_at.slice(0, 10) >= periodStart).length,
-      distribution, total: filteredTasks.length,
+      completed: filteredTasks.filter((row) => row.status === "done" && row.updated_at.slice(0, 10) >= periodStart).length
+        + filteredExtras.filter((row) => row.status === "done" && row.updated_at.slice(0, 10) >= periodStart).length,
+      distribution,
+      total: filteredTasks.length + filteredExtras.length,
+      extras: filteredExtras.length,
+      extrasOpen: filteredExtras.filter((row) => row.status !== "done").length,
     };
-  }, [filteredTasks, periodStart, today]);
+  }, [filteredExtras, filteredTasks, periodStart, today]);
   const workload = useMemo(() => {
     const openByMember = new Map<string, number>();
     filteredTasks.filter((row) => row.status !== "done").forEach((row) => openByMember.set(row.assignee_id, (openByMember.get(row.assignee_id) ?? 0) + 1));
+    filteredExtras.filter((row) => row.status !== "done" && row.assignee_id)
+      .forEach((row) => openByMember.set(row.assignee_id!, (openByMember.get(row.assignee_id!) ?? 0) + 1));
     return (capacity.data?.members ?? [])
       .filter((member) => !functionMemberIds || functionMemberIds.has(member.user_id))
       .map((member) => ({ ...member, openTasks: openByMember.get(member.user_id) ?? 0 }))
       .sort((a, b) => b.openTasks - a.openTasks || a.display_name.localeCompare(b.display_name));
-  }, [capacity.data?.members, filteredTasks, functionMemberIds]);
+  }, [capacity.data?.members, filteredExtras, filteredTasks, functionMemberIds]);
   const taskChartData = useMemo(() => (Object.keys(STATUS) as Status[]).map((status) => ({
     status: STATUS[status].label,
     quantidade: task.distribution[status],
@@ -349,6 +397,7 @@ export default function ControlDashboard() {
   // gestor (e nós) sabermos o motivo em vez de um aviso genérico.
   const failedIndicators = ([
     ["Tarefas", tasks],
+    ["Tarefas extras", extras],
     ["Capacidade da equipe", capacity],
     ["Permissão do ponto", pointPermission],
     ["Ponto", point],
@@ -367,6 +416,7 @@ export default function ControlDashboard() {
   const analysisIsStale = generatedAnalysis !== null && generatedAnalysis.contextKey !== analysisContextKey;
   const analysisReady = !anyError
     && !tasks.isLoading
+    && !extras.isLoading
     && !capacity.isLoading
     && !pointPermission.isLoading
     && !clients.isLoading
@@ -486,12 +536,12 @@ export default function ControlDashboard() {
         <SectionHeader title="Tarefas" icon={ListTodo} action={actionLink("/tasks", "Abrir quadro")} />
         <div className="flex flex-col gap-1.5 sm:max-w-[280px]"><span className="text-caption text-muted-foreground">Segmentar por função</span><Select value={activeFunction} onValueChange={setSelectedFunction}><SelectTrigger className="h-9" aria-label="Filtrar por função"><SelectValue placeholder="Todas as funções" /></SelectTrigger><SelectContent><SelectItem value="all">Todas as funções</SelectItem>{(capacity.data?.functions ?? []).map((item) => <SelectItem key={item.id} value={item.id}><span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />{item.name}</span></SelectItem>)}</SelectContent></Select></div>
         <div className="grid gap-3 sm:grid-cols-3">
-          <MetricCard label="Tarefas abertas" value={tasks.isLoading ? <LoadingValue /> : task.open} icon={ListTodo} tone="info" />
-          <MetricCard label="Tarefas atrasadas" value={tasks.isLoading ? <LoadingValue /> : task.overdue} icon={AlertTriangle} tone="warning" />
-          <MetricCard label={`Concluídas ${periodLabel}`} value={tasks.isLoading ? <LoadingValue /> : task.completed} icon={CheckCircle2} tone="success" hint="Com base na última atualização" />
+          <MetricCard label="Tarefas abertas" value={tasks.isLoading || extras.isLoading ? <LoadingValue /> : task.open} icon={ListTodo} tone="info" hint={task.extrasOpen > 0 ? `Inclui ${task.extrasOpen} ${task.extrasOpen === 1 ? "extra" : "extras"} da Produção` : "Inclui as tarefas extras da Produção"} />
+          <MetricCard label="Tarefas atrasadas" value={tasks.isLoading ? <LoadingValue /> : task.overdue} icon={AlertTriangle} tone="warning" hint="Tarefa extra não tem prazo" />
+          <MetricCard label={`Concluídas ${periodLabel}`} value={tasks.isLoading || extras.isLoading ? <LoadingValue /> : task.completed} icon={CheckCircle2} tone="success" hint="Com base na última atualização" />
         </div>
         <div className="rounded-xl border bg-surface p-5 shadow-xs">
-          <div className="flex items-center justify-between"><div><h3 className="text-h3">Tarefas por status</h3><p className="text-small text-muted-foreground">Distribuição do quadro na função selecionada.</p></div><span className="text-small tabular-nums text-muted-foreground">{task.total} no total</span></div>
+          <div className="flex items-center justify-between"><div><h3 className="text-h3">Tarefas por status</h3><p className="text-small text-muted-foreground">Quadro de Tarefas + tarefas extras da Produção, na função selecionada.</p></div><span className="text-small tabular-nums text-muted-foreground">{task.total} no total{task.extras > 0 ? ` · ${task.extras} ${task.extras === 1 ? "extra" : "extras"}` : ""}</span></div>
           <ChartContainer config={taskChartConfig} className="mt-4 h-[260px] w-full">
             <BarChart data={taskChartData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
               <CartesianGrid vertical={false} />

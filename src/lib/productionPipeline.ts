@@ -84,7 +84,10 @@ export const PIPELINES: Record<string, StepDef[]> = {
 // permite removê-las sem tocar nas etapas do modelo.
 export const CUSTOM_PREFIX = "custom_";
 export const isCustomStep = (key: string) => key.startsWith(CUSTOM_PREFIX);
-export const newCustomKey = () => `${CUSTOM_PREFIX}${Date.now().toString(36)}`;
+// O sufixo aleatório evita colisão quando duas etapas são criadas no mesmo
+// milissegundo (a chave é única por peça e por modelo).
+export const newCustomKey = () =>
+  `${CUSTOM_PREFIX}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 export const STEP_KIND_LABELS: Record<StepKind, string> = {
   check: "Tarefa simples (feito / não feito)",
@@ -93,12 +96,76 @@ export const STEP_KIND_LABELS: Record<StepKind, string> = {
   acao: "Ação (executa algo)",
 };
 
-export function stepsFor(contentType: string): StepDef[] {
-  return PIPELINES[contentType] ?? PIPELINES.static;
+// Modelos salvos pela organização. Um tipo ausente aqui cai no modelo do código.
+export type PipelineMap = Record<string, StepDef[]>;
+
+export function stepsFor(contentType: string, pipelines?: PipelineMap | null): StepDef[] {
+  return pipelines?.[contentType] ?? PIPELINES[contentType] ?? PIPELINES.static;
 }
 
-export function stepDef(contentType: string, key: string): StepDef | null {
-  return stepsFor(contentType).find((s) => s.key === key) ?? null;
+export function stepDef(contentType: string, key: string, pipelines?: PipelineMap | null): StepDef | null {
+  return stepsFor(contentType, pipelines).find((s) => s.key === key) ?? null;
+}
+
+export const EDITABLE_PIECE_TYPES = ["reels", "carousel", "static", "story", "blog"] as const;
+
+export async function loadPipelines(organizationId: string): Promise<PipelineMap> {
+  const { data } = await (supabase as AnyClient)
+    .from("production_step_templates")
+    .select("content_type, step_key, label, kind, position, role")
+    .eq("organization_id", organizationId)
+    .order("position");
+
+  const out: PipelineMap = {};
+  for (const row of (data ?? []) as Array<{
+    content_type: string; step_key: string; label: string; kind: StepKind;
+    position: number; role: RoleKey | null;
+  }>) {
+    (out[row.content_type] ??= []).push(S(row.step_key, row.label, row.kind, row.role));
+  }
+  return out;
+}
+
+// Substitui o modelo daquele tipo por inteiro (apaga o que saiu, grava o resto).
+export async function savePipeline(
+  organizationId: string,
+  userId: string,
+  contentType: string,
+  steps: StepDef[],
+): Promise<void> {
+  const client = supabase as AnyClient;
+  const keys = steps.map((s) => s.key);
+
+  const del = client.from("production_step_templates").delete()
+    .eq("organization_id", organizationId).eq("content_type", contentType);
+  const { error: delError } = await (keys.length
+    ? del.not("step_key", "in", `(${keys.map((k) => `"${k}"`).join(",")})`)
+    : del);
+  if (delError) throw new Error(delError.message);
+
+  if (!steps.length) return;
+  const { error } = await client.from("production_step_templates").upsert(
+    steps.map((s, index) => ({
+      organization_id: organizationId,
+      content_type: contentType,
+      step_key: s.key,
+      label: s.label,
+      kind: s.kind,
+      position: index,
+      role: s.role,
+      updated_by: userId,
+    })),
+    { onConflict: "organization_id,content_type,step_key" },
+  );
+  if (error) throw new Error(error.message);
+}
+
+// Volta o tipo ao modelo padrão do código (some da tabela → fallback).
+export async function resetPipeline(organizationId: string, contentType: string): Promise<void> {
+  const { error } = await (supabase as AnyClient)
+    .from("production_step_templates").delete()
+    .eq("organization_id", organizationId).eq("content_type", contentType);
+  if (error) throw new Error(error.message);
 }
 
 // ---------------------------------------------------------------------------
@@ -130,8 +197,10 @@ export function reasonsFor(stepKey: string): ReasonDef[] {
 
 // Quais etapas devem ser REABERTAS quando o gate é reprovado por esses motivos.
 // Só reabre etapas que existem naquele tipo de conteúdo.
-export function stepsToReopen(contentType: string, stepKey: string, codes: string[]): string[] {
-  const valid = new Set(stepsFor(contentType).map((s) => s.key));
+export function stepsToReopen(
+  contentType: string, stepKey: string, codes: string[], pipelines?: PipelineMap | null,
+): string[] {
+  const valid = new Set(stepsFor(contentType, pipelines).map((s) => s.key));
   const out = new Set<string>();
   for (const code of codes) {
     const def = reasonsFor(stepKey).find((r) => r.code === code);
@@ -215,6 +284,7 @@ export function buildProductionItems(
   _roleMap: RoleMap,
   _resolve: AssigneeResolver | null,
   writingNotes: string | null,
+  pipelines?: PipelineMap | null,
 ): Array<Record<string, unknown>> {
   const order: Array<keyof PieceCounts> = ["reels", "carousel", "static", "story", "blog"];
   const rows: Array<Record<string, unknown>> = [];
@@ -227,7 +297,7 @@ export function buildProductionItems(
         ...base,
         content_type: ct,
         piece_number: i,
-        stage: stepsFor(ct)[0]?.key ?? "copy", // compatibilidade com a coluna antiga
+        stage: stepsFor(ct, pipelines)[0]?.key ?? "copy", // compatibilidade com a coluna antiga
         assignee_id: null,
         notes: (ct === "reels" || ct === "blog") ? writingNotes : null,
         position: pos++,
@@ -242,8 +312,9 @@ export function buildStepRows(
   item: { id: string; organization_id: string; content_type: string },
   roleMap: RoleMap,
   resolve: AssigneeResolver | null,
+  pipelines?: PipelineMap | null,
 ): Array<Record<string, unknown>> {
-  return stepsFor(item.content_type).map((step, index) => ({
+  return stepsFor(item.content_type, pipelines).map((step, index) => ({
     organization_id: item.organization_id,
     item_id: item.id,
     step_key: step.key,

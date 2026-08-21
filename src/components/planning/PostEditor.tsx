@@ -6,6 +6,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import { usePostEditorDraft } from "@/hooks/usePostEditorDraft";
+import { commentTagLabels } from "@/lib/publicRpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -875,6 +876,16 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
                     </div>
                     {c.text && <p>{c.text}</p>}
                     {c.audio_url && <audio controls className="mt-1 w-full h-8" src={c.audio_url} />}
+                    {/* Tags que o cliente marcou: dizem a que o comentário se refere. */}
+                    {commentTagLabels(c).length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {commentTagLabels(c).map((label) => (
+                          <span key={label} className="rounded-full bg-background/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

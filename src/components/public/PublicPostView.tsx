@@ -11,6 +11,7 @@ import {
   updatePostStatus as updatePostStatusRpc,
   requestPostRevision,
   revisionReasonsFor,
+  commentTagLabels,
 } from "@/lib/publicRpc";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -33,6 +34,7 @@ interface PublicPostViewProps {
 export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
   const queryClient = useQueryClient();
   const [commentText, setCommentText] = useState("");
+  const [commentTags, setCommentTags] = useState<string[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -103,13 +105,13 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
   });
 
   const addComment = useMutation({
-    mutationFn: async ({ text, audioUrl }: { text?: string; audioUrl?: string }) => {
+    mutationFn: async ({ text, audioUrl, reasonCodes }: { text?: string; audioUrl?: string; reasonCodes?: string[] }) => {
       if (!text?.trim() && !audioUrl) throw new Error("Comentário vazio");
-      await insertPostComment(clientToken, postId, null, text ?? null, audioUrl ?? null);
+      await insertPostComment(clientToken, postId, null, text ?? null, audioUrl ?? null, reasonCodes ?? null);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["post-comments", postId] });
-      setCommentText(""); setAudioBlob(null); setAudioUrl(null); setSendingAudio(false);
+      setCommentText(""); setCommentTags([]); setAudioBlob(null); setAudioUrl(null); setSendingAudio(false);
       toast.success("Comentário enviado!");
     },
     onError: (error: any) => {
@@ -553,6 +555,15 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
                     <>
                       {c.text && <p className="text-sm">{c.text}</p>}
                       {c.audio_url && <audio controls className="mt-2 w-full" src={c.audio_url}>Seu navegador não suporta áudio.</audio>}
+                      {commentTagLabels(c).length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {commentTagLabels(c).map((label) => (
+                            <span key={label} className="rounded-full bg-background/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              {label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -561,11 +572,37 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
           )}
 
           {/* Text comment */}
-          <div className="flex gap-2">
-            <Textarea value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Escreva um comentário..." rows={1} className="flex-1" disabled={addComment.isPending} />
-            <Button size="icon" disabled={!commentText.trim() || addComment.isPending} onClick={() => addComment.mutate({ text: commentText })} title={addComment.isPending ? "Enviando..." : "Enviar"}>
-              {addComment.isPending ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> : <Send className="h-4 w-4" />}
-            </Button>
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <Textarea value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Escreva um comentário..." rows={1} className="flex-1" disabled={addComment.isPending} />
+              <Button size="icon" disabled={!commentText.trim() || addComment.isPending} onClick={() => addComment.mutate({ text: commentText, reasonCodes: commentTags })} title={addComment.isPending ? "Enviando..." : "Enviar"}>
+                {addComment.isPending ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> : <Send className="h-4 w-4" />}
+              </Button>
+            </div>
+
+            {/* Tags: dizem A QUE o comentário se refere, para a equipe achar
+                rápido o que corrigir. Opcional. */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">Sobre o quê?</span>
+              {revisionReasonsFor(post.content_type).map((r) => {
+                const marcado = commentTags.includes(r.code);
+                return (
+                  <button
+                    key={r.code}
+                    type="button"
+                    onClick={() => setCommentTags((tags) =>
+                      marcado ? tags.filter((t) => t !== r.code) : [...tags, r.code])}
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      marcado
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* O comentário é o lugar natural onde o cliente reclama — então o

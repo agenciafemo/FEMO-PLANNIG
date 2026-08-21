@@ -5,6 +5,8 @@ export interface ScriptLaudaSource {
   references_notes: string | null;
   editing_instructions: string | null;
   position: number | null;
+  /** Lauda em blocos. Ausente/vazio = roteiro em texto corrido. */
+  scenes?: unknown;
 }
 
 export function orderScriptsForLauda<T extends ScriptLaudaSource>(

@@ -247,4 +247,30 @@
   body.script-lauda-printing .script-lauda-print-area svg {
     color: #404040 !important;
   }
+
+  /* Lauda em blocos. A tabela pode passar de uma página: o cabeçalho se repete
+     em cada folha e nenhum bloco é partido no meio — quem está gravando não
+     pode perder a fala na virada da página. */
+  body.script-lauda-printing .script-lauda-scenes thead {
+    display: table-header-group;
+  }
+
+  body.script-lauda-printing .script-lauda-scenes tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* A regra geral acima zera todos os fundos; sem isso o cabeçalho da tabela
+     se perderia no papel. */
+  body.script-lauda-printing .script-lauda-scenes thead th {
+    border-bottom: 1px solid #a3a3a3 !important;
+    font-weight: 700 !important;
+  }
+
+  /* A seção da tabela é a única que PODE quebrar — senão uma lauda longa
+     estoura a primeira página. */
+  body.script-lauda-printing .script-lauda-print-area section:has(.script-lauda-scenes) {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
 }

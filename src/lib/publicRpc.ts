@@ -170,6 +170,7 @@ export function insertPostComment(
   authorName: string | null,
   text: string | null,
   audioUrl: string | null = null,
+  reasonCodes: string[] | null = null,
 ): Promise<PostComment> {
   return callWrite<PostComment>("public_insert_post_comment", {
     _token: token,
@@ -177,6 +178,7 @@ export function insertPostComment(
     _author_name: authorName,
     _text: text,
     _audio_url: audioUrl,
+    _reason_codes: reasonCodes?.length ? reasonCodes : null,
   });
 }
 
@@ -234,6 +236,14 @@ export const REVISION_REASONS: { code: string; label: string; types?: string[] }
   { code: "portugues", label: "Erro de português" },
   { code: "edicao", label: "Edição", types: ["reels"] },
 ];
+
+/** Rótulos das tags de um comentário. `reason_codes` ainda não consta em
+ *  types.ts (gerado), por isso a leitura é tolerante. */
+export function commentTagLabels(comment: unknown): string[] {
+  const codes = (comment as { reason_codes?: string[] | null })?.reason_codes;
+  if (!codes?.length) return [];
+  return codes.map((code) => REVISION_REASONS.find((r) => r.code === code)?.label ?? code);
+}
 
 /** Só oferece ao cliente o que faz sentido para aquele tipo de post — não faz
  *  sentido pedir "erro de edição" num post estático. */
