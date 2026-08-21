@@ -380,11 +380,14 @@ async function createCommemorativeDate(input: {
   draft: CommemorativeDateDraft;
 }): Promise<void> {
   const { organizationId, draft } = input;
+  // Datas móveis não têm dia/mês fixos (o banco exige month/day nulos nesse
+  // caso; o resolver calcula o dia a partir da regra).
+  const movable = isMovableRule(draft.recurrence || "fixed");
   const base = {
     organization_id: organizationId,
     title: draft.title.trim(),
-    month: draft.month,
-    day: draft.day,
+    month: movable ? null : draft.month,
+    day: movable ? null : draft.day,
     category: draft.category,
     recurring: true,
     recurrence_rule: draft.recurrence || "fixed",
