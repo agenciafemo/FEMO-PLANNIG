@@ -87,6 +87,15 @@ export default function PlanningDetail() {
   const { organizationId, isLegacy } = useOrganization();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+
+  // Volta para de ONDE a pessoa veio (Planejamentos do menu, planejamentos do
+  // cliente, Produção...). Só cai em /plannings quando não há histórico — por
+  // exemplo, ao abrir o link do planejamento direto pela URL.
+  const voltar = () => {
+    if (window.history.state?.idx > 0) navigate(-1);
+    else navigate("/plannings");
+  };
+
   const [editingPost, setEditingPost] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [editingPeriod, setEditingPeriod] = useState(false);
@@ -535,9 +544,9 @@ export default function PlanningDetail() {
       <div className="h-1 w-full rounded-full" style={{ background: `linear-gradient(90deg, ${accentColor} 0%, ${accentColor}55 100%)` }} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 min-w-0">
-          <Link to="/clients">
-            <Button variant="ghost" size="icon" className="shrink-0"><ArrowLeft className="h-5 w-5" /></Button>
-          </Link>
+          <Button variant="ghost" size="icon" className="shrink-0" onClick={voltar} aria-label="Voltar">
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
           {client?.logo_url ? (
             <Avatar className="h-9 w-9 shrink-0 sm:h-10 sm:w-10">
               <AvatarImage src={client.logo_url} alt={client.name} />

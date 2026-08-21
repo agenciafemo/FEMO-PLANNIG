@@ -7,6 +7,7 @@ import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
@@ -76,6 +77,7 @@ export default function ClientDetail() {
   const [editName, setEditName] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [editAccent, setEditAccent] = useState("#F97316");
+  const [editTrafficOnly, setEditTrafficOnly] = useState(false);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   useEffect(() => {
@@ -83,6 +85,7 @@ export default function ClientDetail() {
     setEditName(client.name);
     setEditNotes(client.notes ?? "");
     setEditAccent(client.accent_color ?? "#F97316");
+    setEditTrafficOnly(Boolean((client as { traffic_only?: boolean }).traffic_only));
     setLogoPreview(null);
     setLogoFile(null);
   }, [client]);
@@ -106,6 +109,7 @@ export default function ClientDetail() {
         name: editName.trim(),
         notes: editNotes.trim() || null,
         accent_color: editAccent,
+        traffic_only: editTrafficOnly,
       };
       if (logoUrl) patch.logo_url = logoUrl;
       const { error } = await supabase.from("clients").update(patch).eq("id", clientId!);
@@ -166,6 +170,24 @@ export default function ClientDetail() {
         </div>
       </div>
 
+      {/* Atalhos — logo no topo: é o que a equipe de social mídia mais acessa */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Link to={`/clients/${clientId}/plannings`} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40">
+          <CalendarClock className="h-5 w-5 text-brand" />
+          <div>
+            <p className="text-sm font-medium">Planejamentos</p>
+            <p className="text-xs text-muted-foreground">Ver e criar planejamentos deste cliente</p>
+          </div>
+        </Link>
+        <Link to="/relatorios" className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40">
+          <FileText className="h-5 w-5 text-brand" />
+          <div>
+            <p className="text-sm font-medium">Relatórios</p>
+            <p className="text-xs text-muted-foreground">Desempenho e tráfego pago</p>
+          </div>
+        </Link>
+      </div>
+
       {/* Dados do cliente (editar + foto) */}
       <div className="rounded-2xl border border-border bg-card p-5">
         <div className="mb-3 flex items-center gap-2">
@@ -209,6 +231,21 @@ export default function ClientDetail() {
                 <input type="color" value={editAccent} onChange={(e) => setEditAccent(e.target.value)} className="h-9 w-10 cursor-pointer rounded border-0 bg-transparent" />
                 <Input value={editAccent} onChange={(e) => setEditAccent(e.target.value)} className="w-32" />
               </div>
+            </div>
+            <div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-muted/30 p-3">
+              <div className="min-w-0">
+                <Label htmlFor="traffic-only" className="text-sm font-medium">Só tráfego pago</Label>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Este cliente não tem planejamento de conteúdo. Marcando, ele fica de fora
+                  do alerta de clientes sem planejamento no Dashboard.
+                </p>
+              </div>
+              <Switch
+                id="traffic-only"
+                checked={editTrafficOnly}
+                onCheckedChange={setEditTrafficOnly}
+                className="mt-0.5 shrink-0"
+              />
             </div>
           </div>
         </div>
@@ -297,23 +334,6 @@ export default function ClientDetail() {
       {clientId && <ClientReports clientId={clientId} />}
       {clientId && <ClientDocuments clientId={clientId} />}
 
-      {/* Atalhos */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Link to={`/clients/${clientId}/plannings`} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40">
-          <CalendarClock className="h-5 w-5 text-brand" />
-          <div>
-            <p className="text-sm font-medium">Planejamentos</p>
-            <p className="text-xs text-muted-foreground">Ver e criar planejamentos deste cliente</p>
-          </div>
-        </Link>
-        <Link to="/relatorios" className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40">
-          <FileText className="h-5 w-5 text-brand" />
-          <div>
-            <p className="text-sm font-medium">Relatórios</p>
-            <p className="text-xs text-muted-foreground">Desempenho e tráfego pago</p>
-          </div>
-        </Link>
-      </div>
     </div>
   );
 }
