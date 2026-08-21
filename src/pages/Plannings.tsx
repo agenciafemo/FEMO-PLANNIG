@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { loadContract } from "@/lib/clientContract";
 import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Calendar, Copy, Image, Layers, Trash2, Film, LayoutGrid, FileText } from "lucide-react";
+import { Plus, Calendar, Copy, Image, Layers, Trash2, Film, LayoutGrid, FileText, ChevronDown, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Link, useParams } from "react-router-dom";
@@ -24,6 +24,24 @@ const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", 
 const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 type StatusFilter = "all" | "draft" | "internal_review" | "client_review" | "approved";
+
+// O que a listagem realmente usa de um planejamento. A query traz mais campos;
+// aqui só interessam os que aparecem na tela e os que ordenam/agrupam.
+type PlanningRow = {
+  id: string;
+  client_id: string;
+  month: number;
+  year: number;
+  status: string;
+  clients?: { name?: string | null; accent_color?: string | null } | null;
+};
+
+type ClientGroup = {
+  clientId: string;
+  name: string;
+  accent: string;
+  plannings: PlanningRow[];
+};
 
 const STATUS_FILTERS: { key: StatusFilter; label: string; color: string }[] = [
   { key: "all", label: "Todos", color: "" },
@@ -42,6 +60,9 @@ export default function Plannings() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [filterClient, setFilterClient] = usePersistedState<string>("plannings-filter-client", "all");
   const [filterMonth, setFilterMonth] = usePersistedState<string>("plannings-filter-month", "all");
+  // Quais clientes estão abertos. Guardado entre visitas para a pessoa voltar
+  // à tela com os mesmos clientes expandidos.
+  const [gruposAbertos, setGruposAbertos] = usePersistedState<string[]>("plannings-grupos-abertos", []);
   const [selectedClient, setSelectedClient] = useState(clientId || "");
   const [month, setMonth] = useState(String(new Date().getMonth() + 1));
   const [year, setYear] = useState(String(new Date().getFullYear()));
@@ -230,6 +251,45 @@ export default function Plannings() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  // Os planejamentos vinham numa lista corrida com todos os clientes
+  // misturados. Agrupar por cliente devolve a hierarquia: cada cliente é um
+  // bloco, e dentro dele os planejamentos do mais recente para o mais antigo.
+  const grupos = useMemo(() => {
+    const visiveis = ((plannings ?? []) as PlanningRow[]).filter((p) =>
+      (statusFilter === "all" || p.status === statusFilter) &&
+      (filterClient === "all" || p.client_id === filterClient) &&
+      (filterMonth === "all" || String(p.month) === filterMonth)
+    );
+
+    const porCliente = new Map<string, ClientGroup>();
+    for (const p of visiveis) {
+      const id = p.client_id;
+      if (!porCliente.has(id)) {
+        porCliente.set(id, {
+          clientId: id,
+          name: p.clients?.name ?? "Sem cliente",
+          accent: p.clients?.accent_color || "#ef5a2b",
+          plannings: [],
+        });
+      }
+      porCliente.get(id)!.plannings.push(p);
+    }
+
+    for (const grupo of porCliente.values()) {
+      grupo.plannings.sort((a, b) => b.year - a.year || b.month - a.month);
+    }
+
+    return [...porCliente.values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [plannings, statusFilter, filterClient, filterMonth]);
+
+  // Com um cliente só na tela, manter fechado seria só um clique a mais.
+  const abrirTudo = grupos.length === 1;
+  const isGrupoAberto = (clientId: string) => abrirTudo || gruposAbertos.includes(clientId);
+  const toggleGrupo = (clientId: string) =>
+    setGruposAbertos(gruposAbertos.includes(clientId)
+      ? gruposAbertos.filter((id) => id !== clientId)
+      : [...gruposAbertos, clientId]);
+
   const duplicatePlanning = useMutation({
     mutationFn: async (planningId: string) => {
       const { data: original } = await supabase.from("plannings").select("*").eq("id", planningId).single();
@@ -389,79 +449,126 @@ export default function Plannings() {
             Limpar filtros
           </button>
         )}
+
+        {grupos.length > 1 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto gap-1.5 text-xs"
+            onClick={() => setGruposAbertos(
+              gruposAbertos.length === grupos.length ? [] : grupos.map((g) => g.clientId),
+            )}
+          >
+            {gruposAbertos.length === grupos.length
+              ? <><ChevronsDownUp className="h-3.5 w-3.5" /> Recolher todos</>
+              : <><ChevronsUpDown className="h-3.5 w-3.5" /> Expandir todos</>}
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => <Card key={i} className="animate-pulse"><CardContent className="h-20" /></Card>)}
         </div>
-      ) : plannings && plannings.length > 0 ? (
-        <div className="space-y-3">
-          {plannings.filter((p: any) =>
-            (statusFilter === "all" || p.status === statusFilter) &&
-            (filterClient === "all" || p.client_id === filterClient) &&
-            (filterMonth === "all" || String(p.month) === filterMonth)
-          ).map((p: any) => {
-            const accent = (p.clients as any)?.accent_color || "#ef5a2b";
+      ) : grupos.length > 0 ? (
+        <div className="space-y-2.5">
+          {grupos.map((grupo) => {
+            const aberto = isGrupoAberto(grupo.clientId);
+            const recente = grupo.plannings[0];
             return (
-            <Card key={p.id} className="overflow-hidden transition-shadow hover:shadow-md">
-              <div className="h-1 w-full" style={{ backgroundColor: accent }} />
-              <CardContent className="flex items-center justify-between p-4">
-                <Link to={`/plannings/${slugify(p.clients?.name || "")}/${MONTH_SLUGS[p.month - 1]}-${p.year}`} className="flex flex-1 items-center gap-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg text-sm font-bold text-white shadow-sm" style={{ backgroundColor: accent }}>
-                    {(p.clients?.name || "?").charAt(0)}
-                  </div>
-                  <div>
-                    <p className="font-semibold">{p.clients?.name}</p>
-                    <p className="text-sm text-muted-foreground">{MONTHS[p.month - 1]} {p.year}</p>
-                  </div>
-                </Link>
-                <div className="flex items-center gap-2">
-                  <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                    p.status === "approved" ? "bg-green-100 text-green-700" :
-                    p.status === "client_review" ? "bg-blue-100 text-blue-700" :
-                    p.status === "internal_review" ? "bg-purple-100 text-purple-700" :
-                    "bg-muted text-muted-foreground"
-                  }`}>
-                    {p.status === "approved" ? "✅ Aprovado" :
-                     p.status === "client_review" ? "👤 Ag. cliente" :
-                     p.status === "internal_review" ? "🔍 Ag. interno" :
-                     "📝 Rascunho"}
-                  </span>
-                  <Button variant="ghost" size="icon" onClick={() => duplicatePlanning.mutate(p.id)} title="Duplicar para próximo mês">
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon" title="Excluir planejamento">
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Excluir planejamento?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Todos os posts, comentários e sugestões deste planejamento serão excluídos permanentemente.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => deletePlanning.mutate(p.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                          Excluir
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
+            <Card key={grupo.clientId} className="overflow-hidden">
+              <div className="h-1 w-full" style={{ backgroundColor: grupo.accent }} />
+
+              {/* Cabeçalho do cliente: resume sem precisar abrir. */}
+              <button
+                type="button"
+                onClick={() => toggleGrupo(grupo.clientId)}
+                aria-expanded={aberto}
+                className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-muted/40"
+              >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white shadow-sm" style={{ backgroundColor: grupo.accent }}>
+                  {grupo.name.charAt(0)}
                 </div>
-              </CardContent>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold">{grupo.name}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {grupo.plannings.length} {grupo.plannings.length === 1 ? "planejamento" : "planejamentos"}
+                    {recente && <> · último em {MONTHS[recente.month - 1]} {recente.year}</>}
+                  </p>
+                </div>
+                <ChevronDown className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${aberto ? "rotate-180" : ""}`} />
+              </button>
+
+              {aberto && (
+                <div className="space-y-1 border-t bg-muted/20 p-2">
+                  {grupo.plannings.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between gap-2 rounded-lg bg-card p-3 transition-shadow hover:shadow-sm">
+                      <Link
+                        to={`/plannings/${slugify(p.clients?.name || "")}/${MONTH_SLUGS[p.month - 1]}-${p.year}`}
+                        className="flex flex-1 items-center gap-3 min-w-0"
+                      >
+                        <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate font-medium">{MONTHS[p.month - 1]} {p.year}</span>
+                      </Link>
+                      <div className="flex items-center gap-2">
+                        <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                          p.status === "approved" ? "bg-green-100 text-green-700" :
+                          p.status === "client_review" ? "bg-blue-100 text-blue-700" :
+                          p.status === "internal_review" ? "bg-purple-100 text-purple-700" :
+                          "bg-muted text-muted-foreground"
+                        }`}>
+                          {p.status === "approved" ? "✅ Aprovado" :
+                           p.status === "client_review" ? "👤 Ag. cliente" :
+                           p.status === "internal_review" ? "🔍 Ag. interno" :
+                           "📝 Rascunho"}
+                        </span>
+                        <Button variant="ghost" size="icon" onClick={() => duplicatePlanning.mutate(p.id)} title="Duplicar para próximo mês">
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" title="Excluir planejamento">
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Excluir planejamento?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Todos os posts, comentários e sugestões deste planejamento serão excluídos permanentemente.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => deletePlanning.mutate(p.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                Excluir
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Card>
           );})}
         </div>
       ) : (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="mb-4 text-muted-foreground">Nenhum planejamento criado</p>
-            <Button onClick={() => setOpen(true)}><Plus className="mr-2 h-4 w-4" /> Criar Planejamento</Button>
+            <p className="mb-4 text-muted-foreground">
+              {plannings && plannings.length > 0
+                ? "Nenhum planejamento com esses filtros"
+                : "Nenhum planejamento criado"}
+            </p>
+            {plannings && plannings.length > 0 ? (
+              <Button variant="outline" onClick={() => { setStatusFilter("all"); setFilterClient("all"); setFilterMonth("all"); }}>
+                Limpar filtros
+              </Button>
+            ) : (
+              <Button onClick={() => setOpen(true)}><Plus className="mr-2 h-4 w-4" /> Criar Planejamento</Button>
+            )}
           </CardContent>
         </Card>
       )}
