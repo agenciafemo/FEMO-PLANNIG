@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertTriangle, CheckCircle2, Instagram, Link2, Loader2, Unlink } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Instagram, Link2, Loader2, Unlink, UserRoundCog } from "lucide-react";
 import {
   disconnectMeta,
   finalizeMetaConnection,
@@ -45,6 +45,20 @@ function pagesErrorMessage(error: unknown): string {
   return "Não foi possível buscar as páginas. Tente novamente ou refaça a conexão.";
 }
 
+// Diz com QUAL conta do Facebook a conexão foi feita. Enquanto vários clientes
+// estiverem na mesma conta, a queda de uma sessão derruba todos — é por isso
+// que essa linha existe: ela torna a migração para a conta de cada cliente
+// visível, cliente a cliente.
+function AuthorLine({ name }: { name: string | null }) {
+  return (
+    <p className="mt-1.5 text-xs text-muted-foreground">
+      {name
+        ? <>Conectado pela conta de <span className="font-medium text-foreground">{name}</span></>
+        : "Conectado antes do registro de conta — reconecte para saber de quem é"}
+    </p>
+  );
+}
+
 export function InstagramConnection({ clientId }: { clientId: string }) {
   const queryClient = useQueryClient();
   const [selectOpen, setSelectOpen] = useState(false);
@@ -59,6 +73,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   const status = first?.connection_status ?? "not_connected";
   const connectionId = first?.connection_id ?? null;
   const canManage = first?.can_manage ?? false;
+  const authorName = first?.meta_user_name ?? null;
   const channels = (rows ?? []).filter((r) => r.channel_id);
   const igChannel = channels.find((c) => c.channel_type === "instagram");
   const pageChannel = channels.find((c) => c.channel_type === "facebook_page");
@@ -92,9 +107,12 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
     enabled: selectOpen && !!effectivePendingId,
   });
 
+  // forceAccount = conectar com a conta do PRÓPRIO cliente. Sem isso o Facebook
+  // reaproveita a sessão aberta no navegador (a da agência) e reautoriza em
+  // silêncio — você acha que migrou e não migrou.
   const connect = useMutation({
-    mutationFn: async () => {
-      const url = await startMetaOAuth(clientId, returnPathFor(clientId));
+    mutationFn: async (forceAccount = false) => {
+      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount);
       window.location.href = url; // navega para o Facebook
     },
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao iniciar conexão: " + (e as Error).message),
@@ -105,9 +123,9 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   // de iniciar o novo OAuth — senão o retorno da Meta falha ao gravar a conexão
   // (pending_connection_create_failed).
   const reconnect = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (forceAccount = false) => {
       if (connectionId) await disconnectMeta(connectionId);
-      const url = await startMetaOAuth(clientId, returnPathFor(clientId));
+      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount);
       window.location.href = url;
     },
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao reconectar: " + (e as Error).message),
@@ -166,16 +184,30 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
           {pageChannel && (
             <p className="text-xs text-muted-foreground">Página: {pageChannel.display_name}</p>
           )}
+          <AuthorLine name={authorName} />
           {canManage && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-2"
-              disabled={disconnect.isPending}
-              onClick={() => disconnect.mutate()}
-            >
-              <Unlink className="mr-1.5 h-3.5 w-3.5" /> Desconectar
-            </Button>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={disconnect.isPending}
+                onClick={() => disconnect.mutate()}
+              >
+                <Unlink className="mr-1.5 h-3.5 w-3.5" /> Desconectar
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={reconnect.isPending}
+                onClick={() => reconnect.mutate(true)}
+                title="Refaz a conexão obrigando a escolher a conta do Facebook"
+              >
+                {reconnect.isPending
+                  ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  : <UserRoundCog className="mr-1.5 h-3.5 w-3.5" />}
+                Conectar como o cliente
+              </Button>
+            </div>
           )}
         </div>
       )}
@@ -185,17 +217,28 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
           <div className="flex items-center gap-2 font-medium text-amber-600">
             <AlertTriangle className="h-4 w-4" /> Reconexão necessária
           </div>
+          <AuthorLine name={authorName} />
           {canManage && (
-            <Button
-              size="sm"
-              className="mt-2"
-              disabled={reconnect.isPending}
-              onClick={() => reconnect.mutate()}
-            >
-              {reconnect.isPending
-                ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                : <Link2 className="mr-1.5 h-3.5 w-3.5" />} Reconectar
-            </Button>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                disabled={reconnect.isPending}
+                onClick={() => reconnect.mutate(false)}
+              >
+                {reconnect.isPending
+                  ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  : <Link2 className="mr-1.5 h-3.5 w-3.5" />} Reconectar
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={reconnect.isPending}
+                onClick={() => reconnect.mutate(true)}
+                title="Refaz a conexão obrigando a escolher a conta do Facebook"
+              >
+                <UserRoundCog className="mr-1.5 h-3.5 w-3.5" /> Conectar como o cliente
+              </Button>
+            </div>
           )}
         </div>
       )}
@@ -225,12 +268,23 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
               ? "Instagram desconectado. Conecte novamente para publicar e ler métricas."
               : "Conecte o Instagram deste cliente para publicar pelo Norteia."}
           </p>
-          <Button size="sm" disabled={connect.isPending} onClick={() => connect.mutate()}>
-            {connect.isPending
-              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              : <Instagram className="mr-1.5 h-3.5 w-3.5" />}
-            Conectar Instagram
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" disabled={connect.isPending} onClick={() => connect.mutate(false)}>
+              {connect.isPending
+                ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                : <Instagram className="mr-1.5 h-3.5 w-3.5" />}
+              Conectar Instagram
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={connect.isPending}
+              onClick={() => connect.mutate(true)}
+              title="Obriga a escolher a conta do Facebook em vez de usar a que já está logada"
+            >
+              <UserRoundCog className="mr-1.5 h-3.5 w-3.5" /> Conectar como o cliente
+            </Button>
+          </div>
         </div>
       )}
 

@@ -33,6 +33,8 @@ export interface MetaConnectionStatusRow {
   token_expires_at: string | null;
   granted_scopes: string[] | null;
   last_error_code: string | null;
+  /** Nome da conta Meta que autorizou. null = conexão anterior a este registro. */
+  meta_user_name: string | null;
   channel_id: string | null;
   channel_type: string | null; // facebook_page | instagram
   external_account_id: string | null;
@@ -125,10 +127,17 @@ export async function getClientMetaStatus(clientId: string): Promise<MetaConnect
 }
 
 /** Inicia o OAuth: devolve a URL de autorização do Facebook para redirecionar. */
-export async function startMetaOAuth(clientId: string, redirectPath: string): Promise<string> {
+export async function startMetaOAuth(
+  clientId: string,
+  redirectPath: string,
+  // True = obriga o Facebook a pedir a conta, em vez de reaproveitar a sessão
+  // aberta. É o caminho para conectar com a conta do próprio cliente.
+  forceAccount = false,
+): Promise<string> {
   const r = await invokeFn<{ authorize_url: string }>("meta-oauth-start", {
     client_id: clientId,
     redirect_path: redirectPath,
+    force_account: forceAccount,
   });
   return r.authorize_url;
 }

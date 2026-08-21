@@ -27,6 +27,10 @@ import { createOAuthState } from "../_shared/meta-vault.ts";
 interface StartBody {
   client_id?: string;
   redirect_path?: string;
+  /** Obriga o Facebook a pedir a conta de novo, em vez de reaproveitar a
+   *  sessão aberta. É como se conecta um cliente com a conta dele numa máquina
+   *  já logada na conta da agência. */
+  force_account?: boolean;
 }
 
 Deno.serve(async (request) => {
@@ -69,7 +73,7 @@ Deno.serve(async (request) => {
 
     // The opaque state travels only inside the OAuth URL; persistence uses its SHA-256 hash above.
     return jsonResponse(
-      { authorize_url: buildAuthorizeUrl(rawState, config) },
+      { authorize_url: buildAuthorizeUrl(rawState, config, body.force_account === true) },
       200,
       headers,
     );

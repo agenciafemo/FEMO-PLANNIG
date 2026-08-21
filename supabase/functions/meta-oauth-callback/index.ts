@@ -2,7 +2,7 @@ import { sha256Hex } from "../_shared/meta-auth.ts";
 import {
   exchangeCodeForShortLivedToken,
   exchangeForLongLivedToken,
-  getMetaUserId,
+  getMetaUser,
   metaConfig,
 } from "../_shared/meta-client.ts";
 import {
@@ -216,11 +216,11 @@ Deno.serve(async (request) => {
       "long_lived_token_exchange_failed",
       () => exchangeForLongLivedToken(shortLivedToken.access_token, config),
     );
-    const metaUserId = await runCallbackStep(
+    const metaUser = await runCallbackStep(
       requestId,
       "lookup_meta_account",
       "meta_account_lookup_failed",
-      () => getMetaUserId(longLivedToken.access_token, config),
+      () => getMetaUser(longLivedToken.access_token, config),
     );
     const tokenExpiresAt = longLivedToken.expires_in
       ? new Date(Date.now() + longLivedToken.expires_in * 1000).toISOString()
@@ -232,7 +232,8 @@ Deno.serve(async (request) => {
       () =>
         createPendingConnection(admin, {
           oauthStateId: consumed!.oauth_state_id,
-          metaUserId,
+          metaUserId: metaUser.id,
+          metaUserName: metaUser.name,
           accessToken: longLivedToken.access_token,
           tokenExpiresAt,
           scopes: consumed!.requested_scopes,
