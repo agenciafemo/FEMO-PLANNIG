@@ -11,6 +11,12 @@
 -- Idempotente.
 -- ============================================================================
 
+-- Em transação de propósito: o DROP abaixo remove a função que o portal usa
+-- para comentar. Se o CREATE seguinte falhasse fora de uma transação, a função
+-- ficaria ausente e comentar quebraria até alguém perceber. Assim, ou as duas
+-- coisas valem, ou nenhuma.
+BEGIN;
+
 ALTER TABLE public.post_comments
   ADD COLUMN IF NOT EXISTS reason_codes TEXT[];
 
@@ -63,3 +69,5 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.public_insert_post_comment(TEXT, UUID, TEXT, TEXT, TEXT, TEXT[])
   TO anon, authenticated;
+
+COMMIT;
