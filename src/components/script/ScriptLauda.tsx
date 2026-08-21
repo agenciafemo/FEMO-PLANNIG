@@ -4,6 +4,13 @@ import {
   orderScriptsForLauda,
   type ScriptLaudaSource,
 } from "@/lib/scriptLauda";
+import {
+  formatDuration,
+  parseScenes,
+  sceneSeconds,
+  totalSeconds,
+  type Scene,
+} from "@/lib/scriptScenes";
 
 interface ScriptLaudaProps {
   clientName: string;
@@ -46,6 +53,52 @@ function ScriptSection({
       </h4>
       <div className="whitespace-pre-wrap text-sm leading-6 text-foreground">
         {children}
+      </div>
+    </section>
+  );
+}
+
+// Lauda em blocos: cada linha é um trecho, com a fala e o que a edição faz
+// naquele mesmo trecho lado a lado. Em papel, é assim que roteiro de gravação
+// se lê — por isso vira tabela, e não duas colunas de texto solto.
+function SceneTable({ scenes }: { scenes: Scene[] }) {
+  return (
+    <section className="space-y-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <MessageSquareText className="h-3.5 w-3.5" />
+          Blocos
+        </h4>
+        <span className="text-xs font-medium tabular-nums text-muted-foreground">
+          {scenes.length} {scenes.length === 1 ? "bloco" : "blocos"} · {formatDuration(totalSeconds(scenes))}
+        </span>
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-border/70">
+        <table className="script-lauda-scenes w-full border-collapse">
+          <thead>
+            <tr className="bg-muted/45">
+              <th className="w-10 px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">#</th>
+              <th className="w-16 px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Tempo</th>
+              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Fala</th>
+              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Edição</th>
+            </tr>
+          </thead>
+          <tbody>
+            {scenes.map((scene, index) => (
+              <tr key={scene.id} className="border-t border-border/70 align-top">
+                <td className="px-2 py-2.5 text-sm font-semibold tabular-nums text-muted-foreground">{index + 1}</td>
+                <td className="px-2 py-2.5 text-sm tabular-nums text-muted-foreground">{formatDuration(sceneSeconds(scene))}</td>
+                <td className="whitespace-pre-wrap px-3 py-2.5 text-sm leading-6 text-foreground">
+                  {scene.speech.trim() || <span className="italic text-muted-foreground">—</span>}
+                </td>
+                <td className="whitespace-pre-wrap px-3 py-2.5 text-sm leading-6 text-muted-foreground">
+                  {scene.editing.trim() || <span className="italic">—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </section>
   );
@@ -103,13 +156,19 @@ export function ScriptLauda({
               </div>
             </header>
 
-            <ScriptSection icon={MessageSquareText} label="Falas">
-              {script.spoken_text?.trim() || (
-                <span className="italic text-muted-foreground">
-                  Nenhuma fala cadastrada.
-                </span>
-              )}
-            </ScriptSection>
+            {/* Roteiro em blocos: fala e edição alinhadas trecho a trecho.
+                Sem blocos, cai no formato antigo de texto corrido. */}
+            {parseScenes(script.scenes).length > 0 ? (
+              <SceneTable scenes={parseScenes(script.scenes)} />
+            ) : (
+              <ScriptSection icon={MessageSquareText} label="Falas">
+                {script.spoken_text?.trim() || (
+                  <span className="italic text-muted-foreground">
+                    Nenhuma fala cadastrada.
+                  </span>
+                )}
+              </ScriptSection>
+            )}
 
             <ScriptSection icon={NotebookPen} label="Observações e referências">
               {script.references_notes?.trim() || (

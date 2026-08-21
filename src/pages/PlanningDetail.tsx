@@ -30,6 +30,8 @@ import {
   setActivePostEditor,
 } from "@/hooks/usePostEditorDraft";
 import { ScriptLaudaDialog } from "@/components/script/ScriptLaudaDialog";
+import { SceneEditor } from "@/components/script/SceneEditor";
+import { parseScenes, scenesSpokenText, serializeScenes, type Scene } from "@/lib/scriptScenes";
 import {
   copyScriptSpokenText,
   type ScriptLaudaSource,
@@ -275,6 +277,7 @@ export default function PlanningDetail() {
   const [scriptText, setScriptText] = useState("");
   const [scriptInstructions, setScriptInstructions] = useState("");
   const [scriptReferences, setScriptReferences] = useState("");
+  const [scriptScenes, setScriptScenes] = useState<Scene[]>([]);
 
   const resetScriptForm = () => {
     setShowScriptForm(false);
@@ -283,6 +286,7 @@ export default function PlanningDetail() {
     setScriptText("");
     setScriptInstructions("");
     setScriptReferences("");
+    setScriptScenes([]);
   };
 
   const copySingleScriptSpokenText = async (script: ScriptLaudaSource) => {
@@ -300,32 +304,37 @@ export default function PlanningDetail() {
     setScriptText(script.spoken_text || "");
     setScriptInstructions(script.editing_instructions || "");
     setScriptReferences(script.references_notes || "");
+    setScriptScenes(parseScenes(script.scenes));
     setShowScriptForm(true);
   };
 
   const saveScript = useMutation({
     mutationFn: async () => {
-      if (!scriptText.trim()) throw new Error("Roteiro não pode estar vazio");
+      const scenes = serializeScenes(scriptScenes);
+      // Quando o roteiro está em blocos, a fala corrida é DERIVADA deles. Isso
+      // mantém funcionando tudo que lê spoken_text (portal do cliente,
+      // teleprompter, sugestões) sem a pessoa ter que manter dois textos.
+      const spoken = scenes ? scenesSpokenText(scenes) : scriptText.trim();
+      if (!spoken) throw new Error("Roteiro não pode estar vazio");
+
       const finalTitle = scriptTitle.trim() || `Roteiro ${(videoScripts?.length ?? 0) + 1}`;
+      const payload = {
+        title: finalTitle,
+        spoken_text: spoken,
+        editing_instructions: scriptInstructions?.trim() || null,
+        references_notes: scriptReferences?.trim() || null,
+        scenes,
+      };
+
       if (editingScriptId) {
-        const { error } = await supabase.from("video_scripts").update({
-          title: finalTitle,
-          spoken_text: scriptText.trim(),
-          editing_instructions: scriptInstructions?.trim() || null,
-          references_notes: scriptReferences?.trim() || null,
-        }).eq("id", editingScriptId);
+        const { error } = await supabase.from("video_scripts")
+          .update(payload as never).eq("id", editingScriptId);
         if (error) throw error;
       } else {
         const positions = videoScripts?.map(s => s.position) ?? [];
         const maxPos = positions.length > 0 ? Math.max(...positions) + 1 : 0;
-        const { error } = await supabase.from("video_scripts").insert({
-          planning_id: planningId!,
-          position: maxPos,
-          title: finalTitle,
-          spoken_text: scriptText.trim(),
-          editing_instructions: scriptInstructions?.trim() || null,
-          references_notes: scriptReferences?.trim() || null,
-        });
+        const { error } = await supabase.from("video_scripts")
+          .insert({ ...payload, planning_id: planningId!, position: maxPos } as never);
         if (error) throw error;
       }
     },
@@ -798,10 +807,17 @@ export default function PlanningDetail() {
                 <Label>Tema do vídeo</Label>
                 <Input value={scriptTitle} onChange={(e) => setScriptTitle(e.target.value)} placeholder="Ex: Dicas de marketing digital" />
               </div>
-              <div className="space-y-2">
-                <Label>Texto falado (roteiro completo)</Label>
-                <Textarea value={scriptText} onChange={(e) => setScriptText(e.target.value)} placeholder="Escreva o roteiro completo, texto corrido..." rows={6} />
-              </div>
+              {/* Em blocos, a fala corrida é derivada — some para não haver duas
+                  fontes da verdade. Sem blocos, segue o campo de sempre. */}
+              {scriptScenes.length === 0 && (
+                <div className="space-y-2">
+                  <Label>Texto falado (roteiro completo)</Label>
+                  <Textarea value={scriptText} onChange={(e) => setScriptText(e.target.value)} placeholder="Escreva o roteiro completo, texto corrido..." rows={6} />
+                </div>
+              )}
+
+              <SceneEditor scenes={scriptScenes} onChange={setScriptScenes} spokenText={scriptText} />
+
               <div className="space-y-2">
                 <Label>Direcionamentos e referências</Label>
                 <Textarea value={scriptReferences} onChange={(e) => setScriptReferences(e.target.value)} placeholder="Ex: Referência do vídeo X, estilo similar ao canal Y, tom descontraído..." rows={3} />
