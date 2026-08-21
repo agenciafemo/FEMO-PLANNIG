@@ -124,9 +124,14 @@ export default function Plannings() {
       addPosts(storiesCount, "story");
       addPosts(blogCount, "blog");
 
+      // Guarda os posts criados para ligar cada peça de produção ao seu post
+      // (é o que faz o quadro se marcar sozinho conforme o conteúdo é montado).
+      let createdPosts: Array<{ id: string; content_type: string; position: number }> = [];
       if (postsToInsert.length > 0) {
-        const { error: postsError } = await supabase.from("posts").insert(postsToInsert);
+        const { data: postsData, error: postsError } = await supabase
+          .from("posts").insert(postsToInsert).select("id, content_type, position");
         if (postsError) throw postsError;
+        createdPosts = (postsData ?? []) as typeof createdPosts;
       }
 
       // Ecossistema Planejamento -> Produção: gera os itens de produção (peças
@@ -169,6 +174,19 @@ export default function Plannings() {
               resolve,
               writingNotes,
             );
+            // Liga cada peça ao post correspondente: dentro do mesmo tipo, a
+            // enésima peça corresponde ao enésimo post.
+            const porTipo = new Map<string, string[]>();
+            for (const p of [...createdPosts].sort((a, b) => a.position - b.position)) {
+              const lista = porTipo.get(p.content_type) ?? [];
+              lista.push(p.id);
+              porTipo.set(p.content_type, lista);
+            }
+            for (const item of items) {
+              const lista = porTipo.get(item.content_type as string) ?? [];
+              item.post_id = lista[(item.piece_number as number) - 1] ?? null;
+            }
+
             if (items.length > 0) {
               // Insere as peças e, com os ids devolvidos, cria as ETAPAS de cada
               // uma (checklist). A peça só é útil no quadro com as etapas.

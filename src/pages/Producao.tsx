@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  CalendarClock, Check, ChevronDown, ChevronRight, CircleCheck, Flag,
+  CalendarClock, Check, ChevronDown, ChevronRight, CircleCheck, ExternalLink, Flag,
   Loader2, Plus, Send, Settings2, UserRound, Workflow, X,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -57,6 +58,11 @@ type ClientRow = { id: string; name: string };
 
 const GROUP_ORDER = ["reels", "carousel", "static", "story", "blog", "extra"];
 
+const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho",
+  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "")
+  .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
 const KIND_ICON = {
   check: CircleCheck,
   data: CalendarClock,
@@ -83,6 +89,25 @@ export default function Producao() {
     },
     enabled: !!organizationId,
   });
+
+  // Planejamentos, só para montar o link "Abrir no planejamento".
+  const { data: plannings = [] } = useQuery({
+    queryKey: ["prod-plannings", organizationId],
+    queryFn: async () => {
+      const { data } = await (supabase as AnyClient).from("plannings")
+        .select("id, month, year, client_id").eq("organization_id", organizationId!);
+      return (data ?? []) as Array<{ id: string; month: number; year: number; client_id: string }>;
+    },
+    enabled: !!organizationId,
+  });
+
+  const planningHref = (piece: Item): string | null => {
+    if (!piece.planning_id) return null;
+    const pl = plannings.find((p) => p.id === piece.planning_id);
+    const client = clients.find((c) => c.id === piece.client_id);
+    if (!pl || !client) return null;
+    return `/plannings/${slugify(client.name)}/${MONTH_SLUGS[pl.month - 1]}-${pl.year}`;
+  };
 
   const { data: members = [] } = useQuery({
     queryKey: ["prod-members", organizationId],
@@ -311,8 +336,10 @@ export default function Producao() {
               <Workflow className="h-4 w-4" /> Produção
             </div>
             <h1 className="text-3xl font-semibold tracking-tight">Quadro de Produção</h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">
+            <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
               Todas as etapas de cada peça já estão aqui — marque conforme conclui, em qualquer ordem.
+              O que você preenche no planejamento (mídia, vídeo, legenda) e a aprovação do cliente
+              marcam sozinhos.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -431,6 +458,14 @@ export default function Producao() {
                                 <span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-semibold text-success">
                                   Concluída
                                 </span>
+                              )}
+                              {planningHref(piece) && (
+                                <Link
+                                  to={planningHref(piece)!}
+                                  className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border/70 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-brand/50 hover:text-brand"
+                                >
+                                  <ExternalLink className="h-3 w-3" /> Abrir no planejamento
+                                </Link>
                               )}
                             </div>
 
