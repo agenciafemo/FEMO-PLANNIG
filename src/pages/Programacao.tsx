@@ -79,6 +79,51 @@ function buildCaption(post: { caption: string | null; hashtags: string | null })
  * Reels exige um arquivo de vídeo DIRETO e público (a Meta baixa a URL);
  * link do Drive não serve — bloqueia com mensagem clara.
  */
+const REDE_LABEL: Record<PublishTarget, string> = {
+  instagram: "Instagram",
+  facebook: "Facebook",
+};
+
+type FalhaDestino = { target: PublishTarget; msg: string };
+
+/**
+ * Enfileira um item por destino e NUNCA aborta no primeiro erro. Cada destino e
+ * uma publicacao independente: se o Facebook falhar, o Instagram ja enfileirado
+ * vai publicar do mesmo jeito. Abortar cedo e reportar erro total faria a
+ * pessoa tentar de novo e duplicar o que deu certo.
+ */
+async function enfileirarDestinos(
+  destinos: PublishTarget[],
+  criar: (target: PublishTarget) => Promise<unknown>,
+): Promise<{ criados: PublishTarget[]; falhas: FalhaDestino[] }> {
+  const criados: PublishTarget[] = [];
+  const falhas: FalhaDestino[] = [];
+  for (const target of destinos) {
+    try {
+      await criar(target);
+      criados.push(target);
+    } catch (e) {
+      falhas.push({ target, msg: (e as Error).message });
+    }
+  }
+  return { criados, falhas };
+}
+
+function resumoFalhas(falhas: FalhaDestino[]): string {
+  return falhas.map((f) => `${REDE_LABEL[f.target]}: ${f.msg}`).join(" · ");
+}
+
+/** Mensagem honesta do que foi e do que nao foi. */
+function resumoEnfileiramento(
+  criados: PublishTarget[],
+  falhas: FalhaDestino[],
+  verbo: string,
+): string {
+  const ok = criados.map((t) => REDE_LABEL[t]).join(" e ");
+  if (!falhas.length) return `${verbo} ${ok ? `(${ok})` : ""}`.trim();
+  return `${verbo} em ${ok}, mas falhou em ${resumoFalhas(falhas)}`;
+}
+
 function buildScheduleInput(post: ApprovedPost) {
   if (post.content_type === "reels") {
     const v = post.video_url ?? "";
@@ -246,21 +291,27 @@ export default function Programacao() {
   const publishNow = useMutation({
     mutationFn: async (post: ApprovedPost) => {
       if (!connectionId) throw new Error("Cliente sem conta conectada");
-      // Uma linha da fila por destino: cada plataforma falha e repete sozinha.
-      for (const target of destinos) {
-        await createScheduledPost({
+      // Uma linha da fila por destino. Se um destino falhar, o outro JA foi
+      // enfileirado e vai publicar — reportar erro total faria a pessoa clicar
+      // de novo e duplicar o que ja deu certo.
+      const { criados, falhas } = await enfileirarDestinos(destinos, (target) =>
+        createScheduledPost({
           clientId,
           connectionId,
           ...buildScheduleInput(post),
           caption: buildCaption(post),
           postId: post.id,
           target,
-        });
-      }
-      return runPublishWorker();
+        }));
+      if (!criados.length) throw new Error(resumoFalhas(falhas));
+      const res = await runPublishWorker();
+      return { ...res, criados, falhas };
     },
     onSuccess: (res) => {
-      toast.success(res.published > 0 ? "Publicado no Instagram!" : "Enviado — processando…");
+      // Diz a rede certa, e avisa quando so uma parte deu certo.
+      const base = res.published > 0 ? "Publicado" : "Enviado — processando";
+      const msg = resumoEnfileiramento(res.criados, res.falhas, base);
+      if (res.falhas.length) toast.warning(msg); else toast.success(msg);
       invalidate();
     },
     onError: (e: unknown) => toast.error("Erro ao publicar: " + (e as Error).message),
@@ -275,8 +326,8 @@ export default function Programacao() {
       if (when.getTime() <= Date.now() + 60 * 1000) {
         throw new Error("Escolha uma data e hora no futuro.");
       }
-      for (const target of destinos) {
-        await createScheduledPost({
+      const { criados, falhas } = await enfileirarDestinos(destinos, (target) =>
+        createScheduledPost({
           clientId,
           connectionId,
           ...buildScheduleInput(scheduling),
@@ -284,11 +335,12 @@ export default function Programacao() {
           scheduledFor: when.toISOString(),
           postId: scheduling.id,
           target,
-        });
-      }
+        }));
+      if (!criados.length) throw new Error(resumoFalhas(falhas));
+      return { criados, falhas };
     },
-    onSuccess: () => {
-      toast.success("Post agendado!");
+    onSuccess: (res) => {
+      toast.success(resumoEnfileiramento(res.criados, res.falhas, "Post agendado"));
       setScheduling(null);
       invalidate();
     },
