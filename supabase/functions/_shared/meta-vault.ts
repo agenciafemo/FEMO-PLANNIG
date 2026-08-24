@@ -55,6 +55,7 @@ export async function createOAuthState(
     redirectPath: string;
     expiresAt: string;
     requestId: string;
+    provider?: "facebook" | "instagram";
   },
 ): Promise<string> {
   const { data, error } = await admin.rpc("meta_server_create_oauth_state", {
@@ -65,6 +66,7 @@ export async function createOAuthState(
     _redirect_path: input.redirectPath,
     _expires_at: input.expiresAt,
     _request_id: input.requestId,
+    _provider: input.provider ?? "facebook",
   });
   if (error || typeof data !== "string") {
     rpcFailure("oauth_state_create_failed");
@@ -91,6 +93,7 @@ export async function createPendingConnection(
     oauthStateId: string;
     metaUserId: string;
     metaUserName?: string | null;
+    provider?: "facebook" | "instagram";
     accessToken: string;
     tokenExpiresAt: string | null;
     scopes: string[];
@@ -107,6 +110,7 @@ export async function createPendingConnection(
       _granted_scopes: input.scopes,
       _request_id: input.requestId,
       _meta_user_name: input.metaUserName ?? null,
+      _provider: input.provider ?? "facebook",
     },
   );
   const connectionId = connectionIdFromRpcData(data);

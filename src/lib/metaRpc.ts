@@ -150,11 +150,14 @@ export async function startMetaOAuth(
   // True = obriga o Facebook a pedir a conta, em vez de reaproveitar a sessão
   // aberta. É o caminho para conectar com a conta do próprio cliente.
   forceAccount = false,
+  // Porta da autorização. "instagram" dispensa Página do Facebook.
+  provider: MetaProvider = "facebook",
 ): Promise<string> {
   const r = await invokeFn<{ authorize_url: string }>("meta-oauth-start", {
     client_id: clientId,
     redirect_path: redirectPath,
     force_account: forceAccount,
+    provider,
   });
   return r.authorize_url;
 }

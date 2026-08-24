@@ -122,9 +122,9 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   // forceAccount = conectar com a conta do PRÓPRIO cliente. Sem isso o Facebook
   // reaproveita a sessão aberta no navegador (a da agência) e reautoriza em
   // silêncio — você acha que migrou e não migrou.
-  const connect = useMutation<void, Error, boolean>({
-    mutationFn: async (forceAccount: boolean) => {
-      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount);
+  const connect = useMutation<void, Error, { forceAccount: boolean; provider: MetaProvider }>({
+    mutationFn: async ({ forceAccount, provider: porta }) => {
+      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount, porta);
       window.location.href = url; // navega para o Facebook
     },
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao iniciar conexão: " + (e as Error).message),
@@ -334,22 +334,39 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
               ? "Instagram desconectado. Conecte novamente para publicar e ler métricas."
               : "Conecte o Instagram deste cliente para publicar pelo Norteia."}
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={connect.isPending} onClick={() => connect.mutate(false)}>
-              {connect.isPending
-                ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                : <Instagram className="mr-1.5 h-3.5 w-3.5" />}
-              Conectar Instagram
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={connect.isPending}
-              onClick={() => connect.mutate(true)}
-              title="Obriga a escolher a conta do Facebook em vez de usar a que já está logada"
-            >
-              <UserRoundCog className="mr-1.5 h-3.5 w-3.5" /> Conectar como o cliente
-            </Button>
+          <div className="space-y-2">
+            {/* Duas portas, dois botões. Não é preferência: pelo Facebook a
+                conta do Instagram precisa estar vinculada a uma Página, e só
+                por ali dá para publicar TAMBÉM na Página. Pelo Instagram o
+                cliente entra direto, sem Facebook nenhum. */}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                disabled={connect.isPending}
+                onClick={() => connect.mutate({ forceAccount: true, provider: "instagram" })}
+                title="O cliente entra com a conta do Instagram dele. Não exige Facebook."
+              >
+                {connect.isPending
+                  ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  : <Instagram className="mr-1.5 h-3.5 w-3.5" />}
+                Entrar com Instagram
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={connect.isPending}
+                onClick={() => connect.mutate({ forceAccount: true, provider: "facebook" })}
+                title="Exige a conta do Instagram vinculada a uma Página. Permite publicar também na Página."
+              >
+                <UserRoundCog className="mr-1.5 h-3.5 w-3.5" /> Entrar com Facebook
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Pelo <span className="font-medium text-foreground">Instagram</span> o cliente
+              conecta sem precisar de Facebook — mas não publica na Página.
+              Pelo <span className="font-medium text-foreground">Facebook</span> é preciso a
+              conta vinculada a uma Página, e aí a Página também pode receber posts.
+            </p>
           </div>
         </div>
       )}

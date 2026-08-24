@@ -19,6 +19,8 @@ import {
 } from "../_shared/meta-auth.ts";
 import {
   buildAuthorizeUrl,
+  buildInstagramAuthorizeUrl,
+  instagramOAuthConfig,
   metaOAuthStartConfig,
 } from "../_shared/meta-client.ts";
 import { createAdminClient } from "../_shared/supabase.ts";
@@ -31,6 +33,8 @@ interface StartBody {
    *  sessão aberta. É como se conecta um cliente com a conta dele numa máquina
    *  já logada na conta da agência. */
   force_account?: boolean;
+  /** Porta da autorização. Ausente = facebook, que é o comportamento antigo. */
+  provider?: "facebook" | "instagram";
 }
 
 Deno.serve(async (request) => {
@@ -55,6 +59,10 @@ Deno.serve(async (request) => {
 
     const admin = createAdminClient();
     await requireClientManager(admin, body.client_id, actor.userId);
+    // A porta do Instagram tem credenciais e escopos próprios — por isso a
+    // configuração é escolhida antes de gerar o state.
+    const provider = body.provider === "instagram" ? "instagram" : "facebook";
+    const igConfig = provider === "instagram" ? instagramOAuthConfig() : null;
     const config = metaOAuthStartConfig();
     const rawState = generateOAuthState();
     const stateHash = await sha256Hex(rawState);
@@ -64,7 +72,7 @@ Deno.serve(async (request) => {
       clientId: body.client_id,
       requestedBy: actor.userId,
       stateHash,
-      scopes: config.scopes,
+      scopes: igConfig ? igConfig.scopes : config.scopes,
       redirectPath,
       expiresAt: new Date(Date.now() + config.stateTtlSeconds * 1000)
         .toISOString(),
@@ -73,7 +81,11 @@ Deno.serve(async (request) => {
 
     // The opaque state travels only inside the OAuth URL; persistence uses its SHA-256 hash above.
     return jsonResponse(
-      { authorize_url: buildAuthorizeUrl(rawState, config, body.force_account === true) },
+      {
+        authorize_url: igConfig
+          ? buildInstagramAuthorizeUrl(rawState, igConfig)
+          : buildAuthorizeUrl(rawState, config, body.force_account === true),
+      },
       200,
       headers,
     );
