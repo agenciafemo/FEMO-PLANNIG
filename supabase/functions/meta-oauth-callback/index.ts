@@ -3,6 +3,10 @@ import {
   exchangeCodeForShortLivedToken,
   exchangeForLongLivedToken,
   getMetaUser,
+  getInstagramAccount,
+  exchangeInstagramCode,
+  exchangeInstagramLongLivedToken,
+  instagramOAuthConfig,
   metaConfig,
 } from "../_shared/meta-client.ts";
 import {
@@ -30,6 +34,10 @@ type CallbackStep =
   | "exchange_short_lived_token"
   | "exchange_long_lived_token"
   | "lookup_meta_account"
+  | "load_instagram_config"
+  | "exchange_instagram_code"
+  | "exchange_instagram_long_lived_token"
+  | "lookup_instagram_account"
   | "create_pending_connection"
   | "record_audit"
   | "build_redirect";
@@ -198,33 +206,62 @@ Deno.serve(async (request) => {
       );
       throw new HttpError(400, "authorization_code_missing");
     }
-    const config = await runCallbackStep(
-      requestId,
-      "load_meta_config",
-      "meta_config_missing",
-      () => metaConfig(),
-    );
-    const shortLivedToken = await runCallbackStep(
-      requestId,
-      "exchange_short_lived_token",
-      "token_exchange_failed",
-      () => exchangeCodeForShortLivedToken(code, config),
-    );
-    const longLivedToken = await runCallbackStep(
-      requestId,
-      "exchange_long_lived_token",
-      "long_lived_token_exchange_failed",
-      () => exchangeForLongLivedToken(shortLivedToken.access_token, config),
-    );
-    const metaUser = await runCallbackStep(
-      requestId,
-      "lookup_meta_account",
-      "meta_account_lookup_failed",
-      () => getMetaUser(longLivedToken.access_token, config),
-    );
-    const tokenExpiresAt = longLivedToken.expires_in
-      ? new Date(Date.now() + longLivedToken.expires_in * 1000).toISOString()
-      : null;
+    // A porta veio no state, que atravessou o redirecionamento. As duas trocam
+    // o codigo por token em endpoints e com credenciais diferentes.
+    const viaInstagram = consumed!.provider === "instagram";
+
+    let accessToken: string;
+    let tokenExpiresAt: string | null;
+    let metaUserId: string;
+    let metaUserName: string | null;
+
+    if (viaInstagram) {
+      const igConfig = await runCallbackStep(
+        requestId, "load_instagram_config", "instagram_config_missing",
+        () => instagramOAuthConfig(),
+      );
+      const short = await runCallbackStep(
+        requestId, "exchange_instagram_code", "token_exchange_failed",
+        () => exchangeInstagramCode(code, igConfig),
+      );
+      const long = await runCallbackStep(
+        requestId, "exchange_instagram_long_lived_token", "long_lived_token_exchange_failed",
+        () => exchangeInstagramLongLivedToken(short.accessToken, igConfig),
+      );
+      const conta = await runCallbackStep(
+        requestId, "lookup_instagram_account", "meta_account_lookup_failed",
+        () => getInstagramAccount(long.accessToken),
+      );
+      accessToken = long.accessToken;
+      // Diferente do token de Pagina, este VENCE — e por isso e renovavel.
+      tokenExpiresAt = new Date(Date.now() + long.expiresInSeconds * 1000).toISOString();
+      metaUserId = conta.id;
+      metaUserName = conta.username ? "@" + conta.username : conta.name;
+    } else {
+      const config = await runCallbackStep(
+        requestId, "load_meta_config", "meta_config_missing",
+        () => metaConfig(),
+      );
+      const shortLivedToken = await runCallbackStep(
+        requestId, "exchange_short_lived_token", "token_exchange_failed",
+        () => exchangeCodeForShortLivedToken(code, config),
+      );
+      const longLivedToken = await runCallbackStep(
+        requestId, "exchange_long_lived_token", "long_lived_token_exchange_failed",
+        () => exchangeForLongLivedToken(shortLivedToken.access_token, config),
+      );
+      const metaUser = await runCallbackStep(
+        requestId, "lookup_meta_account", "meta_account_lookup_failed",
+        () => getMetaUser(longLivedToken.access_token, config),
+      );
+      accessToken = longLivedToken.access_token;
+      tokenExpiresAt = longLivedToken.expires_in
+        ? new Date(Date.now() + longLivedToken.expires_in * 1000).toISOString()
+        : null;
+      metaUserId = metaUser.id;
+      metaUserName = metaUser.name;
+    }
+
     const connectionId = await runCallbackStep(
       requestId,
       "create_pending_connection",
@@ -232,12 +269,13 @@ Deno.serve(async (request) => {
       () =>
         createPendingConnection(admin, {
           oauthStateId: consumed!.oauth_state_id,
-          metaUserId: metaUser.id,
-          metaUserName: metaUser.name,
-          accessToken: longLivedToken.access_token,
+          metaUserId,
+          metaUserName,
+          accessToken,
           tokenExpiresAt,
           scopes: consumed!.requested_scopes,
           requestId,
+          provider: viaInstagram ? "instagram" : "facebook",
         }),
     );
 

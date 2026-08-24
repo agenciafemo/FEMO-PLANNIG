@@ -570,3 +570,138 @@ export async function revokeMetaPermissions(
     return false;
   }
 }
+
+// ============================================================================
+// PORTA DO INSTAGRAM (Instagram API with Instagram Login)
+//
+// Caminho alternativo ao login do Facebook: o cliente autoriza direto com as
+// credenciais do Instagram, SEM precisar de Página vinculada. É o que permite
+// conectar cliente que não tem Facebook.
+//
+// Diferenças que obrigam um fluxo próprio:
+//   • credenciais SEPARADAS — o Instagram tem App ID e Secret próprios, que
+//     não são os do Facebook;
+//   • autorização em www.instagram.com, troca de código em api.instagram.com;
+//   • token de longa duração vale 60 dias mas é RENOVÁVEL por programa, ao
+//     contrário do token de Página;
+//   • as chamadas de API vão para graph.instagram.com.
+// ============================================================================
+
+export interface InstagramOAuthConfig {
+  appId: string;
+  appSecret: string;
+  redirectUri: string;
+  scopes: string[];
+}
+
+export function instagramOAuthConfig(): InstagramOAuthConfig {
+  const scopes = (Deno.env.get("META_INSTAGRAM_SCOPES") ??
+    "instagram_business_basic,instagram_business_content_publish")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  return {
+    appId: requiredEnv("META_INSTAGRAM_APP_ID"),
+    appSecret: requiredEnv("META_INSTAGRAM_APP_SECRET"),
+    redirectUri: requiredEnv("META_INSTAGRAM_REDIRECT_URI"),
+    scopes,
+  };
+}
+
+export function buildInstagramAuthorizeUrl(
+  state: string,
+  config: InstagramOAuthConfig = instagramOAuthConfig(),
+): string {
+  const url = new URL("https://www.instagram.com/oauth/authorize");
+  url.searchParams.set("client_id", config.appId);
+  url.searchParams.set("redirect_uri", config.redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", config.scopes.join(","));
+  url.searchParams.set("state", state);
+  return url.toString();
+}
+
+/** Troca o código pelo token curto e já devolve o id da conta do Instagram. */
+export async function exchangeInstagramCode(
+  code: string,
+  config: InstagramOAuthConfig = instagramOAuthConfig(),
+): Promise<{ accessToken: string; userId: string }> {
+  const body = new URLSearchParams({
+    client_id: config.appId,
+    client_secret: config.appSecret,
+    grant_type: "authorization_code",
+    redirect_uri: config.redirectUri,
+    code,
+  });
+  const res = await fetch("https://api.instagram.com/oauth/access_token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.access_token) {
+    throw new HttpError(502, metaReasonCode(json, res.status));
+  }
+  return { accessToken: json.access_token, userId: String(json.user_id ?? "") };
+}
+
+/**
+ * Troca o token curto (1h) pelo de longa duração (60 dias).
+ * Diferente do de Página, este PODE ser renovado — ver refreshInstagramToken.
+ */
+export async function exchangeInstagramLongLivedToken(
+  shortLivedToken: string,
+  config: InstagramOAuthConfig = instagramOAuthConfig(),
+): Promise<{ accessToken: string; expiresInSeconds: number }> {
+  const url = new URL("https://graph.instagram.com/access_token");
+  url.searchParams.set("grant_type", "ig_exchange_token");
+  url.searchParams.set("client_secret", config.appSecret);
+  url.searchParams.set("access_token", shortLivedToken);
+
+  const res = await fetch(url, { method: "GET" });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.access_token) {
+    throw new HttpError(502, metaReasonCode(json, res.status));
+  }
+  return {
+    accessToken: json.access_token,
+    expiresInSeconds: Number(json.expires_in ?? 60 * 24 * 3600),
+  };
+}
+
+/** Renova um token de longa duração. Só funciona com token de 24h+ de idade. */
+export async function refreshInstagramToken(
+  token: string,
+): Promise<{ accessToken: string; expiresInSeconds: number }> {
+  const url = new URL("https://graph.instagram.com/refresh_access_token");
+  url.searchParams.set("grant_type", "ig_refresh_token");
+  url.searchParams.set("access_token", token);
+
+  const res = await fetch(url, { method: "GET" });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.access_token) {
+    throw new HttpError(502, metaReasonCode(json, res.status));
+  }
+  return {
+    accessToken: json.access_token,
+    expiresInSeconds: Number(json.expires_in ?? 60 * 24 * 3600),
+  };
+}
+
+/** Perfil da conta autorizada, para gravar nome e usuário no canal. */
+export async function getInstagramAccount(
+  token: string,
+): Promise<{ id: string; username: string | null; name: string | null }> {
+  const url = new URL("https://graph.instagram.com/v23.0/me");
+  url.searchParams.set("fields", "user_id,username,name");
+  url.searchParams.set("access_token", token);
+
+  const res = await fetch(url, { method: "GET" });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new HttpError(502, metaReasonCode(json, res.status));
+  const id = String(json.user_id ?? json.id ?? "");
+  if (!id) throw new HttpError(502, "instagram_user_id_missing");
+  return {
+    id,
+    username: json.username ? String(json.username) : null,
+    name: json.name ? String(json.name) : null,
+  };
+}

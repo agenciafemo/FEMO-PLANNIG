@@ -21,6 +21,8 @@ export interface ConsumedOAuthState {
   requested_by: string;
   requested_scopes: string[];
   redirect_path: string;
+  /** Porta usada na autorização. Ausente em states antigos = facebook. */
+  provider?: "facebook" | "instagram";
 }
 
 export interface MetaTokenResponse {
