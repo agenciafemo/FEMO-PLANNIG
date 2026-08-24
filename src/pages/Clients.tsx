@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { insertPosts } from "@/lib/postsInsert";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
@@ -269,7 +270,7 @@ export default function Clients() {
       ];
 
       if (postsToInsert.length > 0) {
-        const { error: postsError } = await supabase.from("posts").insert(postsToInsert);
+        const { error: postsError } = await insertPosts(postsToInsert);
         if (postsError) throw postsError;
       }
 

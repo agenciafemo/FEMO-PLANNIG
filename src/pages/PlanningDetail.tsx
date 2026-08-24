@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { insertPosts } from "@/lib/postsInsert";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
@@ -369,13 +370,11 @@ export default function PlanningDetail() {
       const allPosts = posts || [];
       const maxPos = allPosts.length > 0 ? Math.max(...allPosts.map((p) => p.position)) : -1;
       if (allPosts.length >= 50) throw new Error("Máximo de 50 itens por planejamento");
-      const { data, error } = await supabase
-        .from("posts")
-        .insert({
-          planning_id: planningId!,
-          position: maxPos + 1,
-          content_type: type,
-        })
+      const { data, error } = await insertPosts([{
+        planning_id: planningId!,
+        position: maxPos + 1,
+        content_type: type,
+      }])
         .select("id")
         .single();
       if (error) throw error;

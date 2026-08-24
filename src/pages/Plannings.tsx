@@ -4,6 +4,7 @@ import { loadContract } from "@/lib/clientContract";
 import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
 import { buildProductionItems, buildStepRows, loadPipelines, loadRoleMap } from "@/lib/productionPipeline";
 import { supabase } from "@/integrations/supabase/client";
+import { insertPosts } from "@/lib/postsInsert";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
@@ -349,7 +350,7 @@ export default function Plannings() {
         const newPosts = originalPosts.map((p) => ({
           planning_id: newPlanning.id, position: p.position, content_type: p.content_type, caption: "", hashtags: "", status: "draft" as const,
         }));
-        await supabase.from("posts").insert(newPosts);
+        await insertPosts(newPosts);
       }
       return newPlanning;
     },

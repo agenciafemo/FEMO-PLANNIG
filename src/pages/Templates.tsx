@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { insertPosts } from "@/lib/postsInsert";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
@@ -141,7 +142,7 @@ export default function Templates() {
             caption: tp.caption,
             hashtags: tp.hashtags,
           }));
-          await supabase.from("posts").insert(posts);
+          await insertPosts(posts);
         }
       }
     },

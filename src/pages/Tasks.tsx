@@ -163,6 +163,7 @@ interface UntypedFilterBuilder<T> extends PromiseLike<QueryResult<T>> {
   update(values: Record<string, unknown>): UntypedFilterBuilder<T>;
   insert(values: Record<string, unknown> | Array<Record<string, unknown>>): UntypedFilterBuilder<T>;
   delete(): UntypedFilterBuilder<T>;
+  single(): PromiseLike<QueryResult<T>>;
 }
 
 const taskSupabase = supabase as unknown as {
