@@ -15,7 +15,9 @@ import {
   getClientMetaStatus,
   listMetaPages,
   MetaFunctionError,
+  PROVIDER_LABEL,
   startMetaOAuth,
+  type MetaProvider,
 } from "@/lib/metaRpc";
 
 // Onde o Facebook devolve o navegador após o OAuth. O callback anexa
@@ -54,12 +56,16 @@ function pagesErrorMessage(error: unknown): string {
 // estiverem na mesma conta, a queda de uma sessão derruba todos — é por isso
 // que essa linha existe: ela torna a migração para a conta de cada cliente
 // visível, cliente a cliente.
-function AuthorLine({ name }: { name: string | null }) {
+function AuthorLine({ name, provider }: { name: string | null; provider: MetaProvider }) {
   return (
     <p className="mt-1.5 text-xs text-muted-foreground">
       {name
         ? <>Conectado pela conta de <span className="font-medium text-foreground">{name}</span></>
         : "Conectado antes do registro de conta — reconecte para saber de quem é"}
+      {" · "}
+      {/* Qual porta foi usada muda o que dá para fazer: só a do Facebook
+          publica na Página. */}
+      <span className="font-medium text-foreground">login do {PROVIDER_LABEL[provider]}</span>
     </p>
   );
 }
@@ -79,6 +85,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   const connectionId = first?.connection_id ?? null;
   const canManage = first?.can_manage ?? false;
   const authorName = first?.meta_user_name ?? null;
+  const provider: MetaProvider = first?.provider ?? "facebook";
   const channels = (rows ?? []).filter((r) => r.channel_id);
   const igChannel = channels.find((c) => c.channel_type === "instagram");
   const pageChannel = channels.find((c) => c.channel_type === "facebook_page");
@@ -189,7 +196,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
           {pageChannel && (
             <p className="text-xs text-muted-foreground">Página: {pageChannel.display_name}</p>
           )}
-          <AuthorLine name={authorName} />
+          <AuthorLine name={authorName} provider={provider} />
           {canManage && (
             <div className="mt-2 flex flex-wrap gap-2">
               <Button
@@ -258,7 +265,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
           <div className="flex items-center gap-2 font-medium text-amber-600">
             <AlertTriangle className="h-4 w-4" /> Reconexão necessária
           </div>
-          <AuthorLine name={authorName} />
+          <AuthorLine name={authorName} provider={provider} />
           {canManage && (
             <div className="mt-2 flex flex-wrap gap-2">
               <Button
@@ -287,7 +294,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
       {status === "pending" && (
         <div className="rounded-lg border bg-muted/40 p-3 text-sm">
           <p className="text-muted-foreground">Conexão iniciada — falta escolher a página.</p>
-          <AuthorLine name={authorName} />
+          <AuthorLine name={authorName} provider={provider} />
           {canManage && (
             <div className="mt-2 flex flex-wrap gap-2">
               <Button
