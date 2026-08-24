@@ -11,6 +11,7 @@ import {
   unlockOrganizationVault,
   updateVaultUnlockDuration,
   type UnlockDurationMinutes,
+  type UnlockResult,
   type VaultStatus,
 } from "@/lib/vaultRpc";
 
@@ -115,7 +116,10 @@ export function useVault() {
       }
       // Falha no desbloqueio: o cofre segue trancado, então o status basta —
       // revalidar credenciais aqui só produziria 400.
-      if (result.error === "invalid_master_password") {
+      // `strictNullChecks: false` impede o TS de estreitar a união pelo campo
+      // `ok`, então o motivo é lido do ramo de falha explicitamente.
+      const falha = result as Extract<UnlockResult, { ok: false }>;
+      if (falha.error === "invalid_master_password") {
         invalidateStatus();
         toast.error("Senha mestre incorreta.");
         return;
