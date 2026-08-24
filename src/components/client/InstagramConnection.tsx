@@ -3,6 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { AlertTriangle, CheckCircle2, Instagram, Link2, Loader2, Unlink, UserRoundCog } from "lucide-react";
 import {
   disconnectMeta,
@@ -195,18 +200,54 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
               >
                 <Unlink className="mr-1.5 h-3.5 w-3.5" /> Desconectar
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={reconnect.isPending}
-                onClick={() => reconnect.mutate(true)}
-                title="Refaz a conexão obrigando a escolher a conta do Facebook"
-              >
-                {reconnect.isPending
-                  ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  : <UserRoundCog className="mr-1.5 h-3.5 w-3.5" />}
-                Conectar como o cliente
-              </Button>
+              {/* Só existe UMA conexão viva por cliente, então refazer o OAuth
+                  obriga a desconectar a atual ANTES de ir para o Facebook. Numa
+                  conexão que está funcionando isso é destrutivo: se o login não
+                  se completar, o cliente fica desconectado. Por isso confirma. */}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="sm" disabled={reconnect.isPending}>
+                    {reconnect.isPending
+                      ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      : <UserRoundCog className="mr-1.5 h-3.5 w-3.5" />}
+                    Conectar como o cliente
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Trocar para a conta do cliente?</AlertDialogTitle>
+                    <AlertDialogDescription asChild>
+                      <div className="space-y-2 text-sm">
+                        <p>
+                          A conexão atual será <strong>desconectada primeiro</strong> — é a única
+                          forma de refazer a autorização, porque cada cliente só pode ter uma
+                          conexão viva.
+                        </p>
+                        <p>
+                          Se o login no Facebook não for concluído, este cliente fica
+                          desconectado até alguém conectar de novo. As publicações agendadas
+                          não saem enquanto isso.
+                        </p>
+                        <p>
+                          O Facebook vai pedir a senha de novo, mas costuma reautenticar
+                          <strong> a mesma conta</strong> que já está logada. Para entrar com
+                          outra, use uma <strong>janela anônima</strong> ou saia do Facebook
+                          antes.
+                        </p>
+                        <p className="font-medium text-foreground">
+                          Só continue com o login do cliente em mãos.
+                        </p>
+                      </div>
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => reconnect.mutate(true)}>
+                      Desconectar e trocar de conta
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           )}
         </div>
