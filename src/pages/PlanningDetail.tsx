@@ -416,7 +416,12 @@ export default function PlanningDetail() {
       setEditingPeriod(false);
       toast.success("Período atualizado!");
       const clientName = (planning as any)?.clients?.name ?? "";
-      navigate(`/plannings/${slugify(clientName)}/${MONTH_SLUGS[newMonth - 1]}-${newYear}`);
+      // `replace` porque o endereço antigo morre aqui: o planejamento mudou de
+      // mês. Sem isso ele fica no histórico e o Voltar cairia num link quebrado.
+      navigate(
+        `/plannings/${slugify(clientName)}/${MONTH_SLUGS[newMonth - 1]}-${newYear}`,
+        { replace: true },
+      );
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -432,7 +437,9 @@ export default function PlanningDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["plannings"] });
       toast.success("Planejamento excluído!");
-      navigate("/clients");
+      // Volta para a lista de planejamentos, não para Clientes: quem apagou um
+      // planejamento estava trabalhando em planejamentos.
+      navigate("/plannings", { replace: true });
     },
     onError: (e: any) => toast.error(e.message),
   });
