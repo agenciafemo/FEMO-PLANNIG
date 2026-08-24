@@ -51,6 +51,13 @@ COMMENT ON COLUMN public.meta_scheduled_posts.facebook_post_id IS
   'Id do post na Pagina do Facebook. NULL quando target = instagram.';
 
 -- O worker precisa saber o destino e o id da Pagina para publicar.
+--
+-- DROP antes do CREATE: a funcao ganha duas colunas no RETURNS TABLE, e o
+-- Postgres nao deixa CREATE OR REPLACE mudar o tipo de retorno (42P13). Como
+-- tudo roda dentro da transacao acima, nao existe instante com a funcao
+-- ausente para o worker.
+DROP FUNCTION IF EXISTS public.meta_server_claim_due_scheduled_posts(INT);
+
 CREATE OR REPLACE FUNCTION public.meta_server_claim_due_scheduled_posts(_limit INT DEFAULT 5)
 RETURNS TABLE (
   id UUID,
