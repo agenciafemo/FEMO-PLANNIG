@@ -228,6 +228,12 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
                           desconectado até alguém conectar de novo. As publicações agendadas
                           não saem enquanto isso.
                         </p>
+                        <p>
+                          O Facebook vai pedir a senha de novo, mas costuma reautenticar
+                          <strong> a mesma conta</strong> que já está logada. Para entrar com
+                          outra, use uma <strong>janela anônima</strong> ou saia do Facebook
+                          antes.
+                        </p>
                         <p className="font-medium text-foreground">
                           Só continue com o login do cliente em mãos.
                         </p>
