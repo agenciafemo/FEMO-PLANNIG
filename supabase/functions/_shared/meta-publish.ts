@@ -339,3 +339,177 @@ export async function publishCarouselPost(input: {
 
   return { mediaId, permalink };
 }
+
+// ============================================================================
+// PÁGINA DO FACEBOOK
+//
+// Endpoints completamente diferentes dos do Instagram: aqui não existe o par
+// container + media_publish. Publica-se direto em /{page}/photos, /videos,
+// /feed ou /photo_stories, e a resposta já é o post.
+//
+// Exige a permissão `pages_manage_posts` no token — se ela não foi concedida na
+// conexão, a Meta devolve erro de permissão. Por isso a tela só oferece o
+// Facebook quando o escopo está presente em granted_scopes.
+// ============================================================================
+
+const FB_PERMALINK = (postId: string) => `https://www.facebook.com/${postId}`;
+
+async function facebookPost(
+  path: string,
+  token: string,
+  params: Record<string, string>,
+  failCode: string,
+): Promise<Record<string, unknown>> {
+  const config = metaConfig();
+  const proof = await appSecretProof(token, config.appSecret);
+  const url = new URL(`https://graph.facebook.com/${config.graphVersion}/${path}`);
+  const body = new URLSearchParams({ ...params, access_token: token, appsecret_proof: proof });
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(metaReason(json, failCode));
+  return json as Record<string, unknown>;
+}
+
+/** Post de imagem no feed da Página. */
+export async function publishFacebookImage(input: {
+  pageId: string;
+  token: string;
+  imageUrl: string;
+  caption: string;
+}): Promise<{ mediaId: string; permalink: string | null }> {
+  const json = await facebookPost(
+    `${encodeURIComponent(input.pageId)}/photos`,
+    input.token,
+    { url: input.imageUrl, message: input.caption ?? "" },
+    "fb_image_failed",
+  );
+  // /photos devolve `post_id` (o post no feed) e `id` (a foto). O post é o que
+  // interessa para o link.
+  const postId = (json.post_id ?? json.id) as string | undefined;
+  if (!postId) throw new Error("fb_image_no_id");
+  return { mediaId: postId, permalink: FB_PERMALINK(postId) };
+}
+
+/** Post só de texto no feed — algo que o Instagram não permite. */
+export async function publishFacebookText(input: {
+  pageId: string;
+  token: string;
+  message: string;
+}): Promise<{ mediaId: string; permalink: string | null }> {
+  const json = await facebookPost(
+    `${encodeURIComponent(input.pageId)}/feed`,
+    input.token,
+    { message: input.message },
+    "fb_text_failed",
+  );
+  const postId = json.id as string | undefined;
+  if (!postId) throw new Error("fb_text_no_id");
+  return { mediaId: postId, permalink: FB_PERMALINK(postId) };
+}
+
+/** Vídeo no feed da Página (equivalente ao reels do Instagram). */
+export async function publishFacebookVideo(input: {
+  pageId: string;
+  token: string;
+  videoUrl: string;
+  caption: string;
+}): Promise<{ mediaId: string; permalink: string | null }> {
+  const json = await facebookPost(
+    `${encodeURIComponent(input.pageId)}/videos`,
+    input.token,
+    { file_url: input.videoUrl, description: input.caption ?? "" },
+    "fb_video_failed",
+  );
+  const videoId = json.id as string | undefined;
+  if (!videoId) throw new Error("fb_video_no_id");
+  return { mediaId: videoId, permalink: FB_PERMALINK(videoId) };
+}
+
+/**
+ * Carrossel na Página: sobe cada imagem SEM publicar (published=false) e depois
+ * cria um post no feed anexando todas. É o equivalente do carrossel do
+ * Instagram, mas montado ao contrário — lá o container é criado primeiro.
+ */
+export async function publishFacebookCarousel(input: {
+  pageId: string;
+  token: string;
+  childrenUrls: string[];
+  caption: string;
+}): Promise<{ mediaId: string; permalink: string | null }> {
+  const mediaIds: string[] = [];
+  for (const url of input.childrenUrls) {
+    const child = await facebookPost(
+      `${encodeURIComponent(input.pageId)}/photos`,
+      input.token,
+      { url, published: "false" },
+      "fb_carousel_child_failed",
+    );
+    const childId = child.id as string | undefined;
+    if (!childId) throw new Error("fb_carousel_child_no_id");
+    mediaIds.push(childId);
+  }
+
+  const params: Record<string, string> = { message: input.caption ?? "" };
+  mediaIds.forEach((id, i) => {
+    params[`attached_media[${i}]`] = JSON.stringify({ media_fbid: id });
+  });
+
+  const json = await facebookPost(
+    `${encodeURIComponent(input.pageId)}/feed`,
+    input.token,
+    params,
+    "fb_carousel_failed",
+  );
+  const postId = json.id as string | undefined;
+  if (!postId) throw new Error("fb_carousel_no_id");
+  return { mediaId: postId, permalink: FB_PERMALINK(postId) };
+}
+
+/**
+ * Story da Página. Imagem passa por /photos não publicado e depois
+ * /photo_stories; vídeo vai direto em /video_stories. Story não aceita legenda,
+ * igual ao do Instagram.
+ */
+export async function publishFacebookStory(input: {
+  pageId: string;
+  token: string;
+  imageUrl: string | null;
+  videoUrl: string | null;
+}): Promise<{ mediaId: string; permalink: string | null }> {
+  if (input.videoUrl) {
+    const json = await facebookPost(
+      `${encodeURIComponent(input.pageId)}/video_stories`,
+      input.token,
+      { video_url: input.videoUrl },
+      "fb_story_video_failed",
+    );
+    const id = (json.post_id ?? json.id) as string | undefined;
+    if (!id) throw new Error("fb_story_no_id");
+    return { mediaId: id, permalink: null };
+  }
+
+  if (!input.imageUrl) throw new Error("fb_story_media_missing");
+  const photo = await facebookPost(
+    `${encodeURIComponent(input.pageId)}/photos`,
+    input.token,
+    { url: input.imageUrl, published: "false" },
+    "fb_story_photo_failed",
+  );
+  const photoId = photo.id as string | undefined;
+  if (!photoId) throw new Error("fb_story_photo_no_id");
+
+  const json = await facebookPost(
+    `${encodeURIComponent(input.pageId)}/photo_stories`,
+    input.token,
+    { photo_id: photoId },
+    "fb_story_failed",
+  );
+  const id = (json.post_id ?? json.id) as string | undefined;
+  if (!id) throw new Error("fb_story_no_id");
+  return { mediaId: id, permalink: null };
+}

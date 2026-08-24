@@ -12,6 +12,11 @@ import {
 import { createAdminClient } from "../_shared/supabase.ts";
 import {
   publishCarouselPost,
+  publishFacebookCarousel,
+  publishFacebookImage,
+  publishFacebookStory,
+  publishFacebookText,
+  publishFacebookVideo,
   publishImagePost,
   publishReelsPost,
   publishStoryPost,
@@ -21,6 +26,9 @@ interface ClaimedItem {
   id: string;
   connection_id: string;
   instagram_account_id: string | null;
+  facebook_page_id: string | null;
+  // Uma linha por destino: publicar "nos dois" sao duas linhas.
+  target: "instagram" | "facebook";
   media_type: string;
   image_url: string | null;
   video_url: string | null;
@@ -58,7 +66,12 @@ Deno.serve(async (request) => {
 
     for (const item of items) {
       try {
-        if (!item.instagram_account_id) throw new Error("instagram_account_missing");
+        const isFacebook = item.target === "facebook";
+        if (isFacebook) {
+          if (!item.facebook_page_id) throw new Error("facebook_page_missing");
+        } else if (!item.instagram_account_id) {
+          throw new Error("instagram_account_missing");
+        }
 
         const { data: token, error: tokenError } = await admin.rpc(
           "meta_server_get_connection_token",
@@ -68,12 +81,45 @@ Deno.serve(async (request) => {
           throw new Error("connection_token_unavailable");
         }
 
+        // Garantidos pelo guard logo acima: um dos dois existe conforme o
+        // destino, e o outro nunca e lido nesse caminho.
+        const igAccountId = item.instagram_account_id as string;
+        const pageId = item.facebook_page_id as string;
+
         let mediaId: string;
         let permalink: string | null;
-        if (item.media_type === "reels") {
+        if (isFacebook) {
+          if (item.media_type === "text") {
+            ({ mediaId, permalink } = await publishFacebookText({
+              pageId, token, message: item.caption ?? "",
+            }));
+          } else if (item.media_type === "reels") {
+            if (!item.video_url) throw new Error("reels_video_missing");
+            ({ mediaId, permalink } = await publishFacebookVideo({
+              pageId, token, videoUrl: item.video_url, caption: item.caption ?? "",
+            }));
+          } else if (item.media_type === "story") {
+            if (!item.image_url && !item.video_url) throw new Error("story_media_missing");
+            ({ mediaId, permalink } = await publishFacebookStory({
+              pageId, token, imageUrl: item.image_url, videoUrl: item.video_url,
+            }));
+          } else if (item.media_type === "carousel") {
+            if (!item.children_urls || item.children_urls.length < 2) {
+              throw new Error("carousel_children_missing");
+            }
+            ({ mediaId, permalink } = await publishFacebookCarousel({
+              pageId, token, childrenUrls: item.children_urls, caption: item.caption ?? "",
+            }));
+          } else {
+            if (!item.image_url) throw new Error("image_url_missing");
+            ({ mediaId, permalink } = await publishFacebookImage({
+              pageId, token, imageUrl: item.image_url, caption: item.caption ?? "",
+            }));
+          }
+        } else if (item.media_type === "reels") {
           if (!item.video_url) throw new Error("reels_video_missing");
           ({ mediaId, permalink } = await publishReelsPost({
-            igAccountId: item.instagram_account_id,
+            igAccountId,
             token,
             videoUrl: item.video_url,
             coverUrl: item.cover_url,
@@ -83,7 +129,7 @@ Deno.serve(async (request) => {
           // Story de imagem usa image_url; story de vídeo usa video_url.
           if (!item.image_url && !item.video_url) throw new Error("story_media_missing");
           ({ mediaId, permalink } = await publishStoryPost({
-            igAccountId: item.instagram_account_id,
+            igAccountId,
             token,
             imageUrl: item.image_url,
             videoUrl: item.video_url,
@@ -93,7 +139,7 @@ Deno.serve(async (request) => {
             throw new Error("carousel_children_missing");
           }
           ({ mediaId, permalink } = await publishCarouselPost({
-            igAccountId: item.instagram_account_id,
+            igAccountId,
             token,
             childrenUrls: item.children_urls,
             caption: item.caption ?? "",
@@ -101,7 +147,7 @@ Deno.serve(async (request) => {
         } else {
           if (!item.image_url) throw new Error("image_url_missing");
           ({ mediaId, permalink } = await publishImagePost({
-            igAccountId: item.instagram_account_id,
+            igAccountId,
             token,
             imageUrl: item.image_url,
             caption: item.caption ?? "",

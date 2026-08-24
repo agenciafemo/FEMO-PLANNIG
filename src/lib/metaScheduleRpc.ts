@@ -52,10 +52,23 @@ export async function getScheduledPosts(
  * (o worker pega no próximo ciclo / no invoke imediato). Só quem gerencia a
  * conexão consegue (a RPC valida). Devolve o id do item na fila.
  */
+/** Destinos possiveis de uma publicacao. */
+export type PublishTarget = "instagram" | "facebook";
+
+/** A publicacao na Pagina exige esta permissao no token da conexao. Sem ela a
+ *  Meta recusa, entao a tela so oferece o Facebook quando ela foi concedida. */
+export const FACEBOOK_PUBLISH_SCOPE = "pages_manage_posts";
+
+export function canPublishToFacebook(grantedScopes: string[] | null | undefined): boolean {
+  return (grantedScopes ?? []).includes(FACEBOOK_PUBLISH_SCOPE);
+}
+
 export async function createScheduledPost(input: {
   clientId: string;
   connectionId: string;
-  mediaType?: "image" | "reels" | "story" | "carousel";
+  mediaType?: "image" | "reels" | "story" | "carousel" | "text";
+  /** Onde publicar. Uma chamada por destino: "nos dois" = duas chamadas. */
+  target?: PublishTarget;
   imageUrl?: string | null;
   videoUrl?: string | null;
   coverUrl?: string | null;
@@ -75,6 +88,7 @@ export async function createScheduledPost(input: {
     _scheduled_for: input.scheduledFor ?? new Date().toISOString(),
     _post_id: input.postId ?? null,
     _children_urls: input.childrenUrls ?? null,
+    _target: input.target ?? "instagram",
   });
   if (error) throw error;
   return data as string;
