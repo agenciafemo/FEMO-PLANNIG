@@ -24,6 +24,9 @@ export interface ScheduledPost {
   scheduled_for: string; // ISO
   status: string; // queued | processing | published | failed | canceled
   instagram_media_id: string | null;
+  /** Onde este item publica. Uma linha por destino. */
+  target: PublishTarget;
+  facebook_post_id: string | null;
   permalink: string | null;
   error_code: string | null;
   attempts: number;
