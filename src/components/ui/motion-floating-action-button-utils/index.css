@@ -1,15 +1,18 @@
 /* ============================================================================
-   Botão flutuante de navegação — o "bússola" que segue em todas as telas.
+   Botão flutuante de navegação — a bússola que segue em todas as telas.
 
-   Os atalhos saem em ARCO a partir do botão, animando `offset-distance` sobre
-   um `offset-path`. É o que dá o movimento de leque em vez de uma lista reta.
+   Os atalhos sobem numa COLUNA a partir do botão. A primeira versão usava um
+   arco (offset-path): com seis atalhos e rótulo sempre visível, o espaço entre
+   eles ficava menor que o próprio tamanho deles e tudo se sobrepunha. Coluna
+   não tem esse problema em nenhum tamanho de tela, e o rótulo à esquerda nunca
+   encosta no vizinho.
    ========================================================================== */
 
 .fab-stage {
   position: fixed;
   right: 1.25rem;
   bottom: 1.25rem;
-  z-index: 60; /* acima do conteúdo, abaixo de diálogos (z-50 do shadcn + portal) */
+  z-index: 60; /* acima do conteúdo, abaixo dos diálogos */
 }
 
 .fab-root {
@@ -18,7 +21,7 @@
   height: 3.5rem;
 }
 
-/* Os atalhos partem do centro do botão principal. */
+/* Os atalhos partem do centro do botão e sobem. */
 .fab-actions {
   position: absolute;
   inset: 0;
@@ -27,52 +30,62 @@
 
 .fab-action {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  margin: -1.25rem 0 0 -1.25rem;
+  top: 0;
+  left: 0;
+  width: 3.5rem;   /* mesma largura do botão: os ícones ficam alinhados */
+  height: 3.5rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 9999px;
   pointer-events: auto;
+}
 
-  /* Quarto de arco subindo para a esquerda: é onde há espaço livre num botão
-     ancorado no canto inferior direito. */
-  offset-path: path("M 0 0 A 104 104 0 0 0 -104 -104");
-  offset-rotate: 0deg;
+.fab-action-botao {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 9999px;
 
   background: hsl(var(--card));
   color: hsl(var(--foreground));
   border: 1px solid hsl(var(--border));
   box-shadow: 0 4px 12px hsl(var(--foreground) / 0.12);
-  transition: background-color 150ms, border-color 150ms;
+  transition: background-color 150ms, border-color 150ms, color 150ms;
 }
 
-.fab-action:hover {
+.fab-action-botao:hover {
   background: hsl(var(--accent));
-  border-color: hsl(var(--brand, var(--primary)));
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
 }
 
-.fab-action:focus-visible {
+.fab-action-botao:focus-visible {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }
 
-/* Rótulo à esquerda do ícone — o arco sobe pela esquerda, então cabe ali. */
+/* Rótulo à esquerda do ícone. `right: 100%` mede a partir da .fab-action, que
+   tem a largura do botão — por isso o rótulo nunca invade a coluna. */
 .fab-label {
   position: absolute;
-  right: calc(100% + 0.5rem);
+  /* A .fab-action tem 56px e o botão 44px centrado, então sobram 6px de cada
+     lado. 100% + 2px deixa ~8px entre o rótulo e o ícone. */
+  right: calc(100% + 2px);
+  top: 50%;
+  transform: translateY(-50%);
   white-space: nowrap;
   font-size: 0.75rem;
   font-weight: 500;
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.375rem;
+  line-height: 1;
+  padding: 0.375rem 0.625rem;
+  border-radius: 0.5rem;
   background: hsl(var(--popover));
   color: hsl(var(--popover-foreground));
   border: 1px solid hsl(var(--border));
   box-shadow: 0 2px 8px hsl(var(--foreground) / 0.1);
+  pointer-events: none; /* o clique é do botão, não do rótulo */
 }
 
 .fab-main {
@@ -93,15 +106,7 @@
   outline-offset: 2px;
 }
 
-/* Quem pediu menos movimento recebe o leque sem a curva. */
-@media (prefers-reduced-motion: reduce) {
-  .fab-action {
-    offset-path: none;
-    transition: none;
-  }
-}
-
-/* Nunca sai no papel — a lauda impressa nao deve carregar o botao junto. */
+/* Nunca sai no papel — a lauda impressa não deve carregar o botão junto. */
 @media print {
   .fab-stage { display: none !important; }
 }

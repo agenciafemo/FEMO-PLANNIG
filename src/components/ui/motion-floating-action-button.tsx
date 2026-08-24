@@ -15,6 +15,9 @@ import "./motion-floating-action-button-utils/index.css";
 const buttonTransition = { type: "spring" as const, stiffness: 500, damping: 30 };
 const itemTransition = { type: "spring" as const, stiffness: 400, damping: 22 };
 
+/** Distância entre um atalho e o seguinte. O botão tem 56px; 60 dá o respiro. */
+const PASSO_PX = 60;
+
 /**
  * Atalhos do botão. A ordem importa: o primeiro sai mais perto do botão, e é
  * por isso que o Dashboard vem primeiro — é o "voltar para o centro", o destino
@@ -72,33 +75,36 @@ export function FloatingActionButton({
           <AnimatePresence>
             {open &&
               atalhos.map((atalho, index) => {
-                const distance = ((index + 1) / atalhos.length) * 88;
+                // Coluna: cada atalho sobe um passo fixo. Espaçamento constante
+                // é o que garante que nunca se sobreponham, com 3 ou com 8.
+                const y = -(index + 1) * PASSO_PX;
                 const { Icon } = atalho;
                 return (
                   <motion.div
                     key={atalho.to}
-                    initial={{ offsetDistance: "0%", opacity: 0, scale: 0.3 }}
-                    animate={{ offsetDistance: `${distance}%`, opacity: 1, scale: 1 }}
-                    exit={{ offsetDistance: "0%", opacity: 0, scale: 0.3 }}
+                    initial={{ y: 0, opacity: 0, scale: 0.3 }}
+                    animate={{ y, opacity: 1, scale: 1 }}
+                    exit={{ y: 0, opacity: 0, scale: 0.3 }}
                     transition={{ ...itemTransition, delay: index * staggerInterval }}
                     className="fab-action"
                   >
                     <Link
                       to={atalho.to}
                       aria-label={atalho.label}
-                      className="flex h-full w-full items-center justify-center rounded-full"
+                      className="fab-action-botao"
                       onClick={() => setOpen(false)}
                     >
                       <Icon className="h-[18px] w-[18px]" />
-                      <motion.span
-                        className="fab-label"
-                        initial={{ opacity: 0, x: 8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * staggerInterval + 0.1, duration: 0.15 }}
-                      >
-                        {atalho.label}
-                      </motion.span>
                     </Link>
+                    <motion.span
+                      className="fab-label"
+                      initial={{ opacity: 0, x: 8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 8 }}
+                      transition={{ delay: index * staggerInterval + 0.1, duration: 0.15 }}
+                    >
+                      {atalho.label}
+                    </motion.span>
                   </motion.div>
                 );
               })}
