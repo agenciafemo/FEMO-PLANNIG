@@ -27,6 +27,7 @@ import {
   Clock,
   Copy,
   ExternalLink,
+  Facebook,
   FileText,
   Instagram,
   Loader2,
@@ -38,10 +39,11 @@ import {
   createScheduledPost,
   getScheduledPosts,
   runPublishWorker,
+  canPublishToFacebook,
+  type PublishTarget,
   type ScheduledPost,
 } from "@/lib/metaScheduleRpc";
 import { getClientMetaStatus } from "@/lib/metaRpc";
-import { usePersistedState } from "@/hooks/usePersistedState";
 
 interface ApprovedPost {
   id: string;
@@ -177,7 +179,18 @@ export default function Programacao() {
     queryFn: () => getClientMetaStatus(clientId),
     enabled: !!clientId,
   });
-  const connectionId = statusRows?.find((r) => r.connection_status === "active")?.connection_id ?? null;
+  const activeRow = statusRows?.find((r) => r.connection_status === "active") ?? null;
+  const connectionId = activeRow?.connection_id ?? null;
+  // A Pagina so aceita publicacao com pages_manage_posts no token. Sem esse
+  // escopo a Meta recusa, entao nem oferecemos o destino — e explicamos por que.
+  const facebookLiberado = canPublishToFacebook(activeRow?.granted_scopes);
+  const [targets, setTargets] = usePersistedState<PublishTarget[]>(
+    "programacao-destinos", ["instagram"],
+  );
+  // Sem permissao, Facebook nunca entra na lista efetiva.
+  const destinos: PublishTarget[] = facebookLiberado
+    ? (targets.length ? targets : ["instagram"])
+    : ["instagram"];
 
   const { data: approved } = useQuery({
     queryKey: ["prog-approved", clientId],
@@ -232,14 +245,18 @@ export default function Programacao() {
 
   const publishNow = useMutation({
     mutationFn: async (post: ApprovedPost) => {
-      if (!connectionId) throw new Error("Cliente sem Instagram conectado");
-      await createScheduledPost({
-        clientId,
-        connectionId,
-        ...buildScheduleInput(post),
-        caption: buildCaption(post),
-        postId: post.id,
-      });
+      if (!connectionId) throw new Error("Cliente sem conta conectada");
+      // Uma linha da fila por destino: cada plataforma falha e repete sozinha.
+      for (const target of destinos) {
+        await createScheduledPost({
+          clientId,
+          connectionId,
+          ...buildScheduleInput(post),
+          caption: buildCaption(post),
+          postId: post.id,
+          target,
+        });
+      }
       return runPublishWorker();
     },
     onSuccess: (res) => {
@@ -251,21 +268,24 @@ export default function Programacao() {
 
   const schedule = useMutation({
     mutationFn: async () => {
-      if (!connectionId || !scheduling) throw new Error("Cliente sem Instagram conectado");
+      if (!connectionId || !scheduling) throw new Error("Cliente sem conta conectada");
       const when = new Date(`${scheduleDate}T${scheduleTime}:00`);
       if (isNaN(when.getTime())) throw new Error("Data/hora inválida");
       // Reforço: não deixa agendar no passado (publicaria na hora ou falharia).
       if (when.getTime() <= Date.now() + 60 * 1000) {
         throw new Error("Escolha uma data e hora no futuro.");
       }
-      await createScheduledPost({
-        clientId,
-        connectionId,
-        ...buildScheduleInput(scheduling),
-        caption: buildCaption(scheduling),
-        scheduledFor: when.toISOString(),
-        postId: scheduling.id,
-      });
+      for (const target of destinos) {
+        await createScheduledPost({
+          clientId,
+          connectionId,
+          ...buildScheduleInput(scheduling),
+          caption: buildCaption(scheduling),
+          scheduledFor: when.toISOString(),
+          postId: scheduling.id,
+          target,
+        });
+      }
     },
     onSuccess: () => {
       toast.success("Post agendado!");
@@ -434,10 +454,57 @@ export default function Programacao() {
         })}
       </div>
 
-      {/* Legenda */}
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1"><Instagram className="h-3.5 w-3.5" /> Publica no Instagram do cliente selecionado.</span>
-      </div>
+      {/* Destino da publicacao */}
+      {connectionId && (
+        <div className="rounded-lg border bg-muted/30 p-3">
+          <p className="mb-2 text-xs font-medium">Onde publicar</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {([
+              { key: "instagram" as const, label: "Instagram", Icon: Instagram },
+              { key: "facebook" as const, label: "Facebook", Icon: Facebook },
+            ]).map(({ key, label, Icon }) => {
+              const bloqueado = key === "facebook" && !facebookLiberado;
+              const marcado = destinos.includes(key);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={bloqueado}
+                  title={bloqueado
+                    ? "Esta conexao nao tem permissao para publicar na Pagina"
+                    : undefined}
+                  onClick={() => setTargets(
+                    // Nunca deixa ficar sem nenhum destino.
+                    marcado
+                      ? (destinos.length > 1 ? destinos.filter((t) => t !== key) : destinos)
+                      : [...destinos, key],
+                  )}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    bloqueado
+                      ? "cursor-not-allowed border-border text-muted-foreground opacity-50"
+                      : marcado
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" /> {label}
+                </button>
+              );
+            })}
+          </div>
+          {!facebookLiberado && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Para publicar na Pagina, este cliente precisa reconectar concedendo a
+              permissao de publicacao. Ate la, so o Instagram fica disponivel.
+            </p>
+          )}
+          {destinos.length > 1 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Cada destino vira um item separado na fila — se um falhar, o outro segue.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Comprovante (recibo) do agendamento */}
       <Dialog open={!!receipt} onOpenChange={(v) => { if (!v) setReceipt(null); }}>
