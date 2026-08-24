@@ -139,10 +139,10 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   // Uma conexão pendente ocupa o único slot permitido por cliente. Para
   // refazer o OAuth, primeiro a encerramos pela Edge Function (que valida a
   // permissão do usuário) e só então iniciamos uma autorização nova.
-  const reconnectPending = useMutation({
-    mutationFn: async () => {
+  const reconnectPending = useMutation<void, Error, boolean>({
+    mutationFn: async (forceAccount: boolean) => {
       if (effectivePendingId) await disconnectMeta(effectivePendingId);
-      const url = await startMetaOAuth(clientId, returnPathFor(clientId));
+      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount);
       window.location.href = url;
     },
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao reconectar: " + (e as Error).message),
@@ -287,17 +287,35 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
       {status === "pending" && (
         <div className="rounded-lg border bg-muted/40 p-3 text-sm">
           <p className="text-muted-foreground">Conexão iniciada — falta escolher a página.</p>
+          <AuthorLine name={authorName} />
           {canManage && (
-            <Button
-              size="sm"
-              className="mt-2"
-              onClick={() => {
-                setPendingConnectionId(connectionId);
-                setSelectOpen(true);
-              }}
-            >
-              Escolher página
-            </Button>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  setPendingConnectionId(connectionId);
+                  setSelectOpen(true);
+                }}
+              >
+                Escolher página
+              </Button>
+              {/* Sem isto o estado pendente virava beco sem saída: dava para
+                  escolher a página de quem autorizou, mas não para recomeçar
+                  com a conta do cliente. Aqui a troca não é destrutiva — uma
+                  conexão pendente ainda não publica nada. */}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={reconnectPending.isPending}
+                onClick={() => reconnectPending.mutate(true)}
+                title="Descarta esta conexão e recomeça pedindo o login"
+              >
+                {reconnectPending.isPending
+                  ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  : <UserRoundCog className="mr-1.5 h-3.5 w-3.5" />}
+                Conectar como o cliente
+              </Button>
+            </div>
           )}
         </div>
       )}
@@ -364,7 +382,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
                   type="button"
                   size="sm"
                   disabled={reconnectPending.isPending}
-                  onClick={() => reconnectPending.mutate()}
+                  onClick={() => reconnectPending.mutate(false)}
                 >
                   {reconnectPending.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
                   Refazer conexão
