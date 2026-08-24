@@ -29,3 +29,6 @@ dist-ssr
 # Dumps/backups de banco — nunca versionar dados reais de clientes
 *.dump
 *.sql.backup
+
+# Artefatos do tsc -b (cache de build, nao versionar)
+*.tsbuildinfo

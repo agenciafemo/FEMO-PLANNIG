@@ -65,10 +65,10 @@ export function ClientAttentionAlert() {
         }
       }
 
-      return alvo.flatMap((client) => {
+      return alvo.flatMap<Pendencia>((client) => {
         const planningId = planningPorCliente.get(client.id);
-        if (!planningId) return [{ client, motivo: "sem_planejamento" as const }];
-        if (!comPost.has(planningId)) return [{ client, motivo: "planejamento_vazio" as const }];
+        if (!planningId) return [{ client, motivo: "sem_planejamento" }];
+        if (!comPost.has(planningId)) return [{ client, motivo: "planejamento_vazio" }];
         return [];
       });
     },

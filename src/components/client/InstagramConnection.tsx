@@ -115,8 +115,8 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   // forceAccount = conectar com a conta do PRÓPRIO cliente. Sem isso o Facebook
   // reaproveita a sessão aberta no navegador (a da agência) e reautoriza em
   // silêncio — você acha que migrou e não migrou.
-  const connect = useMutation({
-    mutationFn: async (forceAccount = false) => {
+  const connect = useMutation<void, Error, boolean>({
+    mutationFn: async (forceAccount: boolean) => {
       const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount);
       window.location.href = url; // navega para o Facebook
     },
@@ -127,8 +127,8 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   // viva por cliente (índice único no banco). Então desconectamos a atual ANTES
   // de iniciar o novo OAuth — senão o retorno da Meta falha ao gravar a conexão
   // (pending_connection_create_failed).
-  const reconnect = useMutation({
-    mutationFn: async (forceAccount = false) => {
+  const reconnect = useMutation<void, Error, boolean>({
+    mutationFn: async (forceAccount: boolean) => {
       if (connectionId) await disconnectMeta(connectionId);
       const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount);
       window.location.href = url;
