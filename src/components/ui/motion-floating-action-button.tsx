@@ -196,7 +196,7 @@ export function FloatingActionButton({
               alt=""
               aria-hidden="true"
               draggable={false}
-              className="h-8 w-8 select-none object-contain"
+              className="h-11 w-11 select-none object-contain"
               style={{ rotate: rotacao }}
             />
           )}
