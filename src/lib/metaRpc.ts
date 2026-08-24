@@ -20,6 +20,21 @@ import { supabase } from "@/integrations/supabase/client";
 // Tipos (espelham os contratos das migrations/funções)
 // ---------------------------------------------------------------------------
 
+/**
+ * Porta pela qual a conexão foi autorizada.
+ *
+ * `facebook` — login do Facebook. Exige a conta do Instagram vinculada a uma
+ *   Página. É o caminho que permite publicar TAMBÉM na Página.
+ * `instagram` — login do Instagram. O cliente autoriza direto com as
+ *   credenciais dele, sem Página nenhuma. Não publica no Facebook.
+ */
+export type MetaProvider = "facebook" | "instagram";
+
+export const PROVIDER_LABEL: Record<MetaProvider, string> = {
+  facebook: "Facebook",
+  instagram: "Instagram",
+};
+
 /** Uma linha por canal de get_client_meta_connection_status. Sem token/secret id. */
 export interface MetaConnectionStatusRow {
   client_id: string;
@@ -35,6 +50,8 @@ export interface MetaConnectionStatusRow {
   last_error_code: string | null;
   /** Nome da conta Meta que autorizou. null = conexão anterior a este registro. */
   meta_user_name: string | null;
+  /** Porta da autorização. Ver MetaProvider. */
+  provider: MetaProvider;
   channel_id: string | null;
   channel_type: string | null; // facebook_page | instagram
   external_account_id: string | null;
