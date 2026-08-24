@@ -66,15 +66,23 @@
   outline-offset: 2px;
 }
 
-/* Rótulo à esquerda do ícone. `right: 100%` mede a partir da .fab-action, que
-   tem a largura do botão — por isso o rótulo nunca invade a coluna. */
+/* Rótulo à esquerda do ícone.
+   ATENÇÃO: a centralização NÃO pode usar `transform: translateY(-50%)`. O
+   motion anima `x` escrevendo em `transform`, e sobrescreveria a centralização
+   — foi o que deixava o rótulo meia altura abaixo do ícone. Por isso a caixa
+   externa ocupa a altura toda e centraliza por flex, que a animação não toca. */
 .fab-label {
   position: absolute;
-  /* A .fab-action tem 56px e o botão 44px centrado, então sobram 6px de cada
-     lado. 100% + 2px deixa ~8px entre o rótulo e o ícone. */
   right: calc(100% + 2px);
-  top: 50%;
-  transform: translateY(-50%);
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  pointer-events: none; /* o clique é do botão, não do rótulo */
+}
+
+/* A pílula em si: fica do tamanho do texto, não da altura da coluna. */
+.fab-label-texto {
   white-space: nowrap;
   font-size: 0.75rem;
   font-weight: 500;
@@ -85,7 +93,6 @@
   color: hsl(var(--popover-foreground));
   border: 1px solid hsl(var(--border));
   box-shadow: 0 2px 8px hsl(var(--foreground) / 0.1);
-  pointer-events: none; /* o clique é do botão, não do rótulo */
 }
 
 /* Mostrador liso, sem aro: a rosa dos ventos ocupa quase todo o botao e e ela

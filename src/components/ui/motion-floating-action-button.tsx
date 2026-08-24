@@ -158,6 +158,10 @@ export function FloatingActionButton({
                     >
                       <Icon className="h-[18px] w-[18px]" />
                     </Link>
+                    {/* A caixa externa ocupa a altura toda e centraliza por
+                        flex; a pílula fica dentro. Centralizar por transform
+                        aqui não funciona: o motion anima `x` no transform e
+                        sobrescreveria. */}
                     <motion.span
                       className="fab-label"
                       initial={{ opacity: 0, x: 8 }}
@@ -165,7 +169,7 @@ export function FloatingActionButton({
                       exit={{ opacity: 0, x: 8 }}
                       transition={{ delay: index * staggerInterval + 0.1, duration: 0.15 }}
                     >
-                      {atalho.label}
+                      <span className="fab-label-texto">{atalho.label}</span>
                     </motion.span>
                   </motion.div>
                 );
