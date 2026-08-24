@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import {
+  AnimatePresence,
+  animate,
+  motion,
+  useAnimationFrame,
+  useMotionValue,
+  useReducedMotion,
+  type AnimationPlaybackControls,
+} from "motion/react";
 import { Link, useLocation } from "react-router-dom";
 import {
   CalendarClock,
@@ -10,6 +18,25 @@ import {
   Workflow,
   X,
 } from "lucide-react";
+
+// ── Física da bússola ───────────────────────────────────────────────────────
+// A agulha de uma bússola é um pêndulo de torção amortecido. O que define o
+// "jeito" do movimento é o fator de amortecimento ζ = c / (2·√(I·k)):
+//   ζ ≈ 0,1  → bússola SECA: balança por muitos segundos, ruim de ler.
+//   ζ ≈ 0,7  → bússola COM LÍQUIDO: passa do norte uma ou duas vezes e assenta
+//              em ~1s. É por isso que bússolas têm líquido dentro, e é este o
+//              movimento que se reconhece como "de bússola".
+//   ζ ≥ 1    → superamortecida: rasteja até o norte, parece emperrada.
+//
+// Numa mola de animação com massa 1: ζ = damping / (2·√stiffness).
+// 12 / (2·√90) = 0,63 — dentro da faixa da bússola de líquido.
+const MOLA_BUSSOLA = { type: "spring" as const, stiffness: 90, damping: 12, mass: 1 };
+
+/** Giro em repouso: uma volta a cada 24s. Devagar o bastante para não distrair. */
+const GRAUS_POR_SEGUNDO = 360 / 24;
+
+/** Voltas que o empurrão do mouse dá antes de procurar o norte. */
+const VOLTAS_NO_HOVER = 2;
 import "./motion-floating-action-button-utils/index.css";
 
 const buttonTransition = { type: "spring" as const, stiffness: 500, damping: 30 };
@@ -44,6 +71,41 @@ export function FloatingActionButton({
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
   const stageRef = useRef<HTMLDivElement>(null);
+
+  // ── Rotação da rosa dos ventos ───────────────────────────────────────────
+  const semMovimento = useReducedMotion();
+  const rotacao = useMotionValue(0);
+  const assentando = useRef(false);
+  const molaRef = useRef<AnimationPlaybackControls | null>(null);
+
+  // Giro de repouso. Pausa enquanto a mola do hover está assentando, para as
+  // duas animações não disputarem o mesmo valor.
+  useAnimationFrame((_, delta) => {
+    if (semMovimento || assentando.current) return;
+    rotacao.set(rotacao.get() + (delta / 1000) * GRAUS_POR_SEGUNDO);
+  });
+
+  // O mouse é o empurrão: gira rápido e a própria mola desacelera até o norte,
+  // passando um pouco e voltando — como a agulha achando o polo.
+  const empurrarBussola = () => {
+    if (semMovimento) return;
+    const atual = rotacao.get();
+    // Norte mais próximo depois das voltas: múltiplo de 360 acima do atual.
+    const alvo = Math.ceil((atual + VOLTAS_NO_HOVER * 360) / 360) * 360;
+    molaRef.current?.stop();
+    assentando.current = true;
+    molaRef.current = animate(rotacao, alvo, {
+      ...MOLA_BUSSOLA,
+      onComplete: () => {
+        // Múltiplo de 360 desenha igual a 0; zerar evita o número crescer sem
+        // limite enquanto a tela fica aberta.
+        rotacao.set(0);
+        assentando.current = false;
+      },
+    });
+  };
+
+  useEffect(() => () => molaRef.current?.stop(), []);
 
   // Trocar de página fecha o leque: ele cumpriu o papel.
   useEffect(() => { setOpen(false); }, [pathname]);
@@ -108,16 +170,30 @@ export function FloatingActionButton({
         <motion.button
           type="button"
           className="fab-main"
-          animate={{ rotate: open ? 90 : 0 }}
           transition={buttonTransition}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => setOpen((value) => !value)}
+          onHoverStart={empurrarBussola}
+          onFocus={empurrarBussola}
           aria-label={open ? "Fechar atalhos de navegação" : "Abrir atalhos de navegação"}
           aria-expanded={open}
           data-primary-action
         >
-          {open ? <X className="h-6 w-6" /> : <Compass className="h-6 w-6" />}
+          {open ? (
+            <X className="h-6 w-6" />
+          ) : (
+            // A rosa dos ventos da marca gira; o X, não — ele indica fechar e
+            // girando viraria ruído.
+            <motion.img
+              src="/brand/norteia/logo/NOR.png"
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+              className="h-8 w-8 select-none object-contain"
+              style={{ rotate: rotacao }}
+            />
+          )}
         </motion.button>
       </div>
     </div>

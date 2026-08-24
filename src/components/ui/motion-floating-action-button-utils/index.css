@@ -75,6 +75,9 @@
   box-shadow: 0 2px 8px hsl(var(--foreground) / 0.1);
 }
 
+/* Mostrador claro com aro da marca: a rosa dos ventos do logo e ESCURA e
+   sumiria sobre o petroleo. De quebra, o aro faz o botao parecer um
+   instrumento, que e exatamente o que ele e. */
 .fab-main {
   position: absolute;
   inset: 0;
@@ -82,10 +85,25 @@
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
+  background: hsl(var(--card));
+  color: hsl(var(--primary));
+  border: 2px solid hsl(var(--primary));
+  box-shadow: 0 6px 20px hsl(var(--foreground) / 0.22);
+  cursor: pointer;
+}
+
+/* Aberto, o botao mostra o X: ai o petroleo cheio marca melhor o "fechar". */
+.fab-main[aria-expanded="true"] {
   background: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
   box-shadow: 0 6px 20px hsl(var(--primary) / 0.35);
-  cursor: pointer;
+}
+
+/* No tema escuro a rosa escura se perde no card; clarear resolve sem precisar
+   de um segundo arquivo de imagem. O projeto usa darkMode por classe (.dark),
+   nao data-theme. */
+.dark .fab-main img {
+  filter: invert(1) brightness(1.6);
 }
 
 .fab-main:focus-visible {
