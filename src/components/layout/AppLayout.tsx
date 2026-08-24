@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, Outlet } from "react-router-dom";
+import { FloatingActionButton } from "@/components/ui/motion-floating-action-button";
 import { LogOut, Pencil, Shield } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -102,6 +103,10 @@ export function AppLayout() {
 
       {/* Cronômetro flutuante global — visível em qualquer página enquanto roda. */}
       <FloatingTaskTimer />
+
+      {/* Bússola de navegação: segue em todas as telas do app e devolve a
+          pessoa ao centro sem ela ter que caçar o caminho. */}
+      <FloatingActionButton />
     </div>
   );
 }

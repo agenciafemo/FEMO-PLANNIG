@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { uploadVideoResumable } from "@/lib/uploadVideo";
@@ -106,6 +107,23 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
   const [blogBody, setBlogBody] = useState("");
   const [managerComment, setManagerComment] = useState("");
   const [expandedImageIndex, setExpandedImageIndex] = useState<number | null>(null);
+  // Fechamento único do lightbox, reusado por X, backdrop, Escape e fallback.
+  const closeImageLightbox = useCallback(() => {
+    setExpandedImageIndex(null);
+  }, []);
+  // Escape fecha o lightbox. Em fase de captura + stopPropagation para o
+  // onEscapeKeyDown do Radix Dialog não fechar o editor junto.
+  useEffect(() => {
+    if (expandedImageIndex === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        closeImageLightbox();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [expandedImageIndex, closeImageLightbox]);
   const [targetPlanningId, setTargetPlanningId] = useState("");
   const now = new Date();
   const [newPlanningMonth, setNewPlanningMonth] = useState(String(now.getMonth() + 1));
@@ -554,7 +572,8 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
 
   const getExpandedImages = () => {
     if (contentType === "carousel") return mediaUrls;
-    if (contentType === "story") return mediaUrls;
+    // Story (como static/reels/blog) guarda a imagem em coverImageUrl, não em
+    // mediaUrls. Sem isto, o lightbox recebia array vazio e não abria.
     return coverImageUrl ? [coverImageUrl] : [];
   };
 
@@ -920,13 +939,34 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
         </div>
 
         {/* Expanded Image View */}
-        {expandedImageIndex !== null && expandedImages.length > 0 && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-            <div className="relative w-full max-w-4xl">
+        {expandedImageIndex !== null && expandedImages.length > 0 && createPortal(
+          // Portal para o body: sem isto o `fixed inset-0` fica preso ao
+          // DialogContent (que usa translate). z-[9999] fica acima do Radix Dialog.
+          // Clicar no fundo escuro fecha; o conteúdo interno para a propagação.
+          <div
+            className="pointer-events-auto fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+            onPointerDownCapture={(e) => {
+              // Só fecha quando o clique é no fundo, não em algo interno.
+              if (e.target === e.currentTarget) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeImageLightbox();
+              }
+            }}
+          >
+            <div
+              className="pointer-events-auto relative w-full max-w-4xl"
+              onPointerDownCapture={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
               {/* Close button */}
               <button
-                onClick={() => setExpandedImageIndex(null)}
-                className="absolute -top-10 right-0 text-white hover:text-gray-300 z-10"
+                type="button"
+                aria-label="Fechar visualização ampliada"
+                onPointerDownCapture={(e) => { e.preventDefault(); e.stopPropagation(); closeImageLightbox(); }}
+                onMouseDownCapture={(e) => { e.preventDefault(); e.stopPropagation(); closeImageLightbox(); }}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); closeImageLightbox(); }}
+                className="pointer-events-auto absolute -top-10 right-0 z-[10001] text-white hover:text-gray-300"
               >
                 <X className="h-6 w-6" />
               </button>
@@ -992,7 +1032,8 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
                 )}
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
       </DialogContent>
     </Dialog>
