@@ -88,9 +88,8 @@
   pointer-events: none; /* o clique é do botão, não do rótulo */
 }
 
-/* Mostrador claro com aro da marca: a rosa dos ventos do logo e ESCURA e
-   sumiria sobre o petroleo. De quebra, o aro faz o botao parecer um
-   instrumento, que e exatamente o que ele e. */
+/* Mostrador liso, sem aro: a rosa dos ventos ocupa quase todo o botao e e ela
+   que da a forma. Um anel em volta so competia com o desenho do simbolo. */
 .fab-main {
   position: absolute;
   inset: 0;
@@ -100,7 +99,6 @@
   border-radius: 9999px;
   background: hsl(var(--card));
   color: hsl(var(--primary));
-  border: 2px solid hsl(var(--primary));
   box-shadow: 0 6px 20px hsl(var(--foreground) / 0.22);
   cursor: pointer;
 }
