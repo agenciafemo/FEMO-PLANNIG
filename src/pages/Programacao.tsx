@@ -86,6 +86,16 @@ const REDE_LABEL: Record<PublishTarget, string> = {
 
 type FalhaDestino = { target: PublishTarget; msg: string };
 
+/** Selo compacto da rede — o que distingue dois itens do mesmo post na fila. */
+function RedeIcone({ target }: { target: PublishTarget }) {
+  const Icon = target === "facebook" ? Facebook : Instagram;
+  return (
+    <span className="flex items-center text-muted-foreground" title={`Publica no ${REDE_LABEL[target]}`}>
+      <Icon className="h-2.5 w-2.5" />
+    </span>
+  );
+}
+
 /**
  * Enfileira um item por destino e NUNCA aborta no primeiro erro. Cada destino e
  * uma publicacao independente: se o Facebook falhar, o Instagram ja enfileirado
@@ -124,7 +134,7 @@ function resumoEnfileiramento(
   return `${verbo} em ${ok}, mas falhou em ${resumoFalhas(falhas)}`;
 }
 
-function buildScheduleInput(post: ApprovedPost) {
+function buildScheduleInput(post: ApprovedPost, target: PublishTarget) {
   if (post.content_type === "reels") {
     const v = post.video_url ?? "";
     const isDirectVideo = /\.(mp4|mov|m4v)(\?|$)/i.test(v) && !v.includes("drive.google.com");
@@ -162,7 +172,12 @@ function buildScheduleInput(post: ApprovedPost) {
       "Story sem mídia válida. Adicione uma imagem de capa ou faça upload de um vídeo (mp4/mov) — link do Google Drive não pode ser publicado.",
     );
   }
-  if (!post.cover_image_url) throw new Error("Post sem imagem de capa.");
+  if (!post.cover_image_url) {
+    // Post sem imagem so existe na Pagina: o Instagram exige midia sempre.
+    // E o caso do blog, que ate agora nao tinha como ser publicado.
+    if (target === "facebook") return { mediaType: "text" as const };
+    throw new Error("Post sem imagem de capa.");
+  }
   return { mediaType: "image" as const, imageUrl: post.cover_image_url };
 }
 
@@ -298,7 +313,7 @@ export default function Programacao() {
         createScheduledPost({
           clientId,
           connectionId,
-          ...buildScheduleInput(post),
+          ...buildScheduleInput(post, target),
           caption: buildCaption(post),
           postId: post.id,
           target,
@@ -330,7 +345,7 @@ export default function Programacao() {
         createScheduledPost({
           clientId,
           connectionId,
-          ...buildScheduleInput(scheduling),
+          ...buildScheduleInput(scheduling, target),
           caption: buildCaption(scheduling),
           scheduledFor: when.toISOString(),
           postId: scheduling.id,
@@ -477,7 +492,12 @@ export default function Programacao() {
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-1">
-                          <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${chip.cls}`}>{chip.label}</span>
+                          <span className="flex items-center gap-1">
+                            <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${chip.cls}`}>{chip.label}</span>
+                            {/* Sem isto, dois itens do mesmo post (um por rede)
+                                ficam identicos e ninguem sabe qual falhou. */}
+                            <RedeIcone target={it.target} />
+                          </span>
                           <span className="text-[9px] text-muted-foreground">{format(new Date(it.scheduled_for), "HH:mm")}</span>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -526,10 +546,12 @@ export default function Programacao() {
                     ? "Esta conexao nao tem permissao para publicar na Pagina"
                     : undefined}
                   onClick={() => setTargets(
-                    // Nunca deixa ficar sem nenhum destino.
+                    // Opera sobre o valor GUARDADO: usar a lista efetiva
+                    // apagaria a escolha feita em clientes que tem permissao.
+                    // E nunca deixa ficar sem nenhum destino.
                     marcado
-                      ? (destinos.length > 1 ? destinos.filter((t) => t !== key) : destinos)
-                      : [...destinos, key],
+                      ? (targets.length > 1 ? targets.filter((t) => t !== key) : targets)
+                      : (targets.includes(key) ? targets : [...targets, key]),
                   )}
                   className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                     bloqueado
@@ -599,7 +621,7 @@ export default function Programacao() {
               )}
               {receipt.status === "published" && receipt.permalink && (
                 <a href={receipt.permalink} target="_blank" rel="noreferrer" className="block">
-                  <Button className="w-full"><ExternalLink className="mr-1.5 h-4 w-4" /> Ver post no Instagram</Button>
+                  <Button className="w-full"><ExternalLink className="mr-1.5 h-4 w-4" /> Ver post no {REDE_LABEL[receipt.target]}</Button>
                 </a>
               )}
               {receipt.status === "published" && receipt.permalink && (
@@ -608,7 +630,7 @@ export default function Programacao() {
                   className="w-full"
                   onClick={() => {
                     navigator.clipboard.writeText(
-                      `Olá! A publicação foi feita no Instagram 🎉\nConfira aqui: ${receipt.permalink}`,
+                      `Olá! A publicação foi feita no ${REDE_LABEL[receipt.target]} 🎉\nConfira aqui: ${receipt.permalink}`,
                     );
                     toast.success("Mensagem copiada!");
                   }}

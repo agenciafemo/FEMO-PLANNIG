@@ -375,6 +375,17 @@ async function facebookPost(
   return json as Record<string, unknown>;
 }
 
+/** Remove uma midia da Pagina. Usado para nao deixar lixo quando o carrossel
+ *  falha no meio. */
+async function facebookDelete(objectId: string, token: string): Promise<void> {
+  const config = metaConfig();
+  const proof = await appSecretProof(token, config.appSecret);
+  const url = new URL(`https://graph.facebook.com/${config.graphVersion}/${encodeURIComponent(objectId)}`);
+  url.searchParams.set("access_token", token);
+  url.searchParams.set("appsecret_proof", proof);
+  await fetch(url, { method: "DELETE" });
+}
+
 /** Post de imagem no feed da Página. */
 export async function publishFacebookImage(input: {
   pageId: string;
@@ -459,12 +470,24 @@ export async function publishFacebookCarousel(input: {
     params[`attached_media[${i}]`] = JSON.stringify({ media_fbid: id });
   });
 
-  const json = await facebookPost(
-    `${encodeURIComponent(input.pageId)}/feed`,
-    input.token,
-    params,
-    "fb_carousel_failed",
-  );
+  let json: Record<string, unknown>;
+  try {
+    json = await facebookPost(
+      `${encodeURIComponent(input.pageId)}/feed`,
+      input.token,
+      params,
+      "fb_carousel_failed",
+    );
+  } catch (error) {
+    // As fotos ja subiram como nao publicadas. Se o post do feed falha, elas
+    // ficam orfas na Pagina e cada nova tentativa acumula mais — entao apaga.
+    // Best-effort: uma falha na limpeza nunca substitui o erro original.
+    await Promise.all(mediaIds.map((id) =>
+      facebookDelete(id, input.token).catch(() => {})
+    ));
+    throw error;
+  }
+
   const postId = json.id as string | undefined;
   if (!postId) throw new Error("fb_carousel_no_id");
   return { mediaId: postId, permalink: FB_PERMALINK(postId) };
