@@ -90,6 +90,7 @@ export async function createPendingConnection(
   input: {
     oauthStateId: string;
     metaUserId: string;
+    metaUserName?: string | null;
     accessToken: string;
     tokenExpiresAt: string | null;
     scopes: string[];
@@ -105,6 +106,7 @@ export async function createPendingConnection(
       _token_expires_at: input.tokenExpiresAt,
       _granted_scopes: input.scopes,
       _request_id: input.requestId,
+      _meta_user_name: input.metaUserName ?? null,
     },
   );
   const connectionId = connectionIdFromRpcData(data);

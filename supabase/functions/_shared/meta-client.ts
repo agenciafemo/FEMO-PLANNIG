@@ -88,6 +88,11 @@ export function diagnosticsEnabled(): boolean {
 export function buildAuthorizeUrl(
   state: string,
   config: MetaOAuthStartConfig = metaOAuthStartConfig(),
+  // Força o Facebook a pedir a senha de novo em vez de reaproveitar a sessão
+  // aberta no navegador. É o que permite conectar um cliente com a conta DELE
+  // numa máquina que já está logada na conta da agência — sem isso, o Facebook
+  // reautoriza silenciosamente com quem já está logado.
+  forceAccountChoice = false,
 ): string {
   const url = new URL(
     `https://www.facebook.com/${config.graphVersion}/dialog/oauth`,
@@ -97,6 +102,7 @@ export function buildAuthorizeUrl(
   url.searchParams.set("state", state);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", config.scopes.join(","));
+  if (forceAccountChoice) url.searchParams.set("auth_type", "reauthenticate");
   return url.toString();
 }
 
@@ -209,6 +215,27 @@ export async function exchangeCodeForToken(
 ): Promise<MetaTokenResponse> {
   const shortLived = await exchangeCodeForShortLivedToken(code, config);
   return await exchangeForLongLivedToken(shortLived.access_token, config);
+}
+
+// Quem autorizou: id e nome da conta Meta. O nome é o que permite ver, na ficha
+// do cliente, se a conexão está na conta da agência ou na do próprio cliente.
+export async function getMetaUser(
+  token: string,
+  config = metaConfig(),
+): Promise<{ id: string; name: string | null }> {
+  const url = new URL(`https://graph.facebook.com/${config.graphVersion}/me`);
+  url.searchParams.set("fields", "id,name");
+  url.searchParams.set(
+    "appsecret_proof",
+    await appSecretProof(token, config.appSecret),
+  );
+  const response = await fetchWithTimeout(url, {
+    method: "GET",
+    headers: bearerHeaders(token),
+  }, config.requestTimeoutMs);
+  const payload = await parseMetaResponse<{ id?: string; name?: string }>(response);
+  if (!payload.id) throw new HttpError(502, "meta_user_id_missing");
+  return { id: payload.id, name: payload.name?.trim() || null };
 }
 
 export async function getMetaUserId(
