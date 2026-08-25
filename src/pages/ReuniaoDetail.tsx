@@ -2,7 +2,13 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
-import { getMeeting, listOrgMembers, createTaskFromActionItem, MeetingActionItem } from "@/lib/meetings";
+import {
+  createTaskFromActionItem,
+  getMeeting,
+  listOrgMembers,
+  MeetingActionItem,
+  stopMeetingRecording,
+} from "@/lib/meetings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,13 +21,24 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, CheckCircle2, Circle, Loader2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Circle, Loader2, Square } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -45,6 +62,7 @@ export default function ReuniaoDetail() {
     () => new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
   );
   const [creating, setCreating] = useState(false);
+  const [stopping, setStopping] = useState(false);
 
   const meetingQuery = useQuery({
     queryKey: ["meeting", id],
@@ -92,6 +110,35 @@ export default function ReuniaoDetail() {
     }
   };
 
+  const handleStopRecording = async () => {
+    if (!id || stopping) return;
+    setStopping(true);
+    try {
+      const status = await stopMeetingRecording(id);
+      if (status === "ready") {
+        toast.success("Gravação finalizada e ata gerada.");
+      } else if (status === "transcript_pending" || status === "stopping") {
+        toast.info(
+          "O bot saiu da reunião. A Vexa ainda está finalizando a transcrição; tente novamente em alguns segundos.",
+        );
+      } else if (status === "failed") {
+        toast.error("A gravação terminou, mas não foi possível gerar a ata.");
+      } else {
+        toast.info("Gravação finalizada. Gerando a ata...");
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["meeting", id] }),
+        queryClient.invalidateQueries({ queryKey: ["meetings"] }),
+      ]);
+    } catch {
+      toast.error(
+        "Não foi possível finalizar agora. Aguarde alguns segundos e tente novamente.",
+      );
+    } finally {
+      setStopping(false);
+    }
+  };
+
   if (meetingQuery.isLoading) {
     return <div className="p-6 text-sm text-muted-foreground">Carregando...</div>;
   }
@@ -116,19 +163,55 @@ export default function ReuniaoDetail() {
             {meeting.duration_seconds ? ` · ${Math.round(meeting.duration_seconds / 60)} min` : ""}
           </p>
         </div>
-        <Badge variant={meeting.status === "failed" ? "destructive" : "secondary"}>
-          {STATUS_LABEL[meeting.status] ?? meeting.status}
-        </Badge>
+        <div className="flex items-center gap-2">
+          {meeting.source === "bot" && meeting.status === "recording" && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="sm" disabled={stopping}>
+                  {stopping ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Square className="mr-2 h-4 w-4 fill-current" />
+                  )}
+                  {stopping ? "Finalizando..." : "Finalizar gravação"}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Finalizar esta gravação?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    O bot sairá da reunião e o Norteia buscará a transcrição para gerar a ata.
+                    Essa ação não pode ser desfeita.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Continuar gravando</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    onClick={handleStopRecording}
+                  >
+                    Finalizar gravação
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+          <Badge variant={meeting.status === "failed" ? "destructive" : "secondary"}>
+            {STATUS_LABEL[meeting.status] ?? meeting.status}
+          </Badge>
+        </div>
       </div>
 
       {inProgress && (
         <Card>
           <CardContent className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            {meeting.status === "pending" && "Aguardando início..."}
-            {meeting.status === "recording" && "Gravando a reunião..."}
-            {meeting.status === "transcribing" && "Transcrevendo o áudio..."}
-            {meeting.status === "summarizing" && "Gerando a ata com IA..."}
+            {stopping && "Finalizando a gravação e recuperando a transcrição..."}
+            {!stopping && meeting.status === "pending" && "Aguardando início..."}
+            {!stopping && meeting.status === "recording" &&
+              "Gravando a reunião. Ao terminar, use o botão “Finalizar gravação”."}
+            {!stopping && meeting.status === "transcribing" && "Transcrevendo o áudio..."}
+            {!stopping && meeting.status === "summarizing" && "Gerando a ata com IA..."}
           </CardContent>
         </Card>
       )}

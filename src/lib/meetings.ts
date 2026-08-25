@@ -183,6 +183,24 @@ export async function createMeetingFromLink(input: {
   return data.meeting_id;
 }
 
+export type StopMeetingRecordingStatus =
+  | "ready"
+  | "transcript_pending"
+  | "summarizing"
+  | "failed"
+  | "stopping";
+
+export async function stopMeetingRecording(
+  meetingId: string,
+): Promise<StopMeetingRecordingStatus> {
+  const { data, error } = await invokeEdge<{ status?: string }>(
+    "meeting-bot-stop",
+    { body: { meeting_id: meetingId } },
+  );
+  if (error) throw new Error(error.message);
+  return (data?.status ?? "stopping") as StopMeetingRecordingStatus;
+}
+
 export async function createTaskFromActionItem(input: {
   actionItemId: string;
   meetingId: string;

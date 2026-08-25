@@ -11,53 +11,28 @@ import {
 } from "../_shared/http.ts";
 import { createAdminClient, requiredEnv } from "../_shared/supabase.ts";
 import { timingSafeEqual } from "../_shared/security.ts";
+import {
+  buildTranscript,
+  fetchVexaBots,
+  fetchVexaTranscript,
+  VEXA_FAILED_STATUSES,
+} from "../_shared/vexa.ts";
 
 // Chamada por um cron (pg_cron -> pg_net, mesmo mecanismo já usado no projeto
 // para o robô de notificações do calendário) a cada poucos minutos. Não tem
 // usuário logado, por isso autentica via segredo compartilhado em vez de JWT.
 // Consulta o status de cada reunião com bot ativo na Vexa.ai; quando a
 // reunião termina, busca a transcrição e dispara a geração da ata.
-const VEXA_BASE_URL = "https://api.cloud.vexa.ai";
-const FAILED_STATUSES = new Set(["failed", "needs_help"]);
-
-interface VexaMeeting {
-  status?: string;
-  platform?: string;
-  native_meeting_id?: string;
-}
-
-interface TranscriptSegment {
-  speaker?: string;
-  text?: string;
-  start?: number;
-  end?: number;
-}
-
-async function fetchVexaMeeting(
-  vexaKey: string,
-  vexaMeetingId: string,
-): Promise<VexaMeeting | null> {
-  const response = await fetch(`${VEXA_BASE_URL}/meetings/${vexaMeetingId}`, {
-    headers: { "X-API-Key": vexaKey },
-  });
-  if (!response.ok) return null;
-  return await response.json().catch(() => null);
-}
-
-async function fetchVexaTranscript(
-  vexaKey: string,
-  platform: string,
-  nativeMeetingId: string,
-): Promise<TranscriptSegment[]> {
-  const response = await fetch(
-    `${VEXA_BASE_URL}/transcripts/${platform}/${nativeMeetingId}`,
-    { headers: { "X-API-Key": vexaKey } },
-  );
-  if (!response.ok) return [];
-  const payload = await response.json().catch(() => ({}));
-  return Array.isArray(payload?.segments) ? payload.segments : [];
-}
-
+//
+// A Vexa separa a API em duas chaves com escopos diferentes (confirmado
+// testando ao vivo em 2026-08-25): a "Bot Key" (VEXA_API_KEY, mesma usada em
+// meeting-bot-start) só acessa GET /bots (lista todos os bots, rodando ou
+// não, com status/completion_reason) — NÃO acessa GET /meetings/{id} nem
+// GET /transcripts/... (ambos devolvem 403 "Insufficient scope"). Buscar a
+// transcrição pronta exige a "Transcription Key" separada
+// (VEXA_TRANSCRIPTION_API_KEY) — se esse secret não estiver configurado
+// ainda, a reunião fica marcada como "aguardando transcrição" em vez de
+// falhar.
 Deno.serve(async (request) => {
   const headers = corsHeaders(request);
   try {
@@ -79,6 +54,8 @@ Deno.serve(async (request) => {
 
     const supabase = createAdminClient();
     const vexaKey = requiredEnv("VEXA_API_KEY");
+    const transcriptionKey = Deno.env.get("VEXA_TRANSCRIPTION_API_KEY")
+      ?.trim();
 
     const pendingResult = await supabase.from("meetings").select(
       "id, organization_id, created_by, title, vexa_bot_id",
@@ -89,17 +66,18 @@ Deno.serve(async (request) => {
     );
     if (pendingResult.error) throw new HttpError(502, "meetings_read_failed");
 
+    const bots = await fetchVexaBots(vexaKey);
     const results: Array<{ meeting_id: string; outcome: string }> = [];
 
     for (const meeting of pendingResult.data ?? []) {
       const vexaMeetingId = meeting.vexa_bot_id as string;
-      const vexaMeeting = await fetchVexaMeeting(vexaKey, vexaMeetingId);
+      const vexaMeeting = bots.find((bot) => String(bot.id) === vexaMeetingId);
       if (!vexaMeeting) {
-        results.push({ meeting_id: meeting.id, outcome: "vexa_unreachable" });
+        results.push({ meeting_id: meeting.id, outcome: "vexa_bot_not_found" });
         continue;
       }
 
-      if (FAILED_STATUSES.has(vexaMeeting.status ?? "")) {
+      if (VEXA_FAILED_STATUSES.has(vexaMeeting.status ?? "")) {
         await supabase.from("meetings").update({
           status: "failed",
           failure_reason: `vexa_${vexaMeeting.status}`,
@@ -121,6 +99,16 @@ Deno.serve(async (request) => {
         continue;
       }
 
+      if (!transcriptionKey) {
+        // VEXA_TRANSCRIPTION_API_KEY ainda não configurado — a reunião fica
+        // "recording" (o próximo poll tenta de novo) até o secret existir.
+        results.push({
+          meeting_id: meeting.id,
+          outcome: "missing_transcription_key",
+        });
+        continue;
+      }
+
       const platform = vexaMeeting.platform ?? "google_meet";
       const nativeMeetingId = vexaMeeting.native_meeting_id;
       if (!nativeMeetingId) {
@@ -128,25 +116,15 @@ Deno.serve(async (request) => {
         continue;
       }
       const segments = await fetchVexaTranscript(
-        vexaKey,
+        transcriptionKey,
         platform,
         nativeMeetingId,
       );
-      const transcriptText = segments.map((segment) => segment.text ?? "")
-        .filter(Boolean).join("\n").trim();
-      if (!transcriptText) {
+      const built = buildTranscript(vexaMeeting, segments);
+      if (!built) {
         results.push({ meeting_id: meeting.id, outcome: "empty_transcript" });
         continue;
       }
-      const transcriptRaw = segments.map((segment) => ({
-        speaker: segment.speaker ?? "desconhecido",
-        text: segment.text ?? "",
-        start_ms: Math.round((segment.start ?? 0) * 1000),
-        end_ms: Math.round((segment.end ?? 0) * 1000),
-      }));
-      const durationSeconds = transcriptRaw.length > 0
-        ? Math.round((transcriptRaw[transcriptRaw.length - 1].end_ms) / 1000)
-        : null;
 
       // Sai do status "recording" ANTES de chamar meeting-summarize: se não
       // fizer isso e a chamada abaixo falhar/for cortada, a próxima rodada do
@@ -154,16 +132,17 @@ Deno.serve(async (request) => {
       // e reprocessaria a transcrição e o Gemini à toa a cada ciclo.
       await supabase.from("meetings").update({
         status: "summarizing",
-        transcript_text: transcriptText,
-        transcript_raw: transcriptRaw,
-        duration_seconds: durationSeconds,
+        transcript_text: built.transcriptText,
+        transcript_raw: built.transcriptRaw,
+        duration_seconds: built.durationSeconds,
       }).eq("id", meeting.id);
 
       // Aguarda a resposta (não fire-and-forget): numa Edge Function, nada
       // garante que um fetch disparado sem await sobreviva ao retorno desta
       // resposta — a instância pode ser encerrada antes dele completar.
-      const summarizeUrl =
-        `${requiredEnv("SUPABASE_URL")}/functions/v1/meeting-summarize`;
+      const summarizeUrl = `${
+        requiredEnv("SUPABASE_URL")
+      }/functions/v1/meeting-summarize`;
       const summarizeResponse = await fetch(summarizeUrl, {
         method: "POST",
         headers: {

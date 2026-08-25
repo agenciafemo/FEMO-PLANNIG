@@ -11,12 +11,17 @@ import {
   readJson,
 } from "../_shared/http.ts";
 import { createUserClient, requiredEnv } from "../_shared/supabase.ts";
+import { parseMeetingUrl, VEXA_BASE_URL } from "../_shared/vexa.ts";
 
-// API da Vexa.ai (docs.vexa.ai/api/meetings.md): POST /meetings recebe
-// meeting_url e resolve plataforma/id nativo no servidor deles. scheduled_at
-// + auto_join fazem a própria Vexa colocar o bot na hora certa — não
-// precisamos de cron próprio para agendar.
-const VEXA_BASE_URL = "https://api.cloud.vexa.ai";
+// API da Vexa.ai: a "Bot Key" (escopo usado aqui) só tem permissão no
+// endpoint POST /bots (confirmado testando ao vivo em 2026-08-25 — POST
+// /meetings devolve 403 "Insufficient scope for this endpoint" com esse tipo
+// de chave). /bots entra na chamada IMEDIATAMENTE: não aceita scheduled_at.
+// Por isso, se vier um scheduled_at no futuro (ex.: evento do Calendário de
+// Equipe criado com antecedência), NÃO chamamos a Vexa agora — só guardamos a
+// reunião como "pending". Disparar o bot na hora certa exige um cron próprio
+// (ainda não construído) que rode meeting-bot-start perto do horário.
+const SCHEDULE_TOLERANCE_MS = 2 * 60 * 1000; // até 2min no futuro = "agora"
 
 interface Body {
   organization_id?: string;
@@ -67,6 +72,9 @@ Deno.serve(async (request) => {
       throw new HttpError(403, "meeting_bot_forbidden");
     }
 
+    const parsedMeeting = parseMeetingUrl(meetingLink);
+    if (!parsedMeeting) throw new HttpError(400, "unsupported_meeting_link");
+
     const title = body.title?.trim() || "Reunião";
     const insertResult = await supabase.from("meetings").insert({
       organization_id: organizationId,
@@ -83,18 +91,34 @@ Deno.serve(async (request) => {
     }
     const meetingId = insertResult.data.id as string;
 
+    const scheduledAtMs = body.scheduled_at
+      ? Date.parse(body.scheduled_at)
+      : NaN;
+    const isFutureSchedule = !Number.isNaN(scheduledAtMs) &&
+      scheduledAtMs - Date.now() > SCHEDULE_TOLERANCE_MS;
+    if (isFutureSchedule) {
+      // Ainda não há cron que dispare o bot na hora certa — a reunião fica
+      // "pending" e precisa ser iniciada manualmente perto do horário (ou
+      // quando o cron de agendamento for construído).
+      return jsonResponse(
+        { ok: true, meeting_id: meetingId, scheduled: true },
+        200,
+        headers,
+      );
+    }
+
     const vexaKey = requiredEnv("VEXA_API_KEY");
-    const vexaResponse = await fetch(`${VEXA_BASE_URL}/meetings`, {
+    const vexaResponse = await fetch(`${VEXA_BASE_URL}/bots`, {
       method: "POST",
       headers: {
         "X-API-Key": vexaKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        title,
-        meeting_url: meetingLink,
-        auto_join: true,
-        ...(body.scheduled_at ? { scheduled_at: body.scheduled_at } : {}),
+        platform: parsedMeeting.platform,
+        native_meeting_id: parsedMeeting.nativeMeetingId,
+        bot_name: "Norteia",
+        language: "pt",
       }),
     });
     const vexaPayload = await vexaResponse.json().catch(() => ({}));
