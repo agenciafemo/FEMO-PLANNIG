@@ -32,3 +32,6 @@ dist-ssr
 
 # Artefatos do tsc -b (cache de build, nao versionar)
 *.tsbuildinfo
+
+# Memoria de agente: pessoal, nao versionar
+.claude/agent-memory/
