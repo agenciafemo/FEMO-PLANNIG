@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { insertPosts } from "@/lib/postsInsert";
+import { deletePlanningCascade } from "@/lib/deletePlanning";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
@@ -426,13 +427,9 @@ export default function PlanningDetail() {
   });
 
   const deletePlanning = useMutation({
-    mutationFn: async () => {
-      // Delete all posts first
-      const { error: postsError } = await supabase.from("posts").delete().eq("planning_id", planningId!);
-      if (postsError) throw postsError;
-      const { error } = await supabase.from("plannings").delete().eq("id", planningId!);
-      if (error) throw error;
-    },
+    // Uma operacao so: o CASCADE do banco leva os posts junto. Ver
+    // deletePlanningCascade para o porque de nao apagar os posts a mao.
+    mutationFn: () => deletePlanningCascade(planningId!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["plannings"] });
       toast.success("Planejamento excluído!");
