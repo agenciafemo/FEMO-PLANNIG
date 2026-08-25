@@ -20,6 +20,8 @@ import {
 import { InstagramConnection } from "@/components/client/InstagramConnection";
 import { ClientReports } from "@/components/client/ClientReports";
 import { ClientDocuments } from "@/components/client/ClientDocuments";
+import { ClientMeetings } from "@/components/client/ClientMeetings";
+import { REUNIOES_ENABLED } from "@/lib/featureFlags";
 import { META_CONNECT_ENABLED } from "@/lib/featureFlags";
 
 const CONTRACT_FIELDS = [
@@ -333,6 +335,7 @@ export default function ClientDetail() {
       {/* Relatórios e documentos do cliente */}
       {clientId && <ClientReports clientId={clientId} />}
       {clientId && <ClientDocuments clientId={clientId} />}
+      {REUNIOES_ENABLED && clientId && <ClientMeetings clientId={clientId} />}
 
     </div>
   );

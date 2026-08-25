@@ -15,6 +15,7 @@ export type TeamEvent = {
   ends_at: string | null;
   all_day: boolean;
   created_by: string;
+  record_and_transcribe: boolean;
   team_event_attendees: Attendee[];
 };
 
@@ -25,7 +26,7 @@ export async function loadWeekEvents(
 ): Promise<TeamEvent[]> {
   const { data, error } = await (supabase as AnyClient)
     .from("team_events")
-    .select("id, title, description, location, meeting_link, starts_at, ends_at, all_day, created_by, team_event_attendees(user_id, response)")
+    .select("id, title, description, location, meeting_link, starts_at, ends_at, all_day, created_by, record_and_transcribe, team_event_attendees(user_id, response)")
     .eq("organization_id", organizationId)
     .gte("starts_at", fromIso)
     .lte("starts_at", toIso)
@@ -45,7 +46,8 @@ export async function createTeamEvent(input: {
   endsAt: string | null;
   allDay: boolean;
   attendeeIds: string[]; // participantes (entram como "accepted")
-}): Promise<void> {
+  recordAndTranscribe?: boolean;
+}): Promise<{ id: string }> {
   const { data: ev, error } = await (supabase as AnyClient)
     .from("team_events")
     .insert({
@@ -58,6 +60,7 @@ export async function createTeamEvent(input: {
       starts_at: input.startsAt,
       ends_at: input.endsAt,
       all_day: input.allDay,
+      record_and_transcribe: input.recordAndTranscribe ?? false,
     })
     .select("id")
     .single();
@@ -89,6 +92,8 @@ export async function createTeamEvent(input: {
       }));
     if (notifs.length > 0) await (supabase as AnyClient).from("notifications").insert(notifs);
   } catch { /* best-effort */ }
+
+  return { id: ev.id as string };
 }
 
 // Sair do evento (declined) ou voltar (accepted) — a própria pessoa.
