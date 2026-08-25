@@ -17,10 +17,21 @@ import { timingSafeEqual } from "../_shared/security.ts";
 // usuário logado, por isso autentica via segredo compartilhado em vez de JWT.
 // Consulta o status de cada reunião com bot ativo na Vexa.ai; quando a
 // reunião termina, busca a transcrição e dispara a geração da ata.
+//
+// A Vexa separa a API em duas chaves com escopos diferentes (confirmado
+// testando ao vivo em 2026-08-25): a "Bot Key" (VEXA_API_KEY, mesma usada em
+// meeting-bot-start) só acessa GET /bots (lista todos os bots, rodando ou
+// não, com status/completion_reason) — NÃO acessa GET /meetings/{id} nem
+// GET /transcripts/... (ambos devolvem 403 "Insufficient scope"). Buscar a
+// transcrição pronta exige a "Transcription Key" separada
+// (VEXA_TRANSCRIPTION_API_KEY) — se esse secret não estiver configurado
+// ainda, a reunião fica marcada como "aguardando transcrição" em vez de
+// falhar.
 const VEXA_BASE_URL = "https://api.cloud.vexa.ai";
 const FAILED_STATUSES = new Set(["failed", "needs_help"]);
 
-interface VexaMeeting {
+interface VexaBot {
+  id: number;
   status?: string;
   platform?: string;
   native_meeting_id?: string;
@@ -33,25 +44,23 @@ interface TranscriptSegment {
   end?: number;
 }
 
-async function fetchVexaMeeting(
-  vexaKey: string,
-  vexaMeetingId: string,
-): Promise<VexaMeeting | null> {
-  const response = await fetch(`${VEXA_BASE_URL}/meetings/${vexaMeetingId}`, {
+async function fetchVexaBots(vexaKey: string): Promise<VexaBot[]> {
+  const response = await fetch(`${VEXA_BASE_URL}/bots`, {
     headers: { "X-API-Key": vexaKey },
   });
-  if (!response.ok) return null;
-  return await response.json().catch(() => null);
+  if (!response.ok) return [];
+  const payload = await response.json().catch(() => ({}));
+  return Array.isArray(payload?.meetings) ? payload.meetings : [];
 }
 
 async function fetchVexaTranscript(
-  vexaKey: string,
+  transcriptionKey: string,
   platform: string,
   nativeMeetingId: string,
 ): Promise<TranscriptSegment[]> {
   const response = await fetch(
     `${VEXA_BASE_URL}/transcripts/${platform}/${nativeMeetingId}`,
-    { headers: { "X-API-Key": vexaKey } },
+    { headers: { "X-API-Key": transcriptionKey } },
   );
   if (!response.ok) return [];
   const payload = await response.json().catch(() => ({}));
@@ -79,6 +88,8 @@ Deno.serve(async (request) => {
 
     const supabase = createAdminClient();
     const vexaKey = requiredEnv("VEXA_API_KEY");
+    const transcriptionKey = Deno.env.get("VEXA_TRANSCRIPTION_API_KEY")
+      ?.trim();
 
     const pendingResult = await supabase.from("meetings").select(
       "id, organization_id, created_by, title, vexa_bot_id",
@@ -89,13 +100,16 @@ Deno.serve(async (request) => {
     );
     if (pendingResult.error) throw new HttpError(502, "meetings_read_failed");
 
+    const bots = await fetchVexaBots(vexaKey);
     const results: Array<{ meeting_id: string; outcome: string }> = [];
 
     for (const meeting of pendingResult.data ?? []) {
       const vexaMeetingId = meeting.vexa_bot_id as string;
-      const vexaMeeting = await fetchVexaMeeting(vexaKey, vexaMeetingId);
+      const vexaMeeting = bots.find((bot) =>
+        String(bot.id) === vexaMeetingId
+      );
       if (!vexaMeeting) {
-        results.push({ meeting_id: meeting.id, outcome: "vexa_unreachable" });
+        results.push({ meeting_id: meeting.id, outcome: "vexa_bot_not_found" });
         continue;
       }
 
@@ -121,6 +135,16 @@ Deno.serve(async (request) => {
         continue;
       }
 
+      if (!transcriptionKey) {
+        // VEXA_TRANSCRIPTION_API_KEY ainda não configurado — a reunião fica
+        // "recording" (o próximo poll tenta de novo) até o secret existir.
+        results.push({
+          meeting_id: meeting.id,
+          outcome: "missing_transcription_key",
+        });
+        continue;
+      }
+
       const platform = vexaMeeting.platform ?? "google_meet";
       const nativeMeetingId = vexaMeeting.native_meeting_id;
       if (!nativeMeetingId) {
@@ -128,7 +152,7 @@ Deno.serve(async (request) => {
         continue;
       }
       const segments = await fetchVexaTranscript(
-        vexaKey,
+        transcriptionKey,
         platform,
         nativeMeetingId,
       );
