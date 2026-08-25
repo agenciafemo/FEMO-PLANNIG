@@ -17,6 +17,11 @@ export const PROGRAMACAO_ENABLED = import.meta.env.VITE_PROGRAMACAO_ENABLED === 
 // Para desligar sem novo deploy de código, defina VITE_RELATORIOS_ENABLED="false".
 export const RELATORIOS_ENABLED = import.meta.env.VITE_RELATORIOS_ENABLED !== "false";
 
+// Módulo "Reuniões" — transcrição de reunião (upload manual ou bot Vexa.ai no
+// Google Meet) + ata por IA (Gemini) + itens de ação viram tarefa.
+// Desligado por padrão; aparece com VITE_REUNIOES_ENABLED === "true".
+export const REUNIOES_ENABLED = import.meta.env.VITE_REUNIOES_ENABLED === "true";
+
 // Áudio no portal público adiado: enquanto não houver uma Edge Function segura
 // que valide o token público e devolva uma signed upload URL para o bucket
 // `comment-audios`, os botões de gravar/enviar áudio ficam ocultos no portal

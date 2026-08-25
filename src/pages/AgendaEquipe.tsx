@@ -18,6 +18,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import { REUNIOES_ENABLED } from "@/lib/featureFlags";
+import { createMeetingFromLink, hasMeetingConsent, recordMeetingConsent } from "@/lib/meetings";
+import { MeetingConsentDialog } from "@/components/meetings/MeetingConsentDialog";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -151,23 +155,71 @@ export default function AgendaEquipe() {
   const [form, setForm] = useState({
     title: "", date: format(new Date(), "yyyy-MM-dd"), start: "09:00", end: "10:00",
     location: "", link: "", description: "", attendees: [] as string[],
+    recordAndTranscribe: false,
   });
   const resetForm = () => setForm({
     title: "", date: format(new Date(), "yyyy-MM-dd"), start: "09:00", end: "10:00",
     location: "", link: "", description: "", attendees: [],
+    recordAndTranscribe: false,
   });
+  const [consentOpen, setConsentOpen] = useState(false);
+  const meetingConsentQuery = useQuery({
+    queryKey: ["meeting-consent", organizationId],
+    queryFn: () => hasMeetingConsent(organizationId!),
+    enabled: !!organizationId && REUNIOES_ENABLED,
+  });
+
+  const handleToggleRecordAndTranscribe = (checked: boolean) => {
+    if (checked && !meetingConsentQuery.data) {
+      setConsentOpen(true);
+      return;
+    }
+    setForm((f) => ({ ...f, recordAndTranscribe: checked }));
+  };
+
+  const handleConfirmConsent = async () => {
+    if (!organizationId || !user) return;
+    try {
+      await recordMeetingConsent(organizationId, user.id);
+      await queryClient.invalidateQueries({ queryKey: ["meeting-consent", organizationId] });
+      setConsentOpen(false);
+      setForm((f) => ({ ...f, recordAndTranscribe: true }));
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
 
   const create = useMutation({
     mutationFn: async () => {
       if (!form.title.trim() || !form.date) throw new Error("Preencha título e data.");
       const startsAt = new Date(`${form.date}T${form.start || "09:00"}:00`).toISOString();
       const endsAt = form.end ? new Date(`${form.date}T${form.end}:00`).toISOString() : null;
-      await createTeamEvent({
+      const recordAndTranscribe = form.recordAndTranscribe && !!form.link.trim();
+      const event = await createTeamEvent({
         organizationId: organizationId!, createdBy: user!.id,
         title: form.title.trim(), description: form.description.trim() || null,
         location: form.location.trim() || null, meetingLink: form.link.trim() || null,
         startsAt, endsAt, allDay: false, attendeeIds: form.attendees,
+        recordAndTranscribe,
       });
+      if (recordAndTranscribe) {
+        try {
+          await createMeetingFromLink({
+            organizationId: organizationId!,
+            clientId: null,
+            teamEventId: event.id,
+            meetingLink: form.link.trim(),
+            title: form.title.trim(),
+            scheduledAt: startsAt,
+          });
+        } catch (err) {
+          // Não derruba a criação do evento — a reunião fica sem bot agendado,
+          // mas o evento existe; usuário pode tentar de novo pela tela de Reuniões.
+          toast.error(
+            `Evento criado, mas não consegui agendar a transcrição: ${(err as Error).message}`,
+          );
+        }
+      }
     },
     onSuccess: () => {
       toast.success("Evento criado! Participantes avisados.");
@@ -332,6 +384,12 @@ export default function AgendaEquipe() {
         )}
       </div>
 
+      <MeetingConsentDialog
+        open={consentOpen}
+        onOpenChange={setConsentOpen}
+        onConfirm={handleConfirmConsent}
+      />
+
       {/* Diálogo: novo evento */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
@@ -350,6 +408,21 @@ export default function AgendaEquipe() {
               <div className="space-y-1.5"><Label className="text-xs">Local</Label><Input value={form.location} onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} placeholder="Sala / escritório" /></div>
               <div className="space-y-1.5"><Label className="text-xs">Link da reunião</Label><Input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="https://meet…" /></div>
             </div>
+            {REUNIOES_ENABLED && (
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <Label className="text-xs">Gravar e transcrever esta reunião</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Um bot entra na chamada e gera a ata por IA. Avise os participantes.
+                  </p>
+                </div>
+                <Switch
+                  checked={form.recordAndTranscribe}
+                  onCheckedChange={handleToggleRecordAndTranscribe}
+                  disabled={!form.link.trim()}
+                />
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label className="text-xs">Descrição</Label>
               <Textarea rows={2} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />

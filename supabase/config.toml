@@ -55,3 +55,25 @@ verify_jwt = true
 # Frase do dia no Dashboard (Gemini). Exige login.
 [functions.daily-quote]
 verify_jwt = true
+
+# Módulo "Reuniões" — transcrição + ata por IA + itens de ação.
+# meeting-transcribe e meeting-bot-start são sempre acionadas pelo usuário
+# logado (upload manual / colar link do Meet na tela de Reuniões).
+[functions.meeting-transcribe]
+verify_jwt = true
+
+[functions.meeting-bot-start]
+verify_jwt = true
+
+# meeting-summarize aceita duas origens: usuário logado (Bearer token) OU
+# chamada interna do sistema (meeting-transcribe encadeando, ou o poll do bot
+# Vexa.ai) autenticada por X-Internal-Secret, sem JWT algum — por isso
+# verify_jwt=false aqui, igual ao worker meta-publish; a autenticação real
+# acontece dentro da função (ver supabase/functions/meeting-summarize/index.ts).
+[functions.meeting-summarize]
+verify_jwt = false
+
+# Worker de poll do bot Vexa.ai: chamado só por um cron externo (sem usuário
+# logado), autenticado por X-Internal-Secret (secret MEETINGS_INTERNAL_SECRET).
+[functions.meeting-bot-poll]
+verify_jwt = false

@@ -27,6 +27,8 @@ import TimeClock from "./pages/TimeClock";
 import TeamCollaborators from "./pages/TeamCollaborators";
 import Calendario from "./pages/Calendario";
 import AgendaEquipe from "./pages/AgendaEquipe";
+import Reunioes from "./pages/Reunioes";
+import ReuniaoDetail from "./pages/ReuniaoDetail";
 import ControlDashboard from "./pages/ControlDashboard";
 import ContentKnowledge from "./pages/ContentKnowledge";
 import ContentStudio from "./pages/ContentStudio";
@@ -155,6 +157,8 @@ const App = () => (
                 <Route path="/ponto" element={<TimeClock />} />
                 <Route path="/calendario" element={<Calendario />} />
                 <Route path="/agenda-equipe" element={<AgendaEquipe />} />
+                <Route path="/reunioes" element={<Reunioes />} />
+                <Route path="/reunioes/:id" element={<ReuniaoDetail />} />
                 <Route path="/conteudo/base" element={<ContentKnowledge />} />
                 <Route path="/conteudo" element={<ContentStudio />} />
                 <Route
