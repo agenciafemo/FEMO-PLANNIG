@@ -11,6 +11,7 @@ import {
   readJson,
 } from "../_shared/http.ts";
 import { createUserClient, requiredEnv } from "../_shared/supabase.ts";
+import { parseMeetingUrl, VEXA_BASE_URL } from "../_shared/vexa.ts";
 
 // API da Vexa.ai: a "Bot Key" (escopo usado aqui) só tem permissão no
 // endpoint POST /bots (confirmado testando ao vivo em 2026-08-25 — POST
@@ -20,7 +21,6 @@ import { createUserClient, requiredEnv } from "../_shared/supabase.ts";
 // Equipe criado com antecedência), NÃO chamamos a Vexa agora — só guardamos a
 // reunião como "pending". Disparar o bot na hora certa exige um cron próprio
 // (ainda não construído) que rode meeting-bot-start perto do horário.
-const VEXA_BASE_URL = "https://api.cloud.vexa.ai";
 const SCHEDULE_TOLERANCE_MS = 2 * 60 * 1000; // até 2min no futuro = "agora"
 
 interface Body {
@@ -30,23 +30,6 @@ interface Body {
   meeting_link?: string;
   title?: string;
   scheduled_at?: string | null; // ISO-8601; omitido = entra imediatamente
-}
-
-function parseMeetingUrl(
-  url: string,
-): { platform: string; nativeMeetingId: string } | null {
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname === "meet.google.com") {
-      const nativeMeetingId = parsed.pathname.replace(/^\/+/, "").split(
-        "/",
-      )[0];
-      if (nativeMeetingId) return { platform: "google_meet", nativeMeetingId };
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 Deno.serve(async (request) => {

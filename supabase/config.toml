@@ -65,6 +65,10 @@ verify_jwt = true
 [functions.meeting-bot-start]
 verify_jwt = true
 
+# Usuário logado encerra o bot e recupera a transcrição sem depender do cron.
+[functions.meeting-bot-stop]
+verify_jwt = true
+
 # meeting-summarize aceita duas origens: usuário logado (Bearer token) OU
 # chamada interna do sistema (meeting-transcribe encadeando, ou o poll do bot
 # Vexa.ai) autenticada por X-Internal-Secret, sem JWT algum — por isso

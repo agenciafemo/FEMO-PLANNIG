@@ -11,6 +11,12 @@ import {
 } from "../_shared/http.ts";
 import { createAdminClient, requiredEnv } from "../_shared/supabase.ts";
 import { timingSafeEqual } from "../_shared/security.ts";
+import {
+  buildTranscript,
+  fetchVexaBots,
+  fetchVexaTranscript,
+  VEXA_FAILED_STATUSES,
+} from "../_shared/vexa.ts";
 
 // Chamada por um cron (pg_cron -> pg_net, mesmo mecanismo já usado no projeto
 // para o robô de notificações do calendário) a cada poucos minutos. Não tem
@@ -27,51 +33,6 @@ import { timingSafeEqual } from "../_shared/security.ts";
 // (VEXA_TRANSCRIPTION_API_KEY) — se esse secret não estiver configurado
 // ainda, a reunião fica marcada como "aguardando transcrição" em vez de
 // falhar.
-const VEXA_BASE_URL = "https://api.cloud.vexa.ai";
-const FAILED_STATUSES = new Set(["failed", "needs_help"]);
-
-interface VexaBot {
-  id: number;
-  status?: string;
-  platform?: string;
-  native_meeting_id?: string;
-  start_time?: string | null;
-  end_time?: string | null;
-}
-
-// start/end dos segmentos vêm como timestamp Unix absoluto (epoch em
-// segundos), não como offset relativo ao início da reunião — confirmado em
-// produção em 2026-08-25 (um valor tipo 1787682771 é 2026, não "29min").
-interface TranscriptSegment {
-  speaker?: string;
-  text?: string;
-  start?: number;
-  end?: number;
-}
-
-async function fetchVexaBots(vexaKey: string): Promise<VexaBot[]> {
-  const response = await fetch(`${VEXA_BASE_URL}/bots`, {
-    headers: { "X-API-Key": vexaKey },
-  });
-  if (!response.ok) return [];
-  const payload = await response.json().catch(() => ({}));
-  return Array.isArray(payload?.meetings) ? payload.meetings : [];
-}
-
-async function fetchVexaTranscript(
-  transcriptionKey: string,
-  platform: string,
-  nativeMeetingId: string,
-): Promise<TranscriptSegment[]> {
-  const response = await fetch(
-    `${VEXA_BASE_URL}/transcripts/${platform}/${nativeMeetingId}`,
-    { headers: { "X-API-Key": transcriptionKey } },
-  );
-  if (!response.ok) return [];
-  const payload = await response.json().catch(() => ({}));
-  return Array.isArray(payload?.segments) ? payload.segments : [];
-}
-
 Deno.serve(async (request) => {
   const headers = corsHeaders(request);
   try {
@@ -110,15 +71,13 @@ Deno.serve(async (request) => {
 
     for (const meeting of pendingResult.data ?? []) {
       const vexaMeetingId = meeting.vexa_bot_id as string;
-      const vexaMeeting = bots.find((bot) =>
-        String(bot.id) === vexaMeetingId
-      );
+      const vexaMeeting = bots.find((bot) => String(bot.id) === vexaMeetingId);
       if (!vexaMeeting) {
         results.push({ meeting_id: meeting.id, outcome: "vexa_bot_not_found" });
         continue;
       }
 
-      if (FAILED_STATUSES.has(vexaMeeting.status ?? "")) {
+      if (VEXA_FAILED_STATUSES.has(vexaMeeting.status ?? "")) {
         await supabase.from("meetings").update({
           status: "failed",
           failure_reason: `vexa_${vexaMeeting.status}`,
@@ -161,36 +120,11 @@ Deno.serve(async (request) => {
         platform,
         nativeMeetingId,
       );
-      const transcriptText = segments.map((segment) => segment.text ?? "")
-        .filter(Boolean).join("\n").trim();
-      if (!transcriptText) {
+      const built = buildTranscript(vexaMeeting, segments);
+      if (!built) {
         results.push({ meeting_id: meeting.id, outcome: "empty_transcript" });
         continue;
       }
-      // start/end dos segmentos são epoch absoluto — normaliza para
-      // milissegundos relativos ao início da reunião (start_time do bot).
-      const meetingStartMs = vexaMeeting.start_time
-        ? Date.parse(vexaMeeting.start_time)
-        : NaN;
-      const toRelativeMs = (epochSeconds: number | undefined): number => {
-        if (typeof epochSeconds !== "number" || Number.isNaN(meetingStartMs)) {
-          return 0;
-        }
-        return Math.max(0, Math.round(epochSeconds * 1000 - meetingStartMs));
-      };
-      const transcriptRaw = segments.map((segment) => ({
-        speaker: segment.speaker ?? "desconhecido",
-        text: segment.text ?? "",
-        start_ms: toRelativeMs(segment.start),
-        end_ms: toRelativeMs(segment.end),
-      }));
-      const durationSeconds =
-        vexaMeeting.start_time && vexaMeeting.end_time
-          ? Math.round(
-            (Date.parse(vexaMeeting.end_time) -
-              Date.parse(vexaMeeting.start_time)) / 1000,
-          )
-          : null;
 
       // Sai do status "recording" ANTES de chamar meeting-summarize: se não
       // fizer isso e a chamada abaixo falhar/for cortada, a próxima rodada do
@@ -198,16 +132,17 @@ Deno.serve(async (request) => {
       // e reprocessaria a transcrição e o Gemini à toa a cada ciclo.
       await supabase.from("meetings").update({
         status: "summarizing",
-        transcript_text: transcriptText,
-        transcript_raw: transcriptRaw,
-        duration_seconds: durationSeconds,
+        transcript_text: built.transcriptText,
+        transcript_raw: built.transcriptRaw,
+        duration_seconds: built.durationSeconds,
       }).eq("id", meeting.id);
 
       // Aguarda a resposta (não fire-and-forget): numa Edge Function, nada
       // garante que um fetch disparado sem await sobreviva ao retorno desta
       // resposta — a instância pode ser encerrada antes dele completar.
-      const summarizeUrl =
-        `${requiredEnv("SUPABASE_URL")}/functions/v1/meeting-summarize`;
+      const summarizeUrl = `${
+        requiredEnv("SUPABASE_URL")
+      }/functions/v1/meeting-summarize`;
       const summarizeResponse = await fetch(summarizeUrl, {
         method: "POST",
         headers: {
