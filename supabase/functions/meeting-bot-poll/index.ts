@@ -35,8 +35,13 @@ interface VexaBot {
   status?: string;
   platform?: string;
   native_meeting_id?: string;
+  start_time?: string | null;
+  end_time?: string | null;
 }
 
+// start/end dos segmentos vêm como timestamp Unix absoluto (epoch em
+// segundos), não como offset relativo ao início da reunião — confirmado em
+// produção em 2026-08-25 (um valor tipo 1787682771 é 2026, não "29min").
 interface TranscriptSegment {
   speaker?: string;
   text?: string;
@@ -162,15 +167,30 @@ Deno.serve(async (request) => {
         results.push({ meeting_id: meeting.id, outcome: "empty_transcript" });
         continue;
       }
+      // start/end dos segmentos são epoch absoluto — normaliza para
+      // milissegundos relativos ao início da reunião (start_time do bot).
+      const meetingStartMs = vexaMeeting.start_time
+        ? Date.parse(vexaMeeting.start_time)
+        : NaN;
+      const toRelativeMs = (epochSeconds: number | undefined): number => {
+        if (typeof epochSeconds !== "number" || Number.isNaN(meetingStartMs)) {
+          return 0;
+        }
+        return Math.max(0, Math.round(epochSeconds * 1000 - meetingStartMs));
+      };
       const transcriptRaw = segments.map((segment) => ({
         speaker: segment.speaker ?? "desconhecido",
         text: segment.text ?? "",
-        start_ms: Math.round((segment.start ?? 0) * 1000),
-        end_ms: Math.round((segment.end ?? 0) * 1000),
+        start_ms: toRelativeMs(segment.start),
+        end_ms: toRelativeMs(segment.end),
       }));
-      const durationSeconds = transcriptRaw.length > 0
-        ? Math.round((transcriptRaw[transcriptRaw.length - 1].end_ms) / 1000)
-        : null;
+      const durationSeconds =
+        vexaMeeting.start_time && vexaMeeting.end_time
+          ? Math.round(
+            (Date.parse(vexaMeeting.end_time) -
+              Date.parse(vexaMeeting.start_time)) / 1000,
+          )
+          : null;
 
       // Sai do status "recording" ANTES de chamar meeting-summarize: se não
       // fizer isso e a chamada abaixo falhar/for cortada, a próxima rodada do
