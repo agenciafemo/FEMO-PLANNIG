@@ -5,6 +5,7 @@ import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
 import { buildProductionItems, buildStepRows, loadPipelines, loadRoleMap } from "@/lib/productionPipeline";
 import { supabase } from "@/integrations/supabase/client";
 import { insertPosts } from "@/lib/postsInsert";
+import { countPlanningPosts, deletePlanningCascade } from "@/lib/deletePlanning";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,9 @@ export default function Plannings() {
   // Quais clientes estão abertos. Guardado entre visitas para a pessoa voltar
   // à tela com os mesmos clientes expandidos.
   const [gruposAbertos, setGruposAbertos] = usePersistedState<string[]>("plannings-grupos-abertos", []);
+  // Quantas pecas somem junto — a confirmacao precisa dizer o tamanho do
+  // estrago antes, nao depois.
+  const [pecasParaExcluir, setPecasParaExcluir] = useState<number | null>(null);
   const [selectedClient, setSelectedClient] = useState(clientId || "");
   const [month, setMonth] = useState(String(new Date().getMonth() + 1));
   const [year, setYear] = useState(String(new Date().getFullYear()));
@@ -359,12 +363,9 @@ export default function Plannings() {
   });
 
   const deletePlanning = useMutation({
-    mutationFn: async (planningId: string) => {
-      const { error: postsError } = await supabase.from("posts").delete().eq("planning_id", planningId);
-      if (postsError) throw postsError;
-      const { error } = await supabase.from("plannings").delete().eq("id", planningId);
-      if (error) throw error;
-    },
+    // Uma operacao so: o CASCADE do banco leva os posts junto. Ver
+    // deletePlanningCascade para o porque de nao apagar os posts a mao.
+    mutationFn: (planningId: string) => deletePlanningCascade(planningId),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["plannings"] }); toast.success("Planejamento excluído"); },
     onError: (e: any) => toast.error(e.message),
   });
@@ -580,7 +581,17 @@ export default function Plannings() {
                         </Button>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" title="Excluir planejamento">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Excluir planejamento"
+                              onClick={() => {
+                                // Conta ao abrir: assim a confirmacao ja mostra
+                                // quantas pecas estao em jogo.
+                                setPecasParaExcluir(null);
+                                countPlanningPosts(p.id).then(setPecasParaExcluir).catch(() => setPecasParaExcluir(null));
+                              }}
+                            >
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
                           </AlertDialogTrigger>
@@ -588,7 +599,11 @@ export default function Plannings() {
                             <AlertDialogHeader>
                               <AlertDialogTitle>Excluir planejamento?</AlertDialogTitle>
                               <AlertDialogDescription>
-                                Todos os posts, comentários e sugestões deste planejamento serão excluídos permanentemente.
+                                {pecasParaExcluir === null
+                                  ? "Verificando o que será excluído…"
+                                  : pecasParaExcluir === 0
+                                    ? "Este planejamento não tem nenhuma peça. Ele será excluído permanentemente."
+                                    : `${pecasParaExcluir} ${pecasParaExcluir === 1 ? "peça será excluída" : "peças serão excluídas"} junto com o planejamento, incluindo legendas, comentários e sugestões. Não há como desfazer.`}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
