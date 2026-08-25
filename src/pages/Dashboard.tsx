@@ -13,13 +13,14 @@ import {
   Sparkles,
   LayoutGrid,
   ListTodo,
+  Video,
   Workflow,
   Lock,
   Star,
   Users,
   Users2,
 } from "lucide-react";
-import { PROGRAMACAO_ENABLED, RELATORIOS_ENABLED } from "@/lib/featureFlags";
+import { PROGRAMACAO_ENABLED, RELATORIOS_ENABLED, REUNIOES_ENABLED } from "@/lib/featureFlags";
 import { MetaReconnectAlert } from "@/components/client/MetaReconnectAlert";
 import { ClientAttentionAlert } from "@/components/client/ClientAttentionAlert";
 
@@ -50,6 +51,9 @@ const MODULES: ModuleCard[] = [
   { title: "Ponto", subtitle: "Registro de horário", icon: Clock3, to: "/ponto", isNew: true },
   { title: "Calendário", subtitle: "Datas e campanhas", icon: CalendarDays, to: "/calendario", isNew: true },
   { title: "Agenda da Equipe", subtitle: "Eventos e reuniões", icon: CalendarDays, to: "/agenda-equipe", isNew: true },
+  ...(REUNIOES_ENABLED
+    ? [{ title: "Reuniões", subtitle: "Transcrição e ata com IA", icon: Video, to: "/reunioes", isNew: true }]
+    : []),
   { title: "Estúdio de Conteúdo", subtitle: "Copies e roteiros com IA", icon: Sparkles, to: "/conteudo", isNew: true },
   { title: "Dashboard de Controle", subtitle: "Visão geral da operação", icon: ChartNoAxesCombined, to: "/dashboard-controle", isNew: true, managerOnly: true },
   { title: "Programação", subtitle: "Agendar e publicar", icon: CalendarClock, isNew: true, ...(PROGRAMACAO_ENABLED ? { to: "/programacao" } : { soon: true }) },
