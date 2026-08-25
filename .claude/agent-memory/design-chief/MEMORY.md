@@ -1,0 +1,2 @@
+- [Transcritor de reuniões (proposta)](project_transcritor_reunioes.md) — módulo "Reuniões" via Calendário + sininho; NÃO fazer sala de vídeo própria; Meet bloqueia bots desde 03/2026
+- [Padrões de UX do Norteia](project_norteia_padroes_ux.md) — grid→detalhe, IA sob demanda, sininho best-effort, kanban de Tarefas; seguir ao propor módulo novo

@@ -53,6 +53,17 @@ type ClientRow = {
   traffic_only?: boolean | null;
 };
 
+/**
+ * Sinaliza que o mes escolhido ja tem planejamento. Nao e falha: e o caminho
+ * previsto, e a tela responde com as duas saidas em vez de um toast de erro.
+ */
+class PlanejamentoJaExisteError extends Error {
+  constructor() {
+    super("ja_existe");
+    this.name = "PlanejamentoJaExisteError";
+  }
+}
+
 const STATUS_FILTERS: { key: StatusFilter; label: string; color: string }[] = [
   { key: "all", label: "Todos", color: "" },
   { key: "draft", label: "📝 Rascunho", color: "bg-muted text-muted-foreground" },
@@ -76,6 +87,9 @@ export default function Plannings() {
   // Quantas pecas somem junto — a confirmacao precisa dizer o tamanho do
   // estrago antes, nao depois.
   const [pecasParaExcluir, setPecasParaExcluir] = useState<number | null>(null);
+  // Planejamento que ja existe para o mes escolhido. Enquanto estiver aqui, a
+  // criacao fica bloqueada e a tela oferece as duas saidas.
+  const [jaExiste, setJaExiste] = useState<PlanningRow | null>(null);
   const [selectedClient, setSelectedClient] = useState(clientId || "");
   const [month, setMonth] = useState(String(new Date().getMonth() + 1));
   const [year, setYear] = useState(String(new Date().getFullYear()));
@@ -133,7 +147,27 @@ export default function Plannings() {
 
   const createPlanning = useMutation({
     mutationFn: async () => {
-      const payload: Record<string, unknown> = { client_id: selectedClient, created_by: user!.id, month: parseInt(month), year: parseInt(year) };
+      const mesNum = parseInt(month);
+      const anoNum = parseInt(year);
+
+      // Um cliente so pode ter UM planejamento por mes. A checagem aqui e o
+      // que permite avisar com jeito, em vez de deixar o banco recusar com
+      // erro cru — e cobre tambem o caso de a restricao de unicidade nao
+      // existir no banco, que foi o que gerou planejamentos duplicados.
+      const { data: existente } = await supabase
+        .from("plannings")
+        .select("id, client_id, month, year, status, clients(name, accent_color)")
+        .eq("client_id", selectedClient)
+        .eq("month", mesNum)
+        .eq("year", anoNum)
+        .maybeSingle();
+
+      if (existente) {
+        setJaExiste(existente as unknown as PlanningRow);
+        throw new PlanejamentoJaExisteError();
+      }
+
+      const payload: Record<string, unknown> = { client_id: selectedClient, created_by: user!.id, month: mesNum, year: anoNum };
       if (!isLegacy) payload.organization_id = organizationId!;
 
       const { data: planning, error } = await supabase
@@ -141,6 +175,9 @@ export default function Plannings() {
         .insert(payload as any)
         .select()
         .single();
+      // 23505 = violacao de unicidade. Rede de seguranca para a corrida entre
+      // duas pessoas criando o mesmo mes ao mesmo tempo.
+      if (error?.code === "23505") throw new PlanejamentoJaExisteError();
       if (error) throw error;
 
       let pos = 0;
@@ -261,7 +298,12 @@ export default function Plannings() {
       setOpen(false);
       toast.success("Planejamento criado! Tarefa gerada no quadro do responsável.");
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => {
+      // O duplicado ja abre o dialogo com as saidas; um toast por cima seria
+      // ruido em cima de algo que a tela ja esta explicando.
+      if (e instanceof PlanejamentoJaExisteError) return;
+      toast.error((e as Error).message);
+    },
   });
 
   // Os planejamentos vinham numa lista corrida com todos os clientes
@@ -435,11 +477,53 @@ export default function Plannings() {
                 ))}
               </div>
               <Button type="submit" className="w-full" disabled={createPlanning.isPending || !selectedClient}>
-                {createPlanning.isPending ? "Criando..." : "Criar Planejamento"}
+                {createPlanning.isPending ? "Verificando..." : "Criar Planejamento"}
               </Button>
             </form>
           </DialogContent>
         </Dialog>
+
+        {/* Mes ja tem planejamento. Duas saidas, porque as duas sao legitimas:
+            quem se enganou de mes quer voltar e corrigir; quem esqueceu que ja
+            existe quer ir ate ele. Criar um segundo nao e opcao — foi o que
+            gerou os planejamentos duplicados. */}
+        <AlertDialog open={!!jaExiste} onOpenChange={(v) => { if (!v) setJaExiste(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Este mês já tem planejamento</AlertDialogTitle>
+              <AlertDialogDescription>
+                {jaExiste && (
+                  <>
+                    <span className="font-medium text-foreground">
+                      {jaExiste.clients?.name ?? "Este cliente"}
+                    </span>{" "}
+                    já tem um planejamento de{" "}
+                    <span className="font-medium text-foreground">
+                      {MONTHS[jaExiste.month - 1]} de {jaExiste.year}
+                    </span>.
+                    Cada cliente tem um planejamento por mês — abra o que existe
+                    para editar, ou escolha outro mês.
+                  </>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setJaExiste(null)}>
+                Escolher outro mês
+              </AlertDialogCancel>
+              {jaExiste && (
+                <AlertDialogAction asChild>
+                  <Link
+                    to={`/plannings/${slugify(jaExiste.clients?.name ?? "")}/${MONTH_SLUGS[jaExiste.month - 1]}-${jaExiste.year}`}
+                    onClick={() => { setJaExiste(null); setOpen(false); }}
+                  >
+                    Abrir o planejamento
+                  </Link>
+                </AlertDialogAction>
+              )}
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       {/* Status filter */}
