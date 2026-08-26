@@ -171,10 +171,17 @@ export default function ReuniaoDetail() {
   };
 
   if (meetingQuery.isLoading) {
-    return <div className="p-6 text-sm text-muted-foreground">Carregando...</div>;
+    return <div className="p-4 sm:p-6 text-sm text-muted-foreground">Carregando reunião...</div>;
   }
   if (meetingQuery.isError || !meetingQuery.data) {
-    return <div className="p-6 text-sm text-destructive">Reunião não encontrada.</div>;
+    return (
+      <div className="p-4 sm:p-6 space-y-3">
+        <p className="text-sm text-destructive">Não foi possível carregar esta reunião.</p>
+        <Button type="button" variant="outline" className="min-h-11" onClick={() => meetingQuery.refetch()}>
+          Tentar novamente
+        </Button>
+      </div>
+    );
   }
 
   const meeting = meetingQuery.data;
@@ -184,24 +191,24 @@ export default function ReuniaoDetail() {
   const inProgress = !["transcribed", "ready", "failed"].includes(meeting.status);
 
   return (
-    <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-4">
-      <Link to="/reunioes" className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1 w-fit">
+    <div className="p-3 sm:p-4 md:p-6 max-w-6xl mx-auto space-y-4">
+      <Link to="/reunioes" className="min-h-11 text-sm text-muted-foreground hover:text-foreground flex items-center gap-1 w-fit">
         <ArrowLeft className="h-4 w-4" /> Reuniões
       </Link>
 
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold">{meeting.title}</h1>
-          <p className="text-sm text-muted-foreground">
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold break-words">{meeting.title}</h1>
+          <p className="text-sm text-muted-foreground break-words">
             {format(new Date(meeting.occurred_at), "dd 'de' MMMM 'de' yyyy, HH:mm", { locale: ptBR })}
             {meeting.duration_seconds ? ` · ${Math.round(meeting.duration_seconds / 60)} min` : ""}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
           {meeting.source === "bot" && meeting.status === "recording" && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="destructive" size="sm" disabled={stopping}>
+                <Button type="button" variant="destructive" size="sm" className="min-h-11 w-full sm:w-auto" disabled={stopping} aria-busy={stopping}>
                   {stopping ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
@@ -210,18 +217,18 @@ export default function ReuniaoDetail() {
                   {stopping ? "Finalizando..." : "Finalizar gravação"}
                 </Button>
               </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
+              <AlertDialogContent className="w-[calc(100%-1rem)] max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:max-w-lg sm:p-6">
+                <AlertDialogHeader className="pr-8">
                   <AlertDialogTitle>Finalizar esta gravação?</AlertDialogTitle>
                   <AlertDialogDescription>
                     O bot sairá da reunião e o Norteia buscará a transcrição. A ata
                     por IA você gera depois, quando quiser. Essa ação não pode ser desfeita.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Continuar gravando</AlertDialogCancel>
+                <AlertDialogFooter className="gap-2 sm:gap-0">
+                  <AlertDialogCancel className="mt-0 min-h-11 w-full sm:w-auto">Continuar gravando</AlertDialogCancel>
                   <AlertDialogAction
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    className="min-h-11 w-full bg-destructive text-destructive-foreground hover:bg-destructive/90 sm:w-auto"
                     onClick={handleStopRecording}
                   >
                     Finalizar gravação
@@ -232,10 +239,13 @@ export default function ReuniaoDetail() {
           )}
           {(meeting.status === "transcribed" || meeting.status === "ready") && (
             <Button
+              type="button"
               size="sm"
+              className="min-h-11 w-full sm:w-auto"
               variant={meeting.status === "ready" ? "outline" : "default"}
               onClick={handleGenerateMinutes}
               disabled={generating}
+              aria-busy={generating}
             >
               {generating ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -249,7 +259,7 @@ export default function ReuniaoDetail() {
                 : "Gerar ata com IA"}
             </Button>
           )}
-          <Badge variant={meeting.status === "failed" ? "destructive" : "secondary"}>
+          <Badge className="self-start sm:self-auto" variant={meeting.status === "failed" ? "destructive" : "secondary"}>
             {STATUS_LABEL[meeting.status] ?? meeting.status}
           </Badge>
         </div>
@@ -257,8 +267,8 @@ export default function ReuniaoDetail() {
 
       {inProgress && (
         <Card>
-          <CardContent className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
+          <CardContent className="p-4 flex items-start gap-2 text-sm text-muted-foreground" aria-live="polite">
+            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
             {stopping && "Finalizando a gravação e recuperando a transcrição..."}
             {!stopping && meeting.status === "pending" && "Aguardando início..."}
             {!stopping && meeting.status === "recording" &&
@@ -327,7 +337,7 @@ export default function ReuniaoDetail() {
                   {meeting.action_items.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between gap-2 rounded-lg border p-3"
+                      className="flex flex-col items-stretch gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         {item.task_id ? (
@@ -335,17 +345,17 @@ export default function ReuniaoDetail() {
                         ) : (
                           <Circle className="h-4 w-4 text-muted-foreground shrink-0" />
                         )}
-                        <span className="text-sm truncate">{item.title}</span>
+                        <span className="text-sm break-words">{item.title}</span>
                       </div>
                       {item.task_id ? (
                         <Link
                           to="/tasks"
-                          className="text-xs text-muted-foreground hover:text-foreground shrink-0"
+                          className="inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground shrink-0"
                         >
                           ver tarefa
                         </Link>
                       ) : (
-                        <Button size="sm" variant="outline" onClick={() => openTaskDialog(item)}>
+                        <Button type="button" size="sm" className="min-h-11 w-full sm:w-auto" variant="outline" onClick={() => openTaskDialog(item)}>
                           Criar tarefa
                         </Button>
                       )}
@@ -381,19 +391,19 @@ export default function ReuniaoDetail() {
       </div>
 
       <Dialog open={!!taskDraft} onOpenChange={(open) => !open && setTaskDraft(null)}>
-        <DialogContent>
-          <DialogHeader>
+        <DialogContent className="w-[calc(100%-1rem)] max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:max-w-lg sm:p-6">
+          <DialogHeader className="pr-8">
             <DialogTitle>Criar tarefa</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Título</Label>
-              <Input value={taskDraft?.title ?? ""} disabled />
+              <Input className="min-h-11" value={taskDraft?.title ?? ""} disabled />
             </div>
             <div className="space-y-2">
               <Label>Responsável</Label>
               <Select value={assigneeId} onValueChange={setAssigneeId}>
-                <SelectTrigger>
+                <SelectTrigger className="min-h-11">
                   <SelectValue placeholder="Selecione" />
                 </SelectTrigger>
                 <SelectContent>
@@ -407,9 +417,9 @@ export default function ReuniaoDetail() {
             </div>
             <div className="space-y-2">
               <Label>Prazo</Label>
-              <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+              <Input className="min-h-11" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </div>
-            <Button className="w-full" onClick={handleCreateTask} disabled={creating || !assigneeId || !dueDate}>
+            <Button type="button" className="min-h-11 w-full" onClick={handleCreateTask} disabled={creating || !assigneeId || !dueDate} aria-busy={creating}>
               {creating && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
               Criar tarefa
             </Button>
