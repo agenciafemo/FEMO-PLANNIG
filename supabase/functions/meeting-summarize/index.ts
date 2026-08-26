@@ -248,15 +248,26 @@ Deno.serve(async (request) => {
     const raw = await askGemini(transcript.slice(0, MAX_TRANSCRIPT_CHARS));
     const summary = validateSummary(raw);
 
-    await supabase.from("meeting_action_items").delete().eq(
-      "meeting_id",
-      meetingId,
-    );
+    // Preserva o que ja virou tarefa. Antes a ata so podia ser gerada uma vez,
+    // entao apagar tudo era inofensivo; agora que da para gerar de novo, um
+    // delete cego destruiria o item que alguem ja converteu — a tarefa em si
+    // sobreviveria (task_id e ON DELETE SET NULL na direcao oposta), mas o
+    // vinculo com a reuniao sumiria em silencio.
+    await supabase.from("meeting_action_items").delete()
+      .eq("meeting_id", meetingId)
+      .is("task_id", null);
+
+    const preservados = await supabase.from("meeting_action_items")
+      .select("id", { count: "exact", head: true })
+      .eq("meeting_id", meetingId);
+    const deslocamento = preservados.count ?? 0;
+
     if (summary.itens_acao.length > 0) {
       const rows = summary.itens_acao.map((item, index) => ({
         meeting_id: meetingId,
         title: item.titulo,
-        position: index,
+        // Os preservados ficam no topo; os novos entram depois deles.
+        position: deslocamento + index,
       }));
       const insertResult = await supabase.from("meeting_action_items").insert(
         rows,
@@ -294,8 +305,13 @@ Deno.serve(async (request) => {
     const isProcessingFailure = !isHttpError || error.status >= 500;
     if (supabase && meetingId && isProcessingFailure) {
       const reasonCode = isHttpError ? error.reasonCode : "internal_error";
+      // Volta para 'transcribed', NAO para 'failed': a transcricao continua
+      // salva e integra, e so a ata — que e derivada dela — nao saiu. Marcar
+      // 'failed' aqui descartaria o trabalho que deu certo e tiraria da tela o
+      // botao que permite tentar de novo. O motivo fica em failure_reason para
+      // a tela mostrar, mesmo com a reuniao num estado saudavel.
       await supabase.from("meetings").update({
-        status: "failed",
+        status: "transcribed",
         failure_reason: reasonCode,
       }).eq("id", meetingId).then(() => {}, () => {});
       const meetingResult = await supabase.from("meetings").select(

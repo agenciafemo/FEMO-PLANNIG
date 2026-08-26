@@ -125,37 +125,21 @@ Deno.serve(async (request) => {
       : [];
     const durationSeconds = Number(dgPayload?.metadata?.duration) || null;
 
+    // Para em 'transcribed'. A ata por IA deixou de ser encadeada: virou ação
+    // do usuário, no botão "Gerar ata com IA". Assim um upload transcrito com
+    // sucesso não é mais descartado como falha só porque o Gemini não
+    // respondeu — a transcrição é o ativo, a ata é derivada dela.
     const { error: updateError } = await supabase.from("meetings").update({
+      status: "transcribed",
+      failure_reason: null,
       transcript_text: transcriptText.trim(),
       transcript_raw: utterances,
       duration_seconds: durationSeconds,
     }).eq("id", meetingId);
     if (updateError) throw new HttpError(502, "meeting_save_failed");
 
-    const summarizeUrl = `${requiredEnv("SUPABASE_URL")}/functions/v1/meeting-summarize`;
-    const summarizeResponse = await fetch(summarizeUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ meeting_id: meetingId }),
-    });
-    const summarizePayload = await summarizeResponse.json().catch(() => ({}));
-    if (!summarizeResponse.ok) {
-      // meeting-summarize já grava seu próprio status "failed" + notificação
-      // antes de responder com erro. O prefixo "summarize_call_failed:" é só
-      // pra o catch abaixo reconhecer isso sem precisar adivinhar por qual
-      // reason_code — evita colisão com os reason_codes desta própria função
-      // (ex.: "meeting_save_failed" existe nas duas functions).
-      throw new HttpError(
-        502,
-        `summarize_call_failed:${summarizePayload?.reason_code ?? "unknown"}`,
-      );
-    }
-
     return jsonResponse(
-      { ok: true, transcript_text: transcriptText, summary: summarizePayload.summary },
+      { ok: true, status: "transcribed", transcript_text: transcriptText },
       200,
       headers,
     );
@@ -163,17 +147,16 @@ Deno.serve(async (request) => {
     if (supabase && meetingId) {
       const isHttpError = error instanceof HttpError;
       const reasonCode = isHttpError ? error.reasonCode : "internal_error";
-      // Só pula regravar o status/notificação quando o erro veio de dentro
-      // do meeting-summarize (prefixo explícito acima) — ele já cuidou disso.
-      const alreadyHandledBySummarize = reasonCode.startsWith(
-        "summarize_call_failed:",
-      );
       // 4xx (401/403/404/409/400) acontecem antes de qualquer processamento
       // começar — não há "transcrição em andamento" para marcar como falha,
       // e o usuário nem tem permissão de ver essa reunião necessariamente.
       // Só 5xx (ou erro inesperado sem HttpError) é falha real de processamento.
+      //
+      // Não existe mais o caso "o erro veio de dentro do meeting-summarize":
+      // esta função não o chama mais, então todo erro que chega aqui é falha
+      // de transcrição de verdade — e aí 'failed' é o status correto.
       const isProcessingFailure = !isHttpError || error.status >= 500;
-      if (!alreadyHandledBySummarize && isProcessingFailure) {
+      if (isProcessingFailure) {
         await supabase.from("meetings").update({
           status: "failed",
           failure_reason: reasonCode,

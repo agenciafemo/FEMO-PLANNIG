@@ -44,3 +44,27 @@ export async function invokeEdge<T = unknown>(
     headers: { ...(options.headers ?? {}), Authorization: `Bearer ${accessToken}` },
   });
 }
+
+/**
+ * Extrai o `reason_code` do corpo de um erro de Edge Function.
+ *
+ * O `functions.invoke` do supabase-js não lê o corpo da resposta quando o
+ * status não é 2xx: ele devolve um FunctionsHttpError cujo `message` é sempre
+ * o genérico "Edge Function returned a non-2xx status code". O motivo real que
+ * a função escreveu vive em `error.context`, que é a Response crua — e só
+ * chega à UI se alguém a abrir. Sem isto, todo erro vira "algo deu errado".
+ *
+ * Devolve `null` quando não há corpo legível (erro de rede, HTML de proxy),
+ * para quem chama poder cair numa mensagem genérica sem quebrar.
+ */
+export async function edgeReasonCode(error: unknown): Promise<string | null> {
+  const context = (error as { context?: unknown })?.context;
+  if (!context || typeof (context as Response).json !== "function") return null;
+  try {
+    const body = await (context as Response).clone().json();
+    const code = (body as { reason_code?: unknown })?.reason_code;
+    return typeof code === "string" && code ? code : null;
+  } catch {
+    return null;
+  }
+}
