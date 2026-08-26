@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   createTaskFromActionItem,
+  descreverMotivoAta,
+  generateMeetingMinutes,
   getMeeting,
   listOrgMembers,
   MeetingActionItem,
@@ -38,7 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, CheckCircle2, Circle, Loader2, Square } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Circle, Loader2, Sparkles, Square } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -48,6 +50,7 @@ const STATUS_LABEL: Record<string, string> = {
   recording: "Gravando",
   transcribing: "Transcrevendo",
   summarizing: "Gerando ata",
+  transcribed: "Transcrita",
   ready: "Pronta",
   failed: "Falhou",
 };
@@ -63,6 +66,7 @@ export default function ReuniaoDetail() {
   );
   const [creating, setCreating] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   const meetingQuery = useQuery({
     queryKey: ["meeting", id],
@@ -70,7 +74,11 @@ export default function ReuniaoDetail() {
     enabled: !!id,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return status === "ready" || status === "failed" ? false : 4_000;
+      // 'transcribed' encerra o polling junto com 'ready'/'failed': nada mais
+      // acontece sozinho a partir dali — a ata espera o clique do usuário.
+      const parado = status === "transcribed" || status === "ready" ||
+        status === "failed";
+      return parado ? false : 4_000;
     },
   });
 
@@ -115,16 +123,14 @@ export default function ReuniaoDetail() {
     setStopping(true);
     try {
       const status = await stopMeetingRecording(id);
-      if (status === "ready") {
-        toast.success("Gravação finalizada e ata gerada.");
+      if (status === "transcribed") {
+        toast.success("Gravação finalizada e transcrita.");
       } else if (status === "transcript_pending" || status === "stopping") {
         toast.info(
           "O bot saiu da reunião. A Vexa ainda está finalizando a transcrição; tente novamente em alguns segundos.",
         );
       } else if (status === "failed") {
-        toast.error("A gravação terminou, mas não foi possível gerar a ata.");
-      } else {
-        toast.info("Gravação finalizada. Gerando a ata...");
+        toast.error("A gravação terminou, mas a transcrição não veio.");
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["meeting", id] }),
@@ -139,6 +145,31 @@ export default function ReuniaoDetail() {
     }
   };
 
+  const handleGenerateMinutes = async () => {
+    if (!id || generating) return;
+    setGenerating(true);
+    try {
+      await generateMeetingMinutes(id);
+      toast.success("Ata gerada.");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["meeting", id] }),
+        queryClient.invalidateQueries({ queryKey: ["meetings"] }),
+      ]);
+    } catch (error) {
+      // A mensagem já vem pronta e em português de generateMeetingMinutes,
+      // com o código técnico entre parênteses. Repassar é melhor que trocar
+      // por um genérico: é o que torna o relato do usuário acionável.
+      toast.error(
+        error instanceof Error ? error.message : "Não foi possível gerar a ata.",
+      );
+      // Mesmo falhando, o status pode ter mudado (o servidor devolve a reunião
+      // para "Transcrita" e grava o motivo) — recarrega para a tela refletir.
+      await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   if (meetingQuery.isLoading) {
     return <div className="p-6 text-sm text-muted-foreground">Carregando...</div>;
   }
@@ -147,7 +178,10 @@ export default function ReuniaoDetail() {
   }
 
   const meeting = meetingQuery.data;
-  const inProgress = !["ready", "failed"].includes(meeting.status);
+  // 'transcribed' fica de fora: e um estado de repouso, nao um processamento
+  // em curso. Mostrar o spinner ali sugeriria que algo ainda vai acontecer
+  // sozinho — e nao vai: a ata agora espera o clique do usuario.
+  const inProgress = !["transcribed", "ready", "failed"].includes(meeting.status);
 
   return (
     <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-4">
@@ -180,8 +214,8 @@ export default function ReuniaoDetail() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Finalizar esta gravação?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    O bot sairá da reunião e o Norteia buscará a transcrição para gerar a ata.
-                    Essa ação não pode ser desfeita.
+                    O bot sairá da reunião e o Norteia buscará a transcrição. A ata
+                    por IA você gera depois, quando quiser. Essa ação não pode ser desfeita.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -195,6 +229,25 @@ export default function ReuniaoDetail() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+          )}
+          {(meeting.status === "transcribed" || meeting.status === "ready") && (
+            <Button
+              size="sm"
+              variant={meeting.status === "ready" ? "outline" : "default"}
+              onClick={handleGenerateMinutes}
+              disabled={generating}
+            >
+              {generating ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="mr-2 h-4 w-4" />
+              )}
+              {generating
+                ? "Gerando ata..."
+                : meeting.status === "ready"
+                ? "Gerar ata novamente"
+                : "Gerar ata com IA"}
+            </Button>
           )}
           <Badge variant={meeting.status === "failed" ? "destructive" : "secondary"}>
             {STATUS_LABEL[meeting.status] ?? meeting.status}
@@ -212,6 +265,22 @@ export default function ReuniaoDetail() {
               "Gravando a reunião. Ao terminar, use o botão “Finalizar gravação”."}
             {!stopping && meeting.status === "transcribing" && "Transcrevendo o áudio..."}
             {!stopping && meeting.status === "summarizing" && "Gerando a ata com IA..."}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Ata que nao saiu NAO e falha da reuniao: a transcricao continua ali.
+          Por isso o tom e de aviso, nao de erro — e o texto diz o que se
+          perdeu (so a ata) e o que fazer (o botao continua na tela). */}
+      {meeting.status === "transcribed" && meeting.failure_reason && (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="p-4 text-sm">
+            <p className="font-medium">A ata não pôde ser gerada.</p>
+            <p className="mt-0.5 text-muted-foreground">
+              {descreverMotivoAta(meeting.failure_reason)} A transcrição está
+              salva — use “Gerar ata com IA” para tentar de novo.{" "}
+              <span className="opacity-70">({meeting.failure_reason})</span>
+            </p>
           </CardContent>
         </Card>
       )}

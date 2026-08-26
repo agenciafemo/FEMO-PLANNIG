@@ -11,6 +11,7 @@ const STATUS_LABEL: Record<string, string> = {
   recording: "Gravando",
   transcribing: "Transcrevendo",
   summarizing: "Gerando ata",
+  transcribed: "Transcrita",
   ready: "Pronta",
   failed: "Falhou",
 };

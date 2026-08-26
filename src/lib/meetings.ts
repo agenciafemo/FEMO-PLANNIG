@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import { invokeEdge } from "@/lib/edgeInvoke";
+import { edgeReasonCode, invokeEdge } from "@/lib/edgeInvoke";
 
 // Tabelas de "Reuniões" ainda não estão no types.ts gerado (migration nova) —
 // mesmo padrão de cast usado em src/lib/teamCalendar.ts até rodar
@@ -12,6 +12,9 @@ export type MeetingStatus =
   | "recording"
   | "transcribing"
   | "summarizing"
+  /** Transcrição pronta, ata ainda não gerada. É repouso, não erro: a ata
+   *  virou ação do usuário, e é aqui que toda reunião para por padrão. */
+  | "transcribed"
   | "ready"
   | "failed";
 
@@ -184,9 +187,8 @@ export async function createMeetingFromLink(input: {
 }
 
 export type StopMeetingRecordingStatus =
-  | "ready"
+  | "transcribed"
   | "transcript_pending"
-  | "summarizing"
   | "failed"
   | "stopping";
 
@@ -199,6 +201,47 @@ export async function stopMeetingRecording(
   );
   if (error) throw new Error(error.message);
   return (data?.status ?? "stopping") as StopMeetingRecordingStatus;
+}
+
+/** Motivos que o meeting-summarize sabe distinguir, em português. O código
+ *  técnico continua aparecendo entre parênteses — é o que torna um relato de
+ *  erro do usuário acionável sem precisar abrir os logs. */
+const MOTIVO_ATA: Record<string, string> = {
+  gemini_request_failed: "A IA não respondeu.",
+  gemini_empty_response: "A IA respondeu vazio.",
+  gemini_invalid_json: "A IA respondeu num formato inesperado.",
+  gemini_invalid_response: "A IA respondeu num formato inesperado.",
+  missing_transcript: "Esta reunião não tem transcrição para resumir.",
+  meeting_summarize_forbidden: "Você não tem permissão para gerar a ata desta reunião.",
+  action_items_save_failed: "A ata saiu, mas os itens de ação não puderam ser salvos.",
+  meeting_save_failed: "A ata saiu, mas não pôde ser salva.",
+  meeting_not_found: "Reunião não encontrada.",
+};
+
+/** Frase em português para um `failure_reason` de ata. Usada tanto no toast
+ *  quanto no aviso da tela, para as duas contarem a mesma história. */
+export function descreverMotivoAta(code: string | null | undefined): string {
+  if (!code) return "Não foi possível gerar a ata.";
+  return MOTIVO_ATA[code] ?? "Não foi possível gerar a ata.";
+}
+
+/**
+ * Gera (ou refaz) a ata por IA de uma reunião já transcrita.
+ *
+ * Deixou de ser encadeada na transcrição de propósito: o Gemini é o passo mais
+ * frágil da cadeia, e enquanto ele fazia parte dela uma ata que não saía
+ * derrubava a reunião inteira para "Falhou" — mesmo com a transcrição salva.
+ */
+export async function generateMeetingMinutes(meetingId: string): Promise<void> {
+  const { error } = await invokeEdge("meeting-summarize", {
+    body: { meeting_id: meetingId },
+  });
+  if (!error) return;
+
+  const code = await edgeReasonCode(error);
+  if (!code) throw new Error(error.message);
+  const frase = MOTIVO_ATA[code] ?? "Não foi possível gerar a ata.";
+  throw new Error(`${frase} (${code})`);
 }
 
 export async function createTaskFromActionItem(input: {

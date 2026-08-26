@@ -126,35 +126,25 @@ Deno.serve(async (request) => {
         continue;
       }
 
-      // Sai do status "recording" ANTES de chamar meeting-summarize: se não
-      // fizer isso e a chamada abaixo falhar/for cortada, a próxima rodada do
-      // cron pegaria esta mesma reunião de novo (filtro é status='recording')
-      // e reprocessaria a transcrição e o Gemini à toa a cada ciclo.
-      await supabase.from("meetings").update({
-        status: "summarizing",
+      // Sai do status "recording" assim que a transcricao esta salva: o filtro
+      // do cron e status='recording', entao deixar a reuniao nesse estado faria
+      // a proxima rodada pegar a mesma reuniao e reprocessar tudo de novo.
+      //
+      // Para em 'transcribed'. A ata por IA deixou de ser encadeada aqui — ela
+      // virou acao do usuario, no botao "Gerar ata com IA". O cron nao precisa
+      // mais carregar a parte fragil (Gemini) da cadeia, e uma ata que nao sai
+      // nao derruba mais a transcricao junto.
+      const saveResult = await supabase.from("meetings").update({
+        status: "transcribed",
+        failure_reason: null,
         transcript_text: built.transcriptText,
         transcript_raw: built.transcriptRaw,
         duration_seconds: built.durationSeconds,
       }).eq("id", meeting.id);
 
-      // Aguarda a resposta (não fire-and-forget): numa Edge Function, nada
-      // garante que um fetch disparado sem await sobreviva ao retorno desta
-      // resposta — a instância pode ser encerrada antes dele completar.
-      const summarizeUrl = `${
-        requiredEnv("SUPABASE_URL")
-      }/functions/v1/meeting-summarize`;
-      const summarizeResponse = await fetch(summarizeUrl, {
-        method: "POST",
-        headers: {
-          "X-Internal-Secret": internalSecret,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ meeting_id: meeting.id }),
-      }).catch(() => null);
-
       results.push({
         meeting_id: meeting.id,
-        outcome: summarizeResponse?.ok ? "summarized" : "summarize_call_failed",
+        outcome: saveResult.error ? "meeting_save_failed" : "transcribed",
       });
     }
 

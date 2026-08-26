@@ -40,6 +40,9 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   recording: { label: "◐ Gravando", className: "text-blue-600 dark:text-blue-400" },
   transcribing: { label: "◐ Transcrevendo", className: "text-blue-600 dark:text-blue-400" },
   summarizing: { label: "◐ Gerando ata", className: "text-blue-600 dark:text-blue-400" },
+  // Marcador cheio, nao "◐": transcrita e um estado de repouso, nao um passo
+  // em andamento. O tom neutro separa "esperando voce" de "esperando o app".
+  transcribed: { label: "● Transcrita", className: "text-muted-foreground" },
   ready: { label: "● Pronta", className: "text-emerald-600 dark:text-emerald-400" },
   failed: { label: "⚠ Falhou", className: "text-destructive" },
 };

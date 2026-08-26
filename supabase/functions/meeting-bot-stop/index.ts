@@ -178,8 +178,15 @@ Deno.serve(async (request) => {
       );
     }
 
+    // Para aqui, em 'transcribed'. A ata por IA deixou de ser encadeada: ela
+    // e uma acao do usuario, no botao "Gerar ata com IA".
+    //
+    // Antes, esta funcao chamava meeting-summarize logo em seguida e, se o
+    // Gemini nao respondesse, marcava a reuniao inteira como 'failed' — mesmo
+    // com a transcricao salva e integra. A transcricao e o ativo; a ata e
+    // derivada dela e pode ser refeita a qualquer momento.
     const saveResult = await supabase.from("meetings").update({
-      status: "summarizing",
+      status: "transcribed",
       failure_reason: null,
       transcript_text: built.transcriptText,
       transcript_raw: built.transcriptRaw,
@@ -189,34 +196,8 @@ Deno.serve(async (request) => {
       throw new HttpError(502, "meeting_save_failed");
     }
 
-    const summarizeUrl = `${
-      requiredEnv("SUPABASE_URL")
-    }/functions/v1/meeting-summarize`;
-    const summarizeResponse = await fetch(summarizeUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ meeting_id: meetingId }),
-    }).catch(() =>
-      null
-    );
-
-    if (!summarizeResponse?.ok) {
-      await supabase.from("meetings").update({
-        status: "failed",
-        failure_reason: "summarize_call_failed",
-      }).eq("id", meetingId).then(() => {}, () => {});
-      throw new HttpError(
-        502,
-        "summarize_call_failed",
-        summarizeResponse?.status,
-      );
-    }
-
     return jsonResponse(
-      { ok: true, status: "ready", meeting_id: meetingId },
+      { ok: true, status: "transcribed", meeting_id: meetingId },
       200,
       headers,
     );
