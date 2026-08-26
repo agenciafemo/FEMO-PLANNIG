@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, X } from "lucide-react";
+import { CheckCircle2, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { submitPlanningNps } from "@/lib/publicRpc";
 import {
   isNpsSuppressed,
@@ -33,11 +34,22 @@ export function NpsDialog({ token, planningId }: NpsDialogProps) {
   );
   const submittingRef = useRef(false);
 
+  // No celular a pesquisa começa recolhida numa faixa fina. Aberta, ela é o
+  // ÚNICO elemento fixo do portal — ocupa a largura toda do rodapé e, com o
+  // campo do detrator, chega a meia tela. Tudo que ficasse atrás dela virava
+  // intocável, e é isso que fazia "os botões não funcionarem no mobile".
+  // No desktop nada muda: lá ela é um card estreito no canto, que não cobre
+  // o conteúdo.
+  const isMobile = useIsMobile();
+  const [aberta, setAberta] = useState(false);
+  const recolhida = isMobile && !aberta;
+
   useEffect(() => {
     setState("idle");
     setScore(null);
     setReason("");
     setSuppressed(isNpsSuppressed(planningId));
+    setAberta(false);
     submittingRef.current = false;
   }, [planningId]);
 
@@ -109,17 +121,49 @@ export function NpsDialog({ token, planningId }: NpsDialogProps) {
     );
   }
 
+  // Faixa recolhida: alta o bastante para o dedo, baixa o bastante para não
+  // roubar a tela. Convida, mas não atrapalha quem veio aprovar conteúdo.
+  if (recolhida) {
+    return (
+      <aside
+        className="fixed bottom-3 left-3 right-3 z-50 flex items-center gap-2 rounded-full border border-border bg-card py-2 pl-4 pr-2 text-card-foreground shadow-lg"
+        aria-label="Pesquisa de satisfação do planejamento"
+      >
+        <Star className="h-4 w-4 shrink-0 text-primary" />
+        <button
+          type="button"
+          onClick={() => setAberta(true)}
+          className="min-w-0 flex-1 text-left text-xs font-medium leading-5"
+        >
+          Como está sendo sua experiência?{" "}
+          <span className="text-primary underline">Avaliar</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleDismiss}
+          className="shrink-0 rounded-full p-1.5 text-muted-foreground"
+          aria-label="Fechar pesquisa por agora"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside
       className="fixed bottom-4 left-4 right-4 z-50 ml-auto max-h-[calc(100vh-2rem)] max-w-sm overflow-y-auto rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-xl sm:left-auto"
       aria-label="Pesquisa de satisfação do planejamento"
     >
+      {/* No celular o X recolhe de volta para a faixa, em vez de sumir com a
+          pesquisa: quem abriu sem querer não perde a chance de responder, e a
+          faixa tem o próprio X para dispensar de vez. No desktop, dispensa. */}
       <button
         type="button"
-        onClick={handleDismiss}
+        onClick={() => (isMobile ? setAberta(false) : handleDismiss())}
         disabled={state === "submitting"}
         className="absolute right-3 top-3 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-        aria-label="Fechar pesquisa por agora"
+        aria-label={isMobile ? "Recolher pesquisa" : "Fechar pesquisa por agora"}
       >
         <X className="h-4 w-4" />
       </button>
