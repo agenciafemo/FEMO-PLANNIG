@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { MULTI_ORG_ENABLED } from "@/lib/featureFlags";
@@ -60,12 +60,19 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
   const [organizationId, setOrganizationId] = useState<string | null>(LEGACY_MEMBERSHIP.organizationId);
   const [isLegacy, setIsLegacy] = useState(true);
   const [loading, setLoading] = useState(true);
+  // Segunda linha de defesa contra o app "recarregar" ao voltar para a aba.
+  // Os guards em App.tsx devolvem `null` enquanto loading é true, e `null`
+  // DESMONTA a árvore inteira — todo estado local de formulário morre junto.
+  // Isso é aceitável na primeira carga (não há nada na tela ainda), mas nunca
+  // numa revalidação: ali a tela já existe e precisa continuar de pé.
+  const jaCarregouUmaVez = useRef(false);
 
   const load = useCallback(async () => {
     if (!user) {
       setMemberships([]);
       setOrganizationId(null);
       setLoading(false);
+      jaCarregouUmaVez.current = true;
       return;
     }
 
@@ -76,10 +83,12 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       setMemberships([LEGACY_MEMBERSHIP]);
       setOrganizationId(LEGACY_MEMBERSHIP.organizationId);
       setLoading(false);
+      jaCarregouUmaVez.current = true;
       return;
     }
 
-    setLoading(true);
+    // Só a primeira carga apaga a tela. Depois disso, recarrega por baixo.
+    if (!jaCarregouUmaVez.current) setLoading(true);
 
     try {
       const [{ data: memberRows, error: membersError }, { data: profile, error: profileError }] = await Promise.all([
@@ -117,6 +126,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       setOrganizationId(LEGACY_MEMBERSHIP.organizationId);
     } finally {
       setLoading(false);
+      jaCarregouUmaVez.current = true;
     }
   }, [user]);
 
