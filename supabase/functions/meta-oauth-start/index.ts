@@ -77,6 +77,11 @@ Deno.serve(async (request) => {
       expiresAt: new Date(Date.now() + config.stateTtlSeconds * 1000)
         .toISOString(),
       requestId,
+      // Sem isto o state grava 'facebook' mesmo tendo mandado o usuario para a
+      // porta do Instagram, e o callback (que decide a troca de token por este
+      // campo) tenta trocar o codigo contra o graph.facebook.com — falhando
+      // depois de o cliente ja ter autorizado.
+      provider,
     });
 
     // The opaque state travels only inside the OAuth URL; persistence uses its SHA-256 hash above.
