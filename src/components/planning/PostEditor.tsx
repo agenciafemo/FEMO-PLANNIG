@@ -763,6 +763,12 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
             </div>
           )}
 
+          <FrameioReviewPanel
+            organizationId={organizationId}
+            userId={user?.id ?? null}
+            postId={postId}
+            videoUrl={videoUrl}
+          />
 
           {/* Blog Body */}
           {contentType === "blog" && (
@@ -877,12 +883,6 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
               <p className="text-sm text-muted-foreground">{clientNotes}</p>
             </div>
           )}
-
-          <FrameioReviewPanel
-            organizationId={organizationId}
-            userId={user?.id ?? null}
-            postId={postId}
-          />
 
           {/* Comments Section */}
           <div className="space-y-3 rounded-lg border p-4">

@@ -1,7 +1,7 @@
 # Frame.io V4 → Norteia via Zapier
 
-Esta integração recebe comentários do Frame.io V4 e os relaciona às peças do
-quadro de Produção pelo `file_id`.
+Esta integração recebe comentários e mudanças do campo Status do Frame.io V4,
+relacionando-os às peças do quadro de Produção pelo `file_id`.
 
 ## Segurança
 
@@ -73,12 +73,66 @@ Resposta esperada no teste:
 `linked: false` não é erro: significa que o comentário foi preservado, mas o
 `file_id` ainda não foi vinculado a uma peça no editor do planejamento.
 
+## Zap 2 — status de revisão
+
+O Frame.io V4 disponibiliza no Zapier o gatilho `Metadata Value Updated`. Ele
+prioriza mudanças do campo Status, incluindo valores como `Approved` e
+`In Review`. Crie um segundo Zap; um Zap não aceita dois gatilhos.
+
+Gatilho:
+
+- Aplicativo: `Frame.io V4`
+- Evento: `Metadata Value Updated`
+- Conta e Workspace: os mesmos do Zap de comentários
+
+Ação:
+
+- Aplicativo: `Webhooks by Zapier`
+- Evento: `POST`
+- URL e header: exatamente os mesmos do Zap de comentários
+- Payload: JSON
+
+Campos do body:
+
+| Campo enviado | Origem no Frame.io V4 |
+| --- | --- |
+| `event_type` | valor fixo `metadata.value.updated` |
+| `file_id` | ID do arquivo afetado |
+| `metadata_field_name` | valor fixo `Status` |
+| `status` | novo valor do metadado (`Approved`, `In Review`, etc.) |
+| `status_changed_at` | data/hora de atualização entregue pelo gatilho |
+
+O receptor normaliza os estados conhecidos para `approved`, `in_review`,
+`changes_requested` e `not_set`. Valores personalizados são preservados como
+texto sanitizado. Eventos antigos não sobrescrevem um estado mais recente.
+
+Se a mudança chegar antes de o arquivo ser vinculado, o snapshot fica em
+`frameio_file_states` e é aplicado automaticamente no primeiro vínculo.
+
+Resposta esperada:
+
+```json
+{
+  "ok": true,
+  "duplicate": false,
+  "linked": true,
+  "status": "approved",
+  "request_id": "..."
+}
+```
+
+Na interface, um link `next.frame.io/.../view/{file_id}` já informado como
+vídeo é detectado e pré-preenche o vínculo. O selo é atualizado em até 15
+segundos enquanto o editor estiver aberto.
+
 ## Ordem de entrada em produção
 
 1. Aplicar a migration `20260827173712_frameio_zapier_integration.sql`.
-2. Configurar `FRAMEIO_ZAPIER_CONNECTIONS` nos Secrets do projeto correto.
-3. Publicar `frameio-zapier-webhook` com o import map do repositório.
-4. Testar a Ação do Zap com um comentário de teste.
-5. Vincular o `file_id` à peça no editor do planejamento.
-6. Publicar o Zap somente após o teste retornar `ok: true`.
+2. Aplicar a migration `20260827195912_frameio_review_status.sql`.
+3. Configurar `FRAMEIO_ZAPIER_CONNECTIONS` nos Secrets do projeto correto.
+4. Publicar `frameio-zapier-webhook` com o import map do repositório.
+5. Testar a Ação do Zap com um comentário de teste.
+6. Vincular o `file_id` à peça no editor do planejamento.
+7. Publicar o Zap de comentários somente após o teste retornar `ok: true`.
+8. Criar e testar o Zap de status; confirme `status` na resposta.
 
