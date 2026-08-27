@@ -20,7 +20,7 @@ interface ConnectionConfig {
   enabled?: boolean;
 }
 
-interface ZapierCommentBody {
+interface ZapierBody {
   event_type?: unknown;
   comment_id?: unknown;
   file_id?: unknown;
@@ -31,6 +31,9 @@ interface ZapierCommentBody {
   completed_at?: unknown;
   created_at?: unknown;
   updated_at?: unknown;
+  metadata_field_name?: unknown;
+  status?: unknown;
+  status_changed_at?: unknown;
 }
 
 function cleanText(
@@ -104,7 +107,7 @@ function organizationForToken(token: string): string | null {
   return null;
 }
 
-async function readBody(request: Request): Promise<ZapierCommentBody> {
+async function readBody(request: Request): Promise<ZapierBody> {
   const declaredLength = Number(request.headers.get("content-length") ?? 0);
   if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
     throw new HttpError(413, "payload_too_large");
@@ -118,10 +121,41 @@ async function readBody(request: Request): Promise<ZapierCommentBody> {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error("not_an_object");
     }
-    return parsed as ZapierCommentBody;
+    return parsed as ZapierBody;
   } catch {
     throw new HttpError(400, "invalid_json");
   }
+}
+
+function normalizedLookup(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function normalizeReviewStatus(value: string): string {
+  const lookup = normalizedLookup(value);
+  if (["approved", "aprovado"].includes(lookup)) return "approved";
+  if (["in review", "em revisao", "review"].includes(lookup)) {
+    return "in_review";
+  }
+  if (
+    [
+      "changes requested",
+      "changes required",
+      "needs changes",
+      "needs revision",
+      "rejected",
+      "alteracoes solicitadas",
+      "ajustes solicitados",
+      "reprovado",
+    ].includes(lookup)
+  ) {
+    return "changes_requested";
+  }
+  if (["none", "no status", "not set", "sem status"].includes(lookup)) {
+    return "not_set";
+  }
+  return value.trim();
 }
 
 Deno.serve(async (request) => {
@@ -145,8 +179,105 @@ Deno.serve(async (request) => {
 
     const body = await readBody(request);
     const eventType = cleanText(body.event_type, "event_type", 120, true);
-    if (eventType !== "comment.created") {
+    if (!["comment.created", "metadata.value.updated"].includes(eventType!)) {
       throw new HttpError(422, "unsupported_event_type");
+    }
+
+    const admin = createAdminClient();
+
+    if (eventType === "metadata.value.updated") {
+      const fileId = cleanText(body.file_id, "file_id", 200, true)!;
+      const suppliedStatus = cleanText(body.status, "status", 120, true)!;
+      const statusChangedAt = optionalTimestamp(
+        body.status_changed_at,
+        "status_changed_at",
+      );
+      if (!statusChangedAt) {
+        throw new HttpError(400, "missing_status_changed_at");
+      }
+
+      const fieldName = cleanText(
+        body.metadata_field_name,
+        "metadata_field_name",
+        200,
+      );
+      if (
+        fieldName && !["status", "estado"].includes(normalizedLookup(fieldName))
+      ) {
+        throw new HttpError(422, "unsupported_metadata_field");
+      }
+
+      const normalizedStatus = normalizeReviewStatus(suppliedStatus);
+      const eventKey =
+        `${eventType}:${fileId}:${normalizedStatus}:${statusChangedAt}`;
+      const eventInsert = await admin.from("frameio_webhook_events").insert({
+        organization_id: organizationId,
+        event_key: eventKey,
+        event_type: eventType,
+        file_id: fileId,
+        processing_status: "received",
+      }).select("id").maybeSingle();
+
+      if (eventInsert.error?.code === "23505") {
+        return jsonResponse(
+          { ok: true, duplicate: true, request_id: requestId },
+          200,
+          headers,
+        );
+      }
+      if (eventInsert.error || !eventInsert.data) {
+        throw new HttpError(500, "event_registration_failed");
+      }
+
+      const statusResult = await admin.rpc("apply_frameio_file_status", {
+        _organization_id: organizationId,
+        _file_id: fileId,
+        _frameio_status: normalizedStatus,
+        _external_updated_at: statusChangedAt,
+      });
+      if (statusResult.error) {
+        await admin.from("frameio_webhook_events").update({
+          processing_status: "failed",
+          reason_code: "status_update_failed",
+          processed_at: new Date().toISOString(),
+        }).eq("id", eventInsert.data.id).select("id");
+        throw new HttpError(500, "status_update_failed");
+      }
+
+      const linkResult = await admin.from("frameio_asset_links").select("id")
+        .eq("organization_id", organizationId)
+        .eq("file_id", fileId)
+        .maybeSingle();
+      if (linkResult.error) {
+        throw new HttpError(500, "asset_link_lookup_failed");
+      }
+
+      const eventUpdate = await admin.from("frameio_webhook_events").update({
+        processing_status: "processed",
+        reason_code: linkResult.data ? null : "asset_not_linked",
+        processed_at: new Date().toISOString(),
+      }).eq("id", eventInsert.data.id).select("id");
+      if (eventUpdate.error || !eventUpdate.data?.length) {
+        throw new HttpError(500, "event_completion_failed");
+      }
+
+      safeLog("frameio_status_received", {
+        function_name: FUNCTION_NAME,
+        request_id: requestId,
+        step: linkResult.data ? "linked" : "unlinked",
+      });
+
+      return jsonResponse(
+        {
+          ok: true,
+          duplicate: false,
+          linked: Boolean(linkResult.data),
+          status: normalizedStatus,
+          request_id: requestId,
+        },
+        200,
+        headers,
+      );
     }
 
     const commentId = cleanText(body.comment_id, "comment_id", 200, true)!;
@@ -167,7 +298,6 @@ Deno.serve(async (request) => {
     const updatedAt = optionalTimestamp(body.updated_at, "updated_at");
     const eventKey = `${eventType}:${commentId}`;
 
-    const admin = createAdminClient();
     const eventInsert = await admin.from("frameio_webhook_events").insert({
       organization_id: organizationId,
       event_key: eventKey,

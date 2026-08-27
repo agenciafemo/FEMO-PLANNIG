@@ -1,11 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Loader2, MessageSquareText, Unlink } from "lucide-react";
+import { ExternalLink, Link2, Loader2, MessageSquareText, Unlink } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { frameioFileIdFromUrl, frameioReviewStatus } from "@/lib/frameio";
 
 // As tabelas entram pela migration desta feature e ainda não existem nos tipos
 // gerados. O cast fica restrito a este adaptador até a próxima geração de tipos.
@@ -35,6 +37,7 @@ interface FrameioReviewPanelProps {
   organizationId: string | null;
   userId: string | null;
   postId: string;
+  videoUrl?: string;
 }
 
 function frameTime(seconds: number | null): string | null {
@@ -61,11 +64,13 @@ export function FrameioReviewPanel({
   organizationId,
   userId,
   postId,
+  videoUrl,
 }: FrameioReviewPanelProps) {
   const queryClient = useQueryClient();
   const [fileId, setFileId] = useState("");
   const [fileName, setFileName] = useState("");
   const [fileUrl, setFileUrl] = useState("");
+  const detectedFileId = useMemo(() => frameioFileIdFromUrl(videoUrl), [videoUrl]);
 
   const { data: productionItem, isLoading: itemLoading } = useQuery({
     queryKey: ["frameio-production-item", organizationId, postId],
@@ -96,7 +101,14 @@ export function FrameioReviewPanel({
       return (data ?? []) as AssetLink[];
     },
     enabled: Boolean(organizationId && itemId),
+    refetchInterval: 15_000,
   });
+
+  useEffect(() => {
+    if (!detectedFileId || links.length > 0 || fileId) return;
+    setFileId(detectedFileId);
+    setFileUrl(videoUrl ?? "");
+  }, [detectedFileId, fileId, links.length, videoUrl]);
 
   const fileIds = useMemo(() => links.map((link) => link.file_id), [links]);
   const { data: comments = [] } = useQuery<FrameioComment[]>({
@@ -114,6 +126,7 @@ export function FrameioReviewPanel({
       return (data ?? []) as FrameioComment[];
     },
     enabled: Boolean(organizationId && fileIds.length > 0),
+    refetchInterval: 15_000,
   });
 
   const addLink = useMutation({
@@ -177,7 +190,7 @@ export function FrameioReviewPanel({
         <div>
           <p className="text-sm font-semibold">Revisão no Frame.io</p>
           <p className="text-xs text-muted-foreground">
-            Vincule o arquivo uma vez. Novos comentários recebidos pelo Zapier aparecerão aqui.
+            Acompanhe o estado da revisão. Os comentários ficam como histórico de feedback.
           </p>
         </div>
       </div>
@@ -192,6 +205,16 @@ export function FrameioReviewPanel({
         </p>
       ) : (
         <>
+          {detectedFileId && links.length === 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-sky-500/25 bg-sky-500/10 p-3 text-sm">
+              <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+              <p>
+                Link do Frame.io detectado no vídeo. O ID já foi preenchido; clique em
+                <strong> Vincular</strong> para acompanhar a revisão.
+              </p>
+            </div>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor={`frameio-file-id-${postId}`}>ID do arquivo</Label>
@@ -241,9 +264,14 @@ export function FrameioReviewPanel({
                   className="flex flex-col gap-2 rounded-md border bg-background/70 p-3 sm:flex-row sm:items-center"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">
-                      {link.file_name || "Arquivo do Frame.io"}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-medium">
+                        {link.file_name || "Arquivo do Frame.io"}
+                      </p>
+                      <Badge variant="outline" className={frameioReviewStatus(link.frameio_status).className}>
+                        {frameioReviewStatus(link.frameio_status).label}
+                      </Badge>
+                    </div>
                     <p className="truncate text-xs text-muted-foreground">{link.file_id}</p>
                   </div>
                   <div className="flex gap-2">
@@ -272,7 +300,7 @@ export function FrameioReviewPanel({
           {links.length > 0 && (
             <div className="space-y-2 border-t pt-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Comentários recebidos ({comments.length})
+                Feedback recebido ({comments.length})
               </p>
               {comments.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
