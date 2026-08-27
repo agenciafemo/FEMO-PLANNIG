@@ -81,3 +81,9 @@ verify_jwt = false
 # logado), autenticado por X-Internal-Secret (secret MEETINGS_INTERNAL_SECRET).
 [functions.meeting-bot-poll]
 verify_jwt = false
+
+# Chamado pelo Zapier, que não possui JWT de usuário do Supabase. A função
+# autentica cada organização pelo segredo x-norteia-webhook-secret e nunca
+# aceita organization_id enviado no body.
+[functions.frameio-zapier-webhook]
+verify_jwt = false

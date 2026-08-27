@@ -30,6 +30,7 @@ import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, Exter
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
+import { FrameioReviewPanel } from "@/components/planning/FrameioReviewPanel";
 
 const MONTHS_SHORT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const DRAFT_DEBOUNCE_MS = 500;
@@ -876,6 +877,12 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
               <p className="text-sm text-muted-foreground">{clientNotes}</p>
             </div>
           )}
+
+          <FrameioReviewPanel
+            organizationId={organizationId}
+            userId={user?.id ?? null}
+            postId={postId}
+          />
 
           {/* Comments Section */}
           <div className="space-y-3 rounded-lg border p-4">
