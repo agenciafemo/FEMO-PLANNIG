@@ -36,6 +36,7 @@ import { useOrganization } from "@/hooks/useOrganization";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
+import { GoogleCalendarConnection } from "@/components/calendar/GoogleCalendarConnection";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -62,6 +63,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import {
+  getGoogleCalendarStatus,
+  googleCalendarErrorMessage,
+  GoogleCalendarFunctionError,
+  syncGoogleCalendar,
+} from "@/lib/googleCalendar";
 
 type ClientOption = { id: string; name: string; segment?: string | null };
 
@@ -533,7 +540,7 @@ async function createCalendarEvent(input: {
   clientId: string;
   userId: string;
   draft: EventDraft;
-}): Promise<void> {
+}): Promise<string> {
   const { organizationId, clientId, userId, draft } = input;
   const modernPayload = {
     organization_id: organizationId,
@@ -548,8 +555,11 @@ async function createCalendarEvent(input: {
     end_time: draft.allDay ? null : draft.endTime || null,
     created_by: userId,
   };
-  const modern = await calendarDb.from<EventRow>("calendar_events").insert(modernPayload);
-  if (!modern.error) return;
+  const modern = await calendarDb.from<EventRow>("calendar_events").insert(modernPayload).select("id");
+  if (!modern.error) {
+    if (modern.data?.[0]?.id) return modern.data[0].id;
+    throw new Error("O evento foi criado, mas não foi possível identificá-lo.");
+  }
   if (!needsLegacyEventPayload(modern.error)) throw modern.error;
 
   const legacy = await calendarDb.from<EventRow>("calendar_events").insert({
@@ -563,15 +573,17 @@ async function createCalendarEvent(input: {
     all_day: true,
     color: draft.color,
     created_by: userId,
-  });
+  }).select("id");
   if (legacy.error) throw legacy.error;
+  if (!legacy.data?.[0]?.id) throw new Error("O evento foi criado, mas não foi possível identificá-lo.");
+  return legacy.data[0].id;
 }
 
 async function updateCalendarEvent(input: {
   organizationId: string;
   eventId: string;
   draft: EventDraft;
-}): Promise<void> {
+}): Promise<string> {
   const { organizationId, eventId, draft } = input;
   const modern = await calendarDb.from<EventRow>("calendar_events")
     .update({
@@ -586,7 +598,7 @@ async function updateCalendarEvent(input: {
     })
     .eq("id", eventId)
     .eq("organization_id", organizationId);
-  if (!modern.error) return;
+  if (!modern.error) return eventId;
   if (!needsLegacyEventPayload(modern.error)) throw modern.error;
 
   const legacy = await calendarDb.from<EventRow>("calendar_events")
@@ -600,6 +612,7 @@ async function updateCalendarEvent(input: {
     .eq("id", eventId)
     .eq("organization_id", organizationId);
   if (legacy.error) throw legacy.error;
+  return eventId;
 }
 
 async function deleteCalendarEvent(organizationId: string, eventId: string): Promise<void> {
@@ -669,6 +682,13 @@ export default function Calendario() {
     enabled: !!organizationId && !!selectedClientId,
   });
 
+  const googleCalendarQuery = useQuery({
+    queryKey: ["google-calendar-connection", organizationId],
+    queryFn: () => getGoogleCalendarStatus(organizationId!),
+    enabled: !!organizationId,
+    retry: false,
+  });
+
   const assigneesQuery = useQuery({
     queryKey: ["calendar-task-assignees", organizationId],
     queryFn: () => getAssignees(organizationId!),
@@ -734,15 +754,26 @@ export default function Calendario() {
       if (!draft.title.trim()) throw new Error("Informe o título do evento.");
       if (!draft.date) throw new Error("Informe a data do evento.");
 
-      if (draft.id) {
-        await updateCalendarEvent({ organizationId, eventId: draft.id, draft });
-      } else {
-        await createCalendarEvent({ organizationId, clientId: selectedClientId, userId: user.id, draft });
+      const eventId = draft.id
+        ? await updateCalendarEvent({ organizationId, eventId: draft.id, draft })
+        : await createCalendarEvent({ organizationId, clientId: selectedClientId, userId: user.id, draft });
+
+      let syncWarning: string | null = null;
+      if (googleCalendarQuery.data?.connection_status === "active") {
+        try {
+          await syncGoogleCalendar({ organizationId, operation: "upsert", eventId });
+        } catch (error) {
+          syncWarning = error instanceof GoogleCalendarFunctionError
+            ? googleCalendarErrorMessage(error.reasonCode)
+            : "O evento foi salvo no Norteia, mas ainda não chegou ao Google Calendar.";
+        }
       }
+      return { eventId, syncWarning };
     },
-    onSuccess: async (_, draft) => {
+    onSuccess: async (result, draft) => {
       await refreshEvents();
       toast.success(draft.id ? "Evento atualizado." : "Evento criado.");
+      if (result.syncWarning) toast.warning(result.syncWarning);
       setEventDraft(null);
     },
     onError: (error: Error) => toast.error(error.message),
@@ -752,10 +783,22 @@ export default function Calendario() {
     mutationFn: async (eventId: string) => {
       if (!organizationId) throw new Error("Organização não identificada.");
       await deleteCalendarEvent(organizationId, eventId);
+      let syncWarning: string | null = null;
+      if (googleCalendarQuery.data?.connection_status === "active") {
+        try {
+          await syncGoogleCalendar({ organizationId, operation: "delete", eventId });
+        } catch (error) {
+          syncWarning = error instanceof GoogleCalendarFunctionError
+            ? googleCalendarErrorMessage(error.reasonCode)
+            : "O evento saiu do Norteia, mas ainda pode aparecer no Google Calendar.";
+        }
+      }
+      return { syncWarning };
     },
-    onSuccess: async () => {
+    onSuccess: async ({ syncWarning }) => {
       await refreshEvents();
       toast.success("Evento excluído.");
+      if (syncWarning) toast.warning(syncWarning);
       setConfirmDelete(false);
       setEventDraft(null);
     },
@@ -1006,6 +1049,7 @@ export default function Calendario() {
             >
               <Download className="mr-2 h-4 w-4" /> Baixar PDF
             </Button>
+            <GoogleCalendarConnection organizationId={organizationId} />
           </div>
         }
       />

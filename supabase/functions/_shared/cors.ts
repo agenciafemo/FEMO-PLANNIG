@@ -12,6 +12,7 @@ function configuredOrigins(): Set<string> {
   const values = [
     ...(Deno.env.get("META_ALLOWED_ORIGINS") ?? "").split(","),
     Deno.env.get("META_APP_RETURN_ORIGIN") ?? "",
+    Deno.env.get("GOOGLE_APP_RETURN_ORIGIN") ?? "",
   ];
   return new Set(
     values.map((value) => value.trim()).filter(Boolean).map((value) => {
