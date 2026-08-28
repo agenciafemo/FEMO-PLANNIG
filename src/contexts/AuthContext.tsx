@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import { markAgencyDevice } from "@/lib/agencyDevice";
+import { getOrCreatePortalDeviceId } from "@/lib/agencyDevice";
 
 interface AuthContextType {
   session: Session | null;
@@ -26,13 +26,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) markAgencyDevice();
       setLoading(false);
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) markAgencyDevice();
       setLoading(false);
     });
 
@@ -60,6 +58,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // preferência ao nome vindo da tabela `profiles`, então na prática o valor
   // exibido continua correto. Use `session.user` se precisar do dado cru.
   const userId = session?.user?.id ?? null;
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const registerTeamDevice = async () => {
+      const deviceId = getOrCreatePortalDeviceId();
+      // A RPC só aceita usuários que sejam membros ativos de uma organização.
+      // O cast é temporário até os tipos serem regenerados após a migration ser
+      // aplicada em staging.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase.rpc as any)("register_portal_team_device", {
+        _device_id: deviceId,
+      });
+
+      if (error) {
+        console.warn("Não foi possível registrar este navegador como dispositivo da equipe:", error);
+        return;
+      }
+
+    };
+
+    void registerTeamDevice();
+  }, [userId]);
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const user = useMemo(() => session?.user ?? null, [userId]);
 

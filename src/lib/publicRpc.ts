@@ -331,17 +331,22 @@ export async function submitPlanningNps(
 }
 
 // ----------------------------------------------------------------------------
-// Best-effort — notificação passiva de "cliente abriu o planejamento".
-// NÃO mostra sucesso ao usuário; em erro apenas registra no console. Assim,
-// nunca há "sucesso falso" (não há toast de sucesso associado a este fluxo).
+// Best-effort — auditoria de acesso ao planejamento público. A classificação
+// (equipe, dispositivo conhecido ou anônimo) é feita no banco; o frontend não
+// afirma que o visitante é o cliente.
 // ----------------------------------------------------------------------------
-export async function notifyPlanningViewed(token: string, planningId: string): Promise<void> {
+export async function registerPlanningAccess(
+  token: string,
+  planningId: string,
+  deviceId: string,
+): Promise<void> {
   try {
-    await callVoidWrite("public_notify_planning_viewed", {
+    await callWrite<string>("public_register_planning_access", {
       _token: token,
       _planning_id: planningId,
+      _device_id: deviceId,
     });
   } catch (err) {
-    console.warn("notifyPlanningViewed falhou (best-effort):", err);
+    console.warn("registerPlanningAccess falhou (best-effort):", err);
   }
 }
