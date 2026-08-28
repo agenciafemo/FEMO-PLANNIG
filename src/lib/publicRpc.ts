@@ -22,6 +22,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { isPublicPlanningStatus } from "@/lib/publicPlanningVisibility";
 
 type Tables = Database["public"]["Tables"];
 export type Planning = Tables["plannings"]["Row"];
@@ -102,8 +103,9 @@ export async function getPublicClient(token: string): Promise<PublicClient | nul
   return rows?.[0] ?? null;
 }
 
-export function getPublicPlannings(token: string): Promise<Planning[]> {
-  return callRead<Planning[]>("get_public_plannings", { _token: token });
+export async function getPublicPlannings(token: string): Promise<Planning[]> {
+  const rows = await callRead<Planning[]>("get_public_plannings", { _token: token });
+  return rows.filter((planning) => isPublicPlanningStatus(planning.status));
 }
 
 export function getPublicPosts(token: string, planningId: string): Promise<Post[]> {
