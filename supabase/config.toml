@@ -87,3 +87,18 @@ verify_jwt = false
 # aceita organization_id enviado no body.
 [functions.frameio-zapier-webhook]
 verify_jwt = false
+
+# Google Calendar (fase 1): OAuth por organização e sincronização somente
+# Norteia -> Google. O callback recebe o redirect do Google e valida state de
+# uso único no banco; as demais funções exigem a sessão do usuário.
+[functions.google-calendar-oauth-start]
+verify_jwt = true
+
+[functions.google-calendar-oauth-callback]
+verify_jwt = false
+
+[functions.google-calendar-sync]
+verify_jwt = true
+
+[functions.google-calendar-disconnect]
+verify_jwt = true
