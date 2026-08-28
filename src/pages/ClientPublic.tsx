@@ -18,6 +18,7 @@ import {
   insertVideoScriptSuggestion,
   type VideoScriptField,
 } from "@/lib/publicRpc";
+import { isPublicPlanningStatus } from "@/lib/publicPlanningVisibility";
 import { PUBLIC_AUDIO_ENABLED } from "@/lib/featureFlags";
 import { isAgencyDevice, markAgencyDevice } from "@/lib/agencyDevice";
 import { Button } from "@/components/ui/button";
@@ -136,13 +137,30 @@ export default function ClientPublic() {
     enabled: !!token,
   });
 
+  // Se a equipe devolver um planejamento para produção enquanto o portal está
+  // aberto, não conserva uma seleção antiga apontando para conteúdo oculto.
+  useEffect(() => {
+    if (!selectedPlanning || !plannings) return;
+    if (plannings.some((planning) => planning.id === selectedPlanning)) return;
+    setSelectedPlanning(null);
+    setSelectedPost(null);
+  }, [plannings, selectedPlanning]);
+
+  const selectedPlanningIsVisible = Boolean(
+    selectedPlanning
+      && plannings?.some(
+        (planning) => planning.id === selectedPlanning
+          && isPublicPlanningStatus(planning.status),
+      ),
+  );
+
   const { data: posts } = useQuery({
     queryKey: ["public-posts", selectedPlanning],
     queryFn: async () => {
       const rows = await getPublicPosts(token!, selectedPlanning!);
       return [...rows].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
     },
-    enabled: !!selectedPlanning,
+    enabled: selectedPlanningIsVisible,
   });
 
   const { data: reports } = useQuery({
@@ -170,17 +188,20 @@ export default function ClientPublic() {
       const rows = await getPublicVideoScripts(token!, selectedPlanning!);
       return [...rows].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
     },
-    enabled: !!selectedPlanning,
+    enabled: selectedPlanningIsVisible,
   });
 
   // All video scripts for all plannings (for scripts tab)
   const { data: allScripts } = useQuery({
-    queryKey: ["public-all-scripts", token],
+    queryKey: ["public-all-scripts", token, plannings?.map((planning) => planning.id).join(",")],
     queryFn: async () => {
       const rows = await getPublicAllVideoScripts(token!);
-      return [...rows].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+      const visiblePlanningIds = new Set(plannings!.map((planning) => planning.id));
+      return rows
+        .filter((script) => visiblePlanningIds.has(script.planning_id))
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
     },
-    enabled: !!token,
+    enabled: !!token && !!plannings,
   });
 
   // Report comments
