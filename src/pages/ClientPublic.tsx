@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getPublicClient,
@@ -14,13 +13,13 @@ import {
   getPublicVideoScriptSuggestions,
   insertReportComment,
   updatePlanningStatus,
-  notifyPlanningViewed,
+  registerPlanningAccess,
   insertVideoScriptSuggestion,
   type VideoScriptField,
 } from "@/lib/publicRpc";
 import { isPublicPlanningStatus } from "@/lib/publicPlanningVisibility";
 import { PUBLIC_AUDIO_ENABLED } from "@/lib/featureFlags";
-import { isAgencyDevice, markAgencyDevice } from "@/lib/agencyDevice";
+import { getOrCreatePortalDeviceId } from "@/lib/agencyDevice";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -88,25 +87,6 @@ export default function ClientPublic() {
   const [selectedPlanning, setSelectedPlanning] = useState<string | null>(null);
   const notifiedPlannings = useRef<Set<string>>(new Set());
 
-  // Se quem abre o portal é um usuário LOGADO no app (social mídia/equipe da
-  // agência conferindo algo), não conta como "cliente visualizou" — evita
-  // notificação falsa. Só visitante anônimo (o cliente de verdade) notifica.
-  // Agência = sessão ativa AGORA, ou navegador já marcado como "dispositivo da
-  // equipe" (alguém da agência já logou aqui antes). Cobre o social mídia que
-  // abre o link público sem estar logado no momento.
-  const [isAgencyViewer, setIsAgencyViewer] = useState(isAgencyDevice());
-  // Só liberamos a notificação de "cliente abriu" DEPOIS de confirmar quem é o
-  // viewer (a checagem de sessão é assíncrona). Sem isso, um clique rápido antes
-  // da checagem resolver dispara a notificação falsa mesmo sendo a equipe.
-  // Se a marca do dispositivo já existe, já começamos "confirmados".
-  const [viewerChecked, setViewerChecked] = useState(isAgencyDevice());
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) markAgencyDevice();
-      setIsAgencyViewer(!!data.session || isAgencyDevice());
-      setViewerChecked(true);
-    });
-  }, []);
   const [selectedPost, setSelectedPost] = useState<string | null>(null);
   const [selectedReport, setSelectedReport] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("plannings");
@@ -499,11 +479,16 @@ export default function ClientPublic() {
                             return (
                               <button key={p.id} onClick={() => {
                                 setSelectedPlanning(p.id);
-                                if (viewerChecked && !isAgencyViewer && !notifiedPlannings.current.has(p.id)) {
+                                if (!notifiedPlannings.current.has(p.id)) {
                                   notifiedPlannings.current.add(p.id);
-                                  // Best-effort: o wrapper trata erro internamente (console.warn),
-                                  // sem promise rejeitada solta e sem toast de sucesso falso.
-                                  void notifyPlanningViewed(token!, p.id);
+                                  // O banco classifica o acesso. Um membro logado ou navegador
+                                  // registrado da equipe não cria notificação; visitante anônimo
+                                  // gera apenas a mensagem neutra "Link público acessado".
+                                  void registerPlanningAccess(
+                                    token!,
+                                    p.id,
+                                    getOrCreatePortalDeviceId(),
+                                  );
                                 }
                               }} className={`relative flex w-full items-center justify-between rounded-xl border p-4 text-left transition-all hover:shadow-md ${isActionRequired ? "border-2" : ""}`}
                               style={{ borderColor: isActionRequired ? accentColor : accentColor + "30" }}>
