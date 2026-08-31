@@ -36,6 +36,8 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = any;
 type Member = { user_id: string; display_name: string; avatar_url: string | null };
+type ClientRow = { id: string; name: string };
+type PlanningRow = { id: string; client_id: string; month: number; year: number };
 type ViewMode = "week" | "month";
 
 const WEEKDAYS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
@@ -128,6 +130,27 @@ export default function AgendaEquipe() {
     },
     enabled: !!organizationId,
   });
+  const { data: clients = [] } = useQuery({
+    queryKey: ["calendar-clients", organizationId],
+    queryFn: async () => {
+      const { data, error } = await (supabase as AnyClient).from("clients")
+        .select("id, name").eq("organization_id", organizationId).order("name");
+      if (error) throw new Error(error.message);
+      return (data ?? []) as ClientRow[];
+    },
+    enabled: !!organizationId,
+  });
+  const { data: plannings = [] } = useQuery({
+    queryKey: ["calendar-plannings", organizationId],
+    queryFn: async () => {
+      const { data, error } = await (supabase as AnyClient).from("plannings")
+        .select("id, client_id, month, year").eq("organization_id", organizationId)
+        .order("year", { ascending: false }).order("month", { ascending: false });
+      if (error) throw new Error(error.message);
+      return (data ?? []) as PlanningRow[];
+    },
+    enabled: !!organizationId,
+  });
   const memberOf = (id: string) => members.find((m) => m.user_id === id);
   const memberName = (id: string) => memberOf(id)?.display_name ?? "Alguém";
 
@@ -155,13 +178,20 @@ export default function AgendaEquipe() {
   const [form, setForm] = useState({
     title: "", date: format(new Date(), "yyyy-MM-dd"), start: "09:00", end: "10:00",
     location: "", link: "", description: "", attendees: [] as string[],
-    recordAndTranscribe: false,
+    recordAndTranscribe: false, eventType: "event" as "event" | "meeting" | "capture",
+    clientId: "", planningId: "", isDefaultCapture: true,
   });
   const resetForm = () => setForm({
     title: "", date: format(new Date(), "yyyy-MM-dd"), start: "09:00", end: "10:00",
     location: "", link: "", description: "", attendees: [],
-    recordAndTranscribe: false,
+    recordAndTranscribe: false, eventType: "event", clientId: "", planningId: "", isDefaultCapture: true,
   });
+  const capturePlannings = plannings.filter((p) => p.client_id === form.clientId);
+  const selectedClientName = clients.find((c) => c.id === form.clientId)?.name;
+  const selectedPlanning = plannings.find((p) => p.id === form.planningId);
+  const monthLabel = selectedPlanning
+    ? format(new Date(selectedPlanning.year, selectedPlanning.month - 1, 1), "MMMM/yyyy", { locale: ptBR })
+    : "";
   const [consentOpen, setConsentOpen] = useState(false);
   const meetingConsentQuery = useQuery({
     queryKey: ["meeting-consent", organizationId],
@@ -191,16 +221,26 @@ export default function AgendaEquipe() {
 
   const create = useMutation({
     mutationFn: async () => {
-      if (!form.title.trim() || !form.date) throw new Error("Preencha título e data.");
+      if (!form.date) throw new Error("Preencha a data.");
+      if (form.eventType === "capture" && (!form.clientId || !form.planningId)) {
+        throw new Error("Selecione o cliente e o planejamento da captação.");
+      }
+      const title = form.title.trim() || (form.eventType === "capture"
+        ? `🎬 Captação · ${selectedClientName ?? "Cliente"} · ${monthLabel}`
+        : "Evento da equipe");
       const startsAt = new Date(`${form.date}T${form.start || "09:00"}:00`).toISOString();
       const endsAt = form.end ? new Date(`${form.date}T${form.end}:00`).toISOString() : null;
       const recordAndTranscribe = form.recordAndTranscribe && !!form.link.trim();
       const event = await createTeamEvent({
         organizationId: organizationId!, createdBy: user!.id,
-        title: form.title.trim(), description: form.description.trim() || null,
+        title, description: form.description.trim() || null,
         location: form.location.trim() || null, meetingLink: form.link.trim() || null,
         startsAt, endsAt, allDay: false, attendeeIds: form.attendees,
         recordAndTranscribe,
+        eventType: form.eventType,
+        clientId: form.eventType === "capture" ? form.clientId : null,
+        planningId: form.eventType === "capture" ? form.planningId : null,
+        isDefaultCapture: form.eventType === "capture" ? form.isDefaultCapture : false,
       });
       if (recordAndTranscribe) {
         try {
@@ -209,7 +249,7 @@ export default function AgendaEquipe() {
             clientId: null,
             teamEventId: event.id,
             meetingLink: form.link.trim(),
-            title: form.title.trim(),
+            title,
             scheduledAt: startsAt,
           });
         } catch (err) {
@@ -222,7 +262,9 @@ export default function AgendaEquipe() {
       }
     },
     onSuccess: () => {
-      toast.success("Evento criado! Participantes avisados.");
+      toast.success(form.eventType === "capture"
+        ? "Captação criada e aplicada aos Reels do planejamento."
+        : "Evento criado! Participantes avisados.");
       setCreateOpen(false); resetForm();
       queryClient.invalidateQueries({ queryKey: ["team-events", organizationId] });
     },
@@ -396,8 +438,46 @@ export default function AgendaEquipe() {
           <DialogHeader><DialogTitle>Novo evento / reunião</DialogTitle></DialogHeader>
           <form className="space-y-3" onSubmit={(ev) => { ev.preventDefault(); create.mutate(); }}>
             <div className="space-y-1.5">
-              <Label>Título</Label>
-              <Input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Ex.: Reunião de planejamento" />
+              <Label>Tipo</Label>
+              <Select value={form.eventType} onValueChange={(value: "event" | "meeting" | "capture") => setForm((f) => ({
+                ...f, eventType: value, clientId: value === "capture" ? f.clientId : "", planningId: value === "capture" ? f.planningId : "",
+              }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="event">Evento da equipe</SelectItem>
+                  <SelectItem value="meeting">Reunião</SelectItem>
+                  <SelectItem value="capture">Captação</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {form.eventType === "capture" && (
+              <div className="grid grid-cols-2 gap-2 rounded-lg border border-brand/30 bg-brand/5 p-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Cliente</Label>
+                  <Select value={form.clientId || "none"} onValueChange={(value) => setForm((f) => ({ ...f, clientId: value === "none" ? "" : value, planningId: "" }))}>
+                    <SelectTrigger><SelectValue placeholder="Escolha o cliente" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Escolha o cliente</SelectItem>
+                      {clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Planejamento</Label>
+                  <Select value={form.planningId || "none"} onValueChange={(value) => setForm((f) => ({ ...f, planningId: value === "none" ? "" : value }))} disabled={!form.clientId}>
+                    <SelectTrigger><SelectValue placeholder="Escolha o mês" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Escolha o mês</SelectItem>
+                      {capturePlannings.map((planning) => <SelectItem key={planning.id} value={planning.id}>{format(new Date(planning.year, planning.month - 1, 1), "MMMM/yyyy", { locale: ptBR })}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="col-span-2 text-xs text-muted-foreground">A data será sincronizada com todos os Reels deste planejamento.</p>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label>Título {form.eventType === "capture" && <span className="text-muted-foreground">(opcional)</span>}</Label>
+              <Input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder={form.eventType === "capture" ? "Gerado automaticamente" : "Ex.: Reunião de planejamento"} />
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div className="space-y-1.5"><Label className="text-xs">Data</Label><Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} /></div>
@@ -446,7 +526,7 @@ export default function AgendaEquipe() {
               </div>
             </div>
             <div className="flex justify-end pt-1">
-              <Button type="submit" disabled={create.isPending || !form.title.trim()}>
+              <Button type="submit" disabled={create.isPending || (form.eventType !== "capture" && !form.title.trim())}>
                 {create.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} Criar evento
               </Button>
             </div>
@@ -466,6 +546,11 @@ export default function AgendaEquipe() {
                   {format(parseISO(detail.starts_at), "EEEE, d 'de' MMM · HH:mm", { locale: ptBR })}
                   {detail.ends_at ? ` – ${format(parseISO(detail.ends_at), "HH:mm")}` : ""}
                 </p>
+                {detail.event_type === "capture" && detail.client_id && (
+                  <p className="text-sm text-brand">
+                    🎬 Captação de {clients.find((client) => client.id === detail.client_id)?.name ?? "cliente"}
+                  </p>
+                )}
                 {detail.location && <p className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-4 w-4" /> {detail.location}</p>}
                 {detail.meeting_link && (
                   <a href={detail.meeting_link} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-brand hover:underline">
