@@ -200,6 +200,37 @@ export async function finalizeConnection(admin: SupabaseClient, input: {
   if (error) rpcFailure("connection_finalize_failed");
 }
 
+/**
+ * Ativa uma conexao criada pelo login direto do Instagram. Diferente do fluxo
+ * Facebook, ela nao possui Pagina para selecionar e cria somente o canal IG.
+ */
+export async function finalizeInstagramConnection(
+  admin: SupabaseClient,
+  input: {
+    connectionId: string;
+    actorUserId: string;
+    instagramId: string;
+    instagramName: string;
+    instagramUsername: string | null;
+    instagramAccountType: string | null;
+    requestId: string;
+  },
+): Promise<void> {
+  const { error } = await admin.rpc(
+    "meta_server_finalize_instagram_connection",
+    {
+      _connection_id: input.connectionId,
+      _actor_user_id: input.actorUserId,
+      _instagram_account_id: input.instagramId,
+      _instagram_display_name: input.instagramName,
+      _instagram_username: input.instagramUsername,
+      _instagram_account_type: input.instagramAccountType,
+      _request_id: input.requestId,
+    },
+  );
+  if (error) rpcFailure("instagram_connection_finalize_failed");
+}
+
 export async function disconnectConnection(admin: SupabaseClient, input: {
   connectionId: string;
   actorUserId: string;

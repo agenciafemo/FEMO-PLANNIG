@@ -19,6 +19,7 @@ import {
   startMetaOAuth,
   type MetaProvider,
 } from "@/lib/metaRpc";
+import { requiresFacebookPageSelection } from "@/lib/metaConnectionFlow";
 
 // Onde o Facebook devolve o navegador após o OAuth. O callback anexa
 // ?meta_status=pending&connection_id=...&client_id=... a esta rota.
@@ -89,9 +90,11 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   const channels = (rows ?? []).filter((r) => r.channel_id);
   const igChannel = channels.find((c) => c.channel_type === "instagram");
   const pageChannel = channels.find((c) => c.channel_type === "facebook_page");
+  const pageSelectionRequired = requiresFacebookPageSelection(status, provider);
 
-  // Retomar a seleção: retorno recente do OAuth, ou conexão já pendente no banco.
-  const effectivePendingId = pendingConnectionId ?? (status === "pending" ? connectionId : null);
+  // Retomar a selecao somente no fluxo Facebook. Uma conexao Instagram direta
+  // nunca deve chamar /me/accounts nem abrir o seletor de Pagina.
+  const effectivePendingId = pendingConnectionId ?? (pageSelectionRequired ? connectionId : null);
 
   // Trata o retorno do OAuth na URL (uma vez, para este cliente).
   useEffect(() => {
@@ -100,18 +103,29 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
     const metaStatus = p.get("meta_status");
     if (metaStatus === "pending" && p.get("connection_id")) {
       setPendingConnectionId(p.get("connection_id"));
-      setSelectOpen(true);
+    } else if (metaStatus === "connected") {
+      toast.success("Instagram conectado!");
+      queryClient.invalidateQueries({ queryKey: ["meta-status", clientId] });
     } else if (metaStatus === "error") {
       toast.error("Não foi possível conectar: " + (p.get("reason_code") ?? "erro"));
     }
     if (metaStatus) {
       const url = new URL(window.location.href);
-      ["meta_status", "connection_id", "client_id", "reason_code"].forEach((k) =>
+      ["meta_status", "connection_id", "client_id", "provider", "reason_code"].forEach((k) =>
         url.searchParams.delete(k),
       );
       window.history.replaceState({}, "", url.toString());
     }
-  }, [clientId]);
+  }, [clientId, queryClient]);
+
+  // Aguarda o status carregado do banco confirmar a porta usada. Isso evita
+  // abrir o seletor por engano se o frontend novo entrar no ar antes do
+  // callback novo e receber uma URL pendente antiga, sem `provider`.
+  useEffect(() => {
+    if (!isLoading && pendingConnectionId && provider === "facebook") {
+      setSelectOpen(true);
+    }
+  }, [isLoading, pendingConnectionId, provider]);
 
   const pagesQuery = useQuery({
     queryKey: ["meta-pages", effectivePendingId],
@@ -137,7 +151,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   const reconnect = useMutation<void, Error, boolean>({
     mutationFn: async (forceAccount: boolean) => {
       if (connectionId) await disconnectMeta(connectionId);
-      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount);
+      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount, provider);
       window.location.href = url;
     },
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao reconectar: " + (e as Error).message),
@@ -148,8 +162,9 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   // permissão do usuário) e só então iniciamos uma autorização nova.
   const reconnectPending = useMutation<void, Error, boolean>({
     mutationFn: async (forceAccount: boolean) => {
-      if (effectivePendingId) await disconnectMeta(effectivePendingId);
-      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount);
+      const idToDiscard = pendingConnectionId ?? (status === "pending" ? connectionId : null);
+      if (idToDiscard) await disconnectMeta(idToDiscard);
+      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount, provider);
       window.location.href = url;
     },
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao reconectar: " + (e as Error).message),
@@ -291,7 +306,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
         </div>
       )}
 
-      {status === "pending" && (
+      {status === "pending" && provider === "facebook" && (
         <div className="rounded-lg border bg-muted/40 p-3 text-sm">
           <p className="text-muted-foreground">Conexão iniciada — falta escolher a página.</p>
           <AuthorLine name={authorName} provider={provider} />
@@ -323,6 +338,30 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
                 Conectar como o cliente
               </Button>
             </div>
+          )}
+        </div>
+      )}
+
+      {status === "pending" && provider === "instagram" && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+          <div className="flex items-center gap-2 font-medium text-amber-600">
+            <AlertTriangle className="h-4 w-4" /> Login do Instagram incompleto
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            A conta foi autorizada, mas a conexão não terminou. Refaça o login para concluir.
+          </p>
+          {canManage && (
+            <Button
+              className="mt-2"
+              size="sm"
+              disabled={reconnectPending.isPending}
+              onClick={() => reconnectPending.mutate(true)}
+            >
+              {reconnectPending.isPending
+                ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                : <Instagram className="mr-1.5 h-3.5 w-3.5" />}
+              Refazer login do Instagram
+            </Button>
           )}
         </div>
       )}
@@ -380,7 +419,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Escolher página / Instagram</DialogTitle>
+            <DialogTitle>Escolher Página e Instagram</DialogTitle>
           </DialogHeader>
           {pagesQuery.isLoading ? (
             <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">

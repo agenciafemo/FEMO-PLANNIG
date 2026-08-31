@@ -2,10 +2,10 @@ import { sha256Hex } from "../_shared/meta-auth.ts";
 import {
   exchangeCodeForShortLivedToken,
   exchangeForLongLivedToken,
-  getMetaUser,
-  getInstagramAccount,
   exchangeInstagramCode,
   exchangeInstagramLongLivedToken,
+  getInstagramAccount,
+  getMetaUser,
   instagramOAuthConfig,
   metaConfig,
 } from "../_shared/meta-client.ts";
@@ -19,6 +19,7 @@ import { createAdminClient, requiredEnv } from "../_shared/supabase.ts";
 import {
   consumeOAuthState,
   createPendingConnection,
+  finalizeInstagramConnection,
   recordAudit,
 } from "../_shared/meta-vault.ts";
 import type { ConsumedOAuthState } from "../_shared/meta-types.ts";
@@ -39,6 +40,7 @@ type CallbackStep =
   | "exchange_instagram_long_lived_token"
   | "lookup_instagram_account"
   | "create_pending_connection"
+  | "finalize_instagram_connection"
   | "record_audit"
   | "build_redirect";
 
@@ -124,11 +126,12 @@ async function recordFailureAudit(
   requestId: string,
   result: "denied" | "failure",
   reasonCode: string,
+  connectionId: string | null = null,
 ): Promise<void> {
   try {
     await recordAudit(createAdminClient(), {
       clientId: consumed.client_id,
-      connectionId: null,
+      connectionId,
       actorUserId: consumed.requested_by,
       action: "oauth_failed",
       result,
@@ -153,6 +156,7 @@ Deno.serve(async (request) => {
   const query = new URL(request.url).searchParams;
   const rawState = query.get("state");
   let consumed: ConsumedOAuthState | null = null;
+  let createdConnectionId: string | null = null;
 
   try {
     if (!rawState || rawState.length < 32 || rawState.length > 256) {
@@ -191,6 +195,8 @@ Deno.serve(async (request) => {
         {
           meta_status: "error",
           reason_code: reasonCode,
+          client_id: consumed.client_id,
+          provider: consumed.provider ?? "facebook",
         },
         returnOrigin,
         requestId,
@@ -214,44 +220,65 @@ Deno.serve(async (request) => {
     let tokenExpiresAt: string | null;
     let metaUserId: string;
     let metaUserName: string | null;
+    let instagramAccount:
+      | Awaited<ReturnType<typeof getInstagramAccount>>
+      | null = null;
 
     if (viaInstagram) {
       const igConfig = await runCallbackStep(
-        requestId, "load_instagram_config", "instagram_config_missing",
+        requestId,
+        "load_instagram_config",
+        "instagram_config_missing",
         () => instagramOAuthConfig(),
       );
       const short = await runCallbackStep(
-        requestId, "exchange_instagram_code", "token_exchange_failed",
+        requestId,
+        "exchange_instagram_code",
+        "token_exchange_failed",
         () => exchangeInstagramCode(code, igConfig),
       );
       const long = await runCallbackStep(
-        requestId, "exchange_instagram_long_lived_token", "long_lived_token_exchange_failed",
+        requestId,
+        "exchange_instagram_long_lived_token",
+        "long_lived_token_exchange_failed",
         () => exchangeInstagramLongLivedToken(short.accessToken, igConfig),
       );
       const conta = await runCallbackStep(
-        requestId, "lookup_instagram_account", "meta_account_lookup_failed",
+        requestId,
+        "lookup_instagram_account",
+        "meta_account_lookup_failed",
         () => getInstagramAccount(long.accessToken),
       );
       accessToken = long.accessToken;
       // Diferente do token de Pagina, este VENCE — e por isso e renovavel.
-      tokenExpiresAt = new Date(Date.now() + long.expiresInSeconds * 1000).toISOString();
+      tokenExpiresAt = new Date(Date.now() + long.expiresInSeconds * 1000)
+        .toISOString();
       metaUserId = conta.id;
       metaUserName = conta.username ? "@" + conta.username : conta.name;
+      instagramAccount = conta;
     } else {
       const config = await runCallbackStep(
-        requestId, "load_meta_config", "meta_config_missing",
+        requestId,
+        "load_meta_config",
+        "meta_config_missing",
         () => metaConfig(),
       );
       const shortLivedToken = await runCallbackStep(
-        requestId, "exchange_short_lived_token", "token_exchange_failed",
+        requestId,
+        "exchange_short_lived_token",
+        "token_exchange_failed",
         () => exchangeCodeForShortLivedToken(code, config),
       );
       const longLivedToken = await runCallbackStep(
-        requestId, "exchange_long_lived_token", "long_lived_token_exchange_failed",
+        requestId,
+        "exchange_long_lived_token",
+        "long_lived_token_exchange_failed",
         () => exchangeForLongLivedToken(shortLivedToken.access_token, config),
       );
       const metaUser = await runCallbackStep(
-        requestId, "lookup_meta_account", "meta_account_lookup_failed",
+        requestId,
+        "lookup_meta_account",
+        "meta_account_lookup_failed",
         () => getMetaUser(longLivedToken.access_token, config),
       );
       accessToken = longLivedToken.access_token;
@@ -278,6 +305,41 @@ Deno.serve(async (request) => {
           provider: viaInstagram ? "instagram" : "facebook",
         }),
     );
+    createdConnectionId = connectionId;
+
+    // O login direto ja identifica uma unica conta do Instagram. Nao existe
+    // Pagina do Facebook para escolher, portanto a conexao e ativada aqui no
+    // callback. O fluxo Facebook permanece pendente ate a escolha da Pagina.
+    if (viaInstagram) {
+      const account = instagramAccount!;
+      await runCallbackStep(
+        requestId,
+        "finalize_instagram_connection",
+        "instagram_connection_finalize_failed",
+        () =>
+          finalizeInstagramConnection(admin, {
+            connectionId,
+            actorUserId: consumed!.requested_by,
+            instagramId: account.id,
+            instagramName: account.name ?? account.username ?? account.id,
+            instagramUsername: account.username,
+            instagramAccountType: null,
+            requestId,
+          }),
+      );
+
+      return callbackRedirect(
+        consumed.redirect_path,
+        {
+          meta_status: "connected",
+          client_id: consumed.client_id,
+          connection_id: connectionId,
+          provider: "instagram",
+        },
+        returnOrigin,
+        requestId,
+      );
+    }
 
     return callbackRedirect(
       consumed.redirect_path,
@@ -285,6 +347,7 @@ Deno.serve(async (request) => {
         meta_status: "pending",
         client_id: consumed.client_id,
         connection_id: connectionId,
+        provider: "facebook",
       },
       returnOrigin,
       requestId,
@@ -302,14 +365,25 @@ Deno.serve(async (request) => {
       );
     }
     if (consumed) {
-      await recordFailureAudit(consumed, requestId, "failure", reasonCode);
+      await recordFailureAudit(
+        consumed,
+        requestId,
+        "failure",
+        reasonCode,
+        createdConnectionId,
+      );
+    }
+    const errorParams: Record<string, string> = {
+      meta_status: "error",
+      reason_code: reasonCode,
+    };
+    if (consumed) {
+      errorParams.client_id = consumed.client_id;
+      errorParams.provider = consumed.provider ?? "facebook";
     }
     return callbackRedirect(
       consumed?.redirect_path ?? "/clients",
-      {
-        meta_status: "error",
-        reason_code: reasonCode,
-      },
+      errorParams,
       returnOrigin,
       requestId,
     );

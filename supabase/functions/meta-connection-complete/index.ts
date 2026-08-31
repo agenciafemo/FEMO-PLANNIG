@@ -67,6 +67,9 @@ Deno.serve(async (request) => {
       actor.userId,
       ["pending"],
     );
+    if (connection.provider !== "facebook") {
+      throw new HttpError(409, "instagram_page_selection_not_applicable");
+    }
     const token = await getConnectionToken(admin, connection.id);
     let pages: DiscoveredMetaPage[];
     try {
