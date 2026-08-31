@@ -12,6 +12,7 @@ export interface MetaConnectionRecord {
   client_id: string;
   status: "pending" | "active" | "reauth_required" | "disconnected" | "error";
   connected_by: string;
+  provider: "facebook" | "instagram";
 }
 
 export interface ConsumedOAuthState {

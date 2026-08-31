@@ -109,7 +109,7 @@ export async function requireConnectionManager(
 ): Promise<MetaConnectionRecord> {
   const { data, error } = await admin
     .from("meta_connections")
-    .select("id, organization_id, client_id, status, connected_by")
+    .select("id, organization_id, client_id, status, connected_by, provider")
     .eq("id", connectionId)
     .maybeSingle();
   if (error) throw new HttpError(500, "connection_lookup_failed");
