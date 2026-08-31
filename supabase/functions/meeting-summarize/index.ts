@@ -13,9 +13,16 @@ import {
 import { createAdminClient, createUserClient, requiredEnv } from "../_shared/supabase.ts";
 import { timingSafeEqual } from "../_shared/security.ts";
 
-const GEMINI_MODEL = "gemini-flash-latest";
-const GEMINI_URL =
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+// Não depender de um único alias: o `gemini-flash-latest` pode responder 503
+// durante picos mesmo com chave e quota válidas. Os modelos abaixo foram
+// escolhidos entre os modelos estáveis com generateContent disponíveis para o
+// projeto; a função avança automaticamente quando um deles está indisponível.
+const GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-flash-lite-latest",
+  "gemini-2.5-flash-lite",
+] as const;
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const MAX_TRANSCRIPT_CHARS = 60_000;
 
 interface Body {
@@ -95,7 +102,7 @@ function validateSummary(value: unknown): MeetingSummary {
 }
 
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503]);
-const MAX_ATTEMPTS = 3;
+const ATTEMPTS_PER_MODEL = 2;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -115,53 +122,64 @@ async function askGemini(transcript: string): Promise<unknown> {
     "A resposta deve obedecer estritamente ao schema JSON solicitado.",
   ].join("\n");
 
-  // gemini-flash-latest ocasionalmente devolve 503 "high demand" (confirmado
-  // em produção em 2026-08-25) — retry com backoff, mesmo padrão já usado em
-  // generate-report/index.ts para os mesmos códigos transitórios.
+  // Um retry curto absorve oscilações; persistindo 429/5xx, troca de modelo.
+  // Erros permanentes (400/401/403) encerram imediatamente, pois outro modelo
+  // não corrige chave, restrição ou payload inválido.
   let lastStatus = 0;
-  let lastBody = "";
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const response = await fetch(GEMINI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-goog-api-key": key },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents: [{
-          role: "user",
-          parts: [{ text: `TRANSCRIÇÃO DA REUNIÃO:\n${transcript}` }],
-        }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 4_000,
-          responseMimeType: "application/json",
-          responseSchema,
-        },
-      }),
-    });
-    if (response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      const text = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (typeof text !== "string" || !text.trim()) {
-        throw new HttpError(502, "gemini_empty_response");
+  for (const [modelIndex, model] of GEMINI_MODELS.entries()) {
+    const url = `${GEMINI_BASE_URL}/${model}:generateContent`;
+    for (let attempt = 1; attempt <= ATTEMPTS_PER_MODEL; attempt++) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-goog-api-key": key },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents: [{
+            role: "user",
+            parts: [{ text: `TRANSCRIÇÃO DA REUNIÃO:\n${transcript}` }],
+          }],
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 4_000,
+            responseMimeType: "application/json",
+            responseSchema,
+          },
+        }),
+      });
+      if (response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        const text = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (typeof text !== "string" || !text.trim()) {
+          throw new HttpError(502, "gemini_empty_response");
+        }
+        try {
+          return JSON.parse(text);
+        } catch {
+          throw new HttpError(502, "gemini_invalid_json");
+        }
       }
-      try {
-        return JSON.parse(text);
-      } catch {
-        throw new HttpError(502, "gemini_invalid_json");
+
+      lastStatus = response.status;
+      console.warn(JSON.stringify({
+        event: "meeting_summary_gemini_retry",
+        model,
+        attempt,
+        status: response.status,
+      }));
+
+      if (!RETRYABLE_STATUSES.has(response.status)) {
+        throw new HttpError(502, "gemini_request_failed", response.status);
+      }
+      const hasAnotherAttempt = attempt < ATTEMPTS_PER_MODEL;
+      const hasAnotherModel = modelIndex < GEMINI_MODELS.length - 1;
+      if (hasAnotherAttempt) {
+        await sleep(600 * attempt);
+      } else if (hasAnotherModel) {
+        await sleep(300);
       }
     }
-    lastStatus = response.status;
-    lastBody = await response.text().catch(() => "");
-    if (
-      !RETRYABLE_STATUSES.has(response.status) || attempt === MAX_ATTEMPTS
-    ) {
-      break;
-    }
-    await sleep(600 * attempt);
   }
   throw new HttpError(502, "gemini_request_failed", lastStatus || undefined);
-  // lastBody fica disponível só para depuração local (não exposto na resposta).
-  void lastBody;
 }
 
 Deno.serve(async (request) => {
