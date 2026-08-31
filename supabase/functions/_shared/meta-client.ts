@@ -29,6 +29,14 @@ interface MetaConfig extends MetaOAuthStartConfig {
   requestTimeoutMs: number;
 }
 
+export function metaGraphApiVersion(): string {
+  const graphVersion = requiredEnv("META_GRAPH_API_VERSION");
+  if (!/^v\d+\.\d+$/.test(graphVersion)) {
+    throw new Error("invalid_server_configuration:meta_graph_api_version");
+  }
+  return graphVersion;
+}
+
 function boundedNumber(
   name: string,
   fallback: number,
@@ -44,10 +52,7 @@ function boundedNumber(
 }
 
 export function metaOAuthStartConfig(): MetaOAuthStartConfig {
-  const graphVersion = requiredEnv("META_GRAPH_API_VERSION");
-  if (!/^v\d+\.\d+$/.test(graphVersion)) {
-    throw new Error("invalid_server_configuration:meta_graph_api_version");
-  }
+  const graphVersion = metaGraphApiVersion();
   const scopes = requiredEnv("META_OAUTH_SCOPES")
     .split(",").map((scope) => scope.trim()).filter(Boolean);
   return {
@@ -233,7 +238,9 @@ export async function getMetaUser(
     method: "GET",
     headers: bearerHeaders(token),
   }, config.requestTimeoutMs);
-  const payload = await parseMetaResponse<{ id?: string; name?: string }>(response);
+  const payload = await parseMetaResponse<{ id?: string; name?: string }>(
+    response,
+  );
   if (!payload.id) throw new HttpError(502, "meta_user_id_missing");
   return { id: payload.id, name: payload.name?.trim() || null };
 }
@@ -281,7 +288,9 @@ export async function getPageAccessToken(
     headers: bearerHeaders(userToken),
   }, config.requestTimeoutMs);
   const payload = await parseMetaResponse<{ access_token?: string }>(response);
-  if (!payload.access_token) throw new HttpError(502, "meta_page_token_missing");
+  if (!payload.access_token) {
+    throw new HttpError(502, "meta_page_token_missing");
+  }
   return payload.access_token;
 }
 
