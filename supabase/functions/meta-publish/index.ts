@@ -11,6 +11,7 @@ import {
 } from "../_shared/http.ts";
 import { createAdminClient } from "../_shared/supabase.ts";
 import {
+  type MetaConnectionProvider,
   publishCarouselPost,
   publishFacebookCarousel,
   publishFacebookImage,
@@ -73,6 +74,25 @@ Deno.serve(async (request) => {
           throw new Error("instagram_account_missing");
         }
 
+        const { data: connection, error: connectionError } = await admin
+          .from("meta_connections")
+          .select("provider")
+          .eq("id", item.connection_id)
+          .maybeSingle();
+        if (connectionError || !connection) {
+          throw new Error("connection_provider_unavailable");
+        }
+        if (
+          connection.provider !== "facebook" &&
+          connection.provider !== "instagram"
+        ) {
+          throw new Error("connection_provider_invalid");
+        }
+        const provider = connection.provider as MetaConnectionProvider;
+        if (isFacebook && provider !== "facebook") {
+          throw new Error("facebook_target_requires_facebook_connection");
+        }
+
         const { data: token, error: tokenError } = await admin.rpc(
           "meta_server_get_connection_token",
           { _connection_id: item.connection_id },
@@ -91,29 +111,45 @@ Deno.serve(async (request) => {
         if (isFacebook) {
           if (item.media_type === "text") {
             ({ mediaId, permalink } = await publishFacebookText({
-              pageId, token, message: item.caption ?? "",
+              pageId,
+              token,
+              message: item.caption ?? "",
             }));
           } else if (item.media_type === "reels") {
             if (!item.video_url) throw new Error("reels_video_missing");
             ({ mediaId, permalink } = await publishFacebookVideo({
-              pageId, token, videoUrl: item.video_url, caption: item.caption ?? "",
+              pageId,
+              token,
+              videoUrl: item.video_url,
+              caption: item.caption ?? "",
             }));
           } else if (item.media_type === "story") {
-            if (!item.image_url && !item.video_url) throw new Error("story_media_missing");
+            if (!item.image_url && !item.video_url) {
+              throw new Error("story_media_missing");
+            }
             ({ mediaId, permalink } = await publishFacebookStory({
-              pageId, token, imageUrl: item.image_url, videoUrl: item.video_url,
+              pageId,
+              token,
+              imageUrl: item.image_url,
+              videoUrl: item.video_url,
             }));
           } else if (item.media_type === "carousel") {
             if (!item.children_urls || item.children_urls.length < 2) {
               throw new Error("carousel_children_missing");
             }
             ({ mediaId, permalink } = await publishFacebookCarousel({
-              pageId, token, childrenUrls: item.children_urls, caption: item.caption ?? "",
+              pageId,
+              token,
+              childrenUrls: item.children_urls,
+              caption: item.caption ?? "",
             }));
           } else {
             if (!item.image_url) throw new Error("image_url_missing");
             ({ mediaId, permalink } = await publishFacebookImage({
-              pageId, token, imageUrl: item.image_url, caption: item.caption ?? "",
+              pageId,
+              token,
+              imageUrl: item.image_url,
+              caption: item.caption ?? "",
             }));
           }
         } else if (item.media_type === "reels") {
@@ -124,15 +160,19 @@ Deno.serve(async (request) => {
             videoUrl: item.video_url,
             coverUrl: item.cover_url,
             caption: item.caption ?? "",
+            provider,
           }));
         } else if (item.media_type === "story") {
           // Story de imagem usa image_url; story de vídeo usa video_url.
-          if (!item.image_url && !item.video_url) throw new Error("story_media_missing");
+          if (!item.image_url && !item.video_url) {
+            throw new Error("story_media_missing");
+          }
           ({ mediaId, permalink } = await publishStoryPost({
             igAccountId,
             token,
             imageUrl: item.image_url,
             videoUrl: item.video_url,
+            provider,
           }));
         } else if (item.media_type === "carousel") {
           if (!item.children_urls || item.children_urls.length < 2) {
@@ -143,6 +183,7 @@ Deno.serve(async (request) => {
             token,
             childrenUrls: item.children_urls,
             caption: item.caption ?? "",
+            provider,
           }));
         } else {
           if (!item.image_url) throw new Error("image_url_missing");
@@ -151,6 +192,7 @@ Deno.serve(async (request) => {
             token,
             imageUrl: item.image_url,
             caption: item.caption ?? "",
+            provider,
           }));
         }
 
