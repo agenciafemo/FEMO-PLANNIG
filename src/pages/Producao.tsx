@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
   CalendarClock, Check, ChevronDown, ChevronRight, CircleCheck, ExternalLink, Flag,
-  Loader2, Plus, Send, Settings2, UserRound, Workflow, X,
+  Loader2, Plus, RotateCcw, Send, Settings2, UserRound, Workflow, X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -19,6 +19,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DateRangeFields } from "@/components/filters/DateRangeFields";
+import { usePersistedState } from "@/hooks/usePersistedState";
+import { hasActiveDateRange, isDayWithinRange } from "@/lib/dateRange";
 import { cn } from "@/lib/utils";
 import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
 import {
@@ -61,6 +64,7 @@ type Item = {
 
 type Member = { user_id: string; display_name: string; avatar_url: string | null };
 type ClientRow = { id: string; name: string };
+type ProductionDateFilter = { from: string; to: string };
 
 const GROUP_ORDER = ["reels", "carousel", "static", "story", "blog", "extra"];
 
@@ -78,6 +82,12 @@ const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho",
 const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "")
   .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
+function localDay(value: string | null) {
+  if (!value) return null;
+  const parsed = parseISO(value);
+  return Number.isNaN(parsed.getTime()) ? null : format(parsed, "yyyy-MM-dd");
+}
+
 const KIND_ICON = {
   check: CircleCheck,
   data: CalendarClock,
@@ -91,6 +101,10 @@ export default function Producao() {
   const queryClient = useQueryClient();
 
   const [selectedClient, setSelectedClient] = useState<string>("");
+  const [dateFiltersByOrganization, setDateFiltersByOrganization] = usePersistedState<Record<string, ProductionDateFilter>>(
+    "norteia.production.date-filters.v1",
+    {},
+  );
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [configOpen, setConfigOpen] = useState(false);
   const [modelosOpen, setModelosOpen] = useState(false);
@@ -164,10 +178,30 @@ export default function Producao() {
     refetchOnMount: "always",
   });
 
+  const dateFilter = organizationId
+    ? dateFiltersByOrganization[organizationId] ?? { from: "", to: "" }
+    : { from: "", to: "" };
+  const dateFrom = typeof dateFilter.from === "string" ? dateFilter.from : "";
+  const dateTo = typeof dateFilter.to === "string" ? dateFilter.to : "";
+  const hasDateFilter = hasActiveDateRange(dateFrom, dateTo);
+  const updateDateFilter = (patch: Partial<ProductionDateFilter>) => {
+    if (!organizationId) return;
+    setDateFiltersByOrganization({
+      ...dateFiltersByOrganization,
+      [organizationId]: { from: dateFrom, to: dateTo, ...patch },
+    });
+  };
+  const filteredItems = useMemo(() => {
+    if (!hasDateFilter) return items;
+    return items.filter((item) => (item.production_item_steps ?? []).some((step) =>
+      isDayWithinRange(localDay(step.scheduled_at), dateFrom, dateTo)
+    ));
+  }, [dateFrom, dateTo, hasDateFilter, items]);
+
   // ---- Resumo por cliente (onde está o gargalo da operação) ----
   const summary = useMemo(() => {
     return clients.map((client) => {
-      const own = items.filter((i) => i.client_id === client.id);
+      const own = filteredItems.filter((i) => i.client_id === client.id);
       const steps = own.flatMap((i) => i.production_item_steps ?? []);
       const done = steps.filter((s) => s.done).length;
       const pct = steps.length === 0 ? 0 : Math.round((done / steps.length) * 100);
@@ -185,11 +219,18 @@ export default function Producao() {
         bottleneck: worst ? { label: worst[0], count: worst[1] } : null,
       };
     }).filter((row) => row.pieces > 0);
-  }, [clients, items]);
+  }, [clients, filteredItems]);
 
   // Cliente atual: o escolhido, ou o primeiro que tem produção.
   const activeClient = selectedClient || summary[0]?.client.id || "";
-  const clientItems = items.filter((i) => i.client_id === activeClient);
+  const clientItems = useMemo(
+    () => filteredItems.filter((item) => item.client_id === activeClient),
+    [activeClient, filteredItems],
+  );
+  const totalClientItems = useMemo(
+    () => items.filter((item) => item.client_id === activeClient).length,
+    [activeClient, items],
+  );
 
   const groups = useMemo(() => {
     return GROUP_ORDER
@@ -506,17 +547,45 @@ export default function Producao() {
           </div>
         )}
 
-        {/* Seletor de cliente */}
-        <div className="flex items-center gap-2">
-          <Select value={activeClient} onValueChange={setSelectedClient}>
-            <SelectTrigger className="w-64"><SelectValue placeholder="Escolha o cliente" /></SelectTrigger>
-            <SelectContent>
-              {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <span className="text-xs text-muted-foreground">
-            {clientItems.length} {clientItems.length === 1 ? "peça" : "peças"} em produção
-          </span>
+        {/* Filtros do quadro */}
+        <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/70 p-3 shadow-sm backdrop-blur-sm sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="min-w-[220px] flex-1 space-y-1 sm:max-w-[280px]">
+            <Label className="text-[11px] text-muted-foreground">Cliente</Label>
+            <Select value={activeClient} onValueChange={setSelectedClient}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Escolha o cliente" /></SelectTrigger>
+              <SelectContent>
+                {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <DateRangeFields
+            idPrefix="production-scheduled"
+            from={dateFrom}
+            to={dateTo}
+            fromLabel="Etapas de"
+            toLabel="Etapas até"
+            onFromChange={(value) => updateDateFilter({ from: value })}
+            onToChange={(value) => updateDateFilter({ to: value })}
+          />
+
+          <div className="flex h-9 items-center gap-2 sm:ml-auto">
+            <span className="text-xs text-muted-foreground">
+              {hasDateFilter ? `${clientItems.length} de ${totalClientItems}` : clientItems.length}{" "}
+              {totalClientItems === 1 ? "peça" : "peças"}
+            </span>
+            {hasDateFilter && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 text-xs text-muted-foreground"
+                onClick={() => updateDateFilter({ from: "", to: "" })}
+              >
+                <RotateCcw className="h-3.5 w-3.5" /> Limpar data
+              </Button>
+            )}
+          </div>
         </div>
 
         {isLoading ? (
@@ -526,9 +595,13 @@ export default function Producao() {
         ) : groups.length === 0 ? (
           <div className="rounded-2xl border border-border/70 bg-card/50 px-6 py-14 text-center">
             <Workflow className="mx-auto h-7 w-7 text-muted-foreground/60" />
-            <p className="mt-2 text-sm font-medium">Nenhuma peça em produção</p>
+            <p className="mt-2 text-sm font-medium">
+              {hasDateFilter ? "Nenhuma peça agendada neste período" : "Nenhuma peça em produção"}
+            </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              As peças aparecem aqui quando um planejamento é criado para este cliente.
+              {hasDateFilter
+                ? "A peça aparece quando ao menos uma etapa possui data dentro do intervalo."
+                : "As peças aparecem aqui quando um planejamento é criado para este cliente."}
             </p>
           </div>
         ) : (

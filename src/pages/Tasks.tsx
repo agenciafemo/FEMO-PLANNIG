@@ -78,6 +78,8 @@ import { usePersistedState } from "@/hooks/usePersistedState";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { SubtasksBoard } from "@/components/tasks/SubtasksBoard";
+import { DateRangeFields } from "@/components/filters/DateRangeFields";
+import { isDayWithinRange } from "@/lib/dateRange";
 
 type TaskStatus = "todo" | "doing" | "review" | "done";
 type TaskPriority = "low" | "medium" | "high";
@@ -86,6 +88,8 @@ type TaskFilters = {
   clientId: string;
   priority: "all" | TaskPriority;
   functionId: string;
+  dueFrom: string;
+  dueTo: string;
 };
 
 type TaskRecord = {
@@ -232,6 +236,8 @@ const DEFAULT_FILTERS: TaskFilters = {
   clientId: "all",
   priority: "all",
   functionId: "all",
+  dueFrom: "",
+  dueTo: "",
 };
 
 function initials(name: string) {
@@ -785,11 +791,14 @@ export default function Tasks() {
   const priorityFilter: TaskFilters["priority"] = ["all", "low", "medium", "high"].includes(storedFilters.priority)
     ? storedFilters.priority
     : "all";
+  const dueFromFilter = typeof storedFilters.dueFrom === "string" ? storedFilters.dueFrom : "";
+  const dueToFilter = typeof storedFilters.dueTo === "string" ? storedFilters.dueTo : "";
 
   const hasActiveFilters = assigneeFilter !== "all"
     || clientFilter !== "all"
     || priorityFilter !== "all"
-    || functionFilter !== "all";
+    || functionFilter !== "all"
+    || Boolean(dueFromFilter || dueToFilter);
   const onlyMineActive = !!user && assigneeFilter === user.id;
 
   const filteredTasks = useMemo(
@@ -799,9 +808,10 @@ export default function Tasks() {
       if (clientFilter === "none" && task.client_id !== null) return false;
       if (clientFilter !== "all" && clientFilter !== "none" && task.client_id !== clientFilter) return false;
       if (priorityFilter !== "all" && task.priority !== priorityFilter) return false;
+      if (!isDayWithinRange(task.due_date, dueFromFilter, dueToFilter)) return false;
       return true;
     }),
-    [assigneeFilter, clientFilter, localTasks, membersForFunction, priorityFilter]
+    [assigneeFilter, clientFilter, dueFromFilter, dueToFilter, localTasks, membersForFunction, priorityFilter]
   );
 
   const moveTask = useMutation({
@@ -1707,6 +1717,16 @@ export default function Tasks() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <DateRangeFields
+                idPrefix="tasks-due"
+                from={dueFromFilter}
+                to={dueToFilter}
+                fromLabel="Entrega de"
+                toLabel="Entrega até"
+                onFromChange={(value) => updateFilters({ dueFrom: value })}
+                onToChange={(value) => updateFilters({ dueTo: value })}
+              />
             </div>
 
             <div className="flex h-9 shrink-0 items-center justify-between gap-3 xl:justify-end">
