@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { format, parseISO } from "date-fns";
 import {
   CalendarClock, Check, ChevronDown, ChevronRight, CircleCheck, ExternalLink, Flag,
   Loader2, Plus, Send, Settings2, UserRound, Workflow, X,
@@ -42,6 +43,8 @@ type Step = {
   reason_codes: string[] | null;
   reason_note: string | null;
   assignee_id: string | null;
+  capture_event_id: string | null;
+  schedule_source: "calendar" | "manual";
 };
 
 type Item = {
@@ -147,7 +150,7 @@ export default function Producao() {
     queryKey: ["production-items", organizationId],
     queryFn: async () => {
       const { data, error } = await (supabase as AnyClient).from("production_items")
-        .select("id, content_type, piece_number, title, client_id, planning_id, notes, position, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, reason_codes, reason_note, assignee_id)")
+        .select("id, content_type, piece_number, title, client_id, planning_id, notes, position, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, reason_codes, reason_note, assignee_id, capture_event_id, schedule_source)")
         .eq("organization_id", organizationId!)
         .order("position");
       if (error) throw new Error(error.message);
@@ -211,23 +214,6 @@ export default function Producao() {
       if (error) throw new Error(error.message);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] }),
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const setCaptacao = useMutation({
-    mutationFn: async ({ step, value }: { step: Step; value: string }) => {
-      const { error } = await (supabase as AnyClient).from("production_item_steps")
-        .update({ scheduled_at: value ? new Date(value).toISOString() : null })
-        .eq("id", step.id);
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: (_d, vars) => {
-      toast.success(vars.value
-        ? "Captação marcada e lançada na Agenda da Equipe."
-        : "Captação desmarcada (removida da agenda).");
-      queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] });
-      queryClient.invalidateQueries({ queryKey: ["team-events", organizationId] });
-    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -674,17 +660,32 @@ export default function Producao() {
                                       </span>
                                     </button>
 
-                                    {step.kind === "data" && (
+                                    {step.kind === "data" && step.step_key === "captacao" ? (
+                                      <Link
+                                        to="/agenda-equipe"
+                                        className={cn(
+                                          "flex h-6 items-center gap-1 rounded-md border px-1.5 text-[11px] transition-colors hover:border-brand/60 hover:bg-brand/5",
+                                          step.scheduled_at ? "border-brand/30 text-brand" : "border-dashed border-muted-foreground/40 text-muted-foreground",
+                                        )}
+                                        title="A captação é definida no Calendário da Equipe"
+                                      >
+                                        <CalendarClock className="h-3 w-3" />
+                                        {step.scheduled_at
+                                          ? format(parseISO(step.scheduled_at), "dd/MM · HH:mm")
+                                          : "Definir na agenda"}
+                                        {step.schedule_source === "calendar" && step.scheduled_at && (
+                                          <span className="ml-0.5 text-[9px] opacity-70">Agenda</span>
+                                        )}
+                                      </Link>
+                                    ) : step.kind === "data" ? (
                                       <Input
                                         type="datetime-local"
                                         className="h-6 w-[165px] px-1.5 text-[11px]"
-                                        title={step.scheduled_at
-                                          ? "Já está na Agenda da Equipe"
-                                          : "Ao marcar a data, entra na Agenda da Equipe"}
-                                        value={step.scheduled_at ? step.scheduled_at.slice(0, 16) : ""}
-                                        onChange={(e) => setCaptacao.mutate({ step, value: e.target.value })}
+                                        value={step.scheduled_at ? format(parseISO(step.scheduled_at), "yyyy-MM-dd'T'HH:mm") : ""}
+                                        readOnly
+                                        title="Etapas de data são sincronizadas pelo Calendário da Equipe"
                                       />
-                                    )}
+                                    ) : null}
 
                                     {who && (
                                       <Avatar className="h-4 w-4">

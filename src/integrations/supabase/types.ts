@@ -2116,6 +2116,7 @@ export type Database = {
       production_item_steps: {
         Row: {
           assignee_id: string | null
+          capture_event_id: string | null
           created_at: string
           done: boolean
           done_at: string | null
@@ -2130,11 +2131,13 @@ export type Database = {
           reason_codes: string[] | null
           reason_note: string | null
           scheduled_at: string | null
+          schedule_source: string
           step_key: string
           updated_at: string
         }
         Insert: {
           assignee_id?: string | null
+          capture_event_id?: string | null
           created_at?: string
           done?: boolean
           done_at?: string | null
@@ -2149,11 +2152,13 @@ export type Database = {
           reason_codes?: string[] | null
           reason_note?: string | null
           scheduled_at?: string | null
+          schedule_source?: string
           step_key: string
           updated_at?: string
         }
         Update: {
           assignee_id?: string | null
+          capture_event_id?: string | null
           created_at?: string
           done?: boolean
           done_at?: string | null
@@ -2168,6 +2173,7 @@ export type Database = {
           reason_codes?: string[] | null
           reason_note?: string | null
           scheduled_at?: string | null
+          schedule_source?: string
           step_key?: string
           updated_at?: string
         }
@@ -2177,6 +2183,13 @@ export type Database = {
             columns: ["item_id"]
             isOneToOne: false
             referencedRelation: "production_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "production_item_steps_capture_event_id_fkey"
+            columns: ["capture_event_id"]
+            isOneToOne: false
+            referencedRelation: "team_events"
             referencedColumns: ["id"]
           },
           {
@@ -2658,14 +2671,18 @@ export type Database = {
       team_events: {
         Row: {
           all_day: boolean
+          client_id: string | null
           created_at: string
           created_by: string
           description: string | null
           ends_at: string | null
+          event_type: string
           id: string
+          is_default_capture: boolean
           location: string | null
           meeting_link: string | null
           organization_id: string
+          planning_id: string | null
           production_step_id: string | null
           starts_at: string
           title: string
@@ -2673,14 +2690,18 @@ export type Database = {
         }
         Insert: {
           all_day?: boolean
+          client_id?: string | null
           created_at?: string
           created_by: string
           description?: string | null
           ends_at?: string | null
+          event_type?: string
           id?: string
+          is_default_capture?: boolean
           location?: string | null
           meeting_link?: string | null
           organization_id: string
+          planning_id?: string | null
           production_step_id?: string | null
           starts_at: string
           title: string
@@ -2688,14 +2709,18 @@ export type Database = {
         }
         Update: {
           all_day?: boolean
+          client_id?: string | null
           created_at?: string
           created_by?: string
           description?: string | null
           ends_at?: string | null
+          event_type?: string
           id?: string
+          is_default_capture?: boolean
           location?: string | null
           meeting_link?: string | null
           organization_id?: string
+          planning_id?: string | null
           production_step_id?: string | null
           starts_at?: string
           title?: string
@@ -2707,6 +2732,20 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_events_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_events_planning_id_fkey"
+            columns: ["planning_id"]
+            isOneToOne: false
+            referencedRelation: "plannings"
             referencedColumns: ["id"]
           },
           {

@@ -35,3 +35,6 @@ dist-ssr
 
 # Memoria de agente: pessoal, nao versionar
 .claude/agent-memory/
+
+# Credenciais locais de integrações — nunca versionar
+IDS/

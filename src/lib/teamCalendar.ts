@@ -16,6 +16,10 @@ export type TeamEvent = {
   all_day: boolean;
   created_by: string;
   record_and_transcribe: boolean;
+  event_type: "event" | "meeting" | "capture";
+  client_id: string | null;
+  planning_id: string | null;
+  is_default_capture: boolean;
   team_event_attendees: Attendee[];
 };
 
@@ -26,7 +30,7 @@ export async function loadWeekEvents(
 ): Promise<TeamEvent[]> {
   const { data, error } = await (supabase as AnyClient)
     .from("team_events")
-    .select("id, title, description, location, meeting_link, starts_at, ends_at, all_day, created_by, record_and_transcribe, team_event_attendees(user_id, response)")
+    .select("id, title, description, location, meeting_link, starts_at, ends_at, all_day, created_by, record_and_transcribe, event_type, client_id, planning_id, is_default_capture, team_event_attendees(user_id, response)")
     .eq("organization_id", organizationId)
     .gte("starts_at", fromIso)
     .lte("starts_at", toIso)
@@ -47,6 +51,10 @@ export async function createTeamEvent(input: {
   allDay: boolean;
   attendeeIds: string[]; // participantes (entram como "accepted")
   recordAndTranscribe?: boolean;
+  eventType?: "event" | "meeting" | "capture";
+  clientId?: string | null;
+  planningId?: string | null;
+  isDefaultCapture?: boolean;
 }): Promise<{ id: string }> {
   const { data: ev, error } = await (supabase as AnyClient)
     .from("team_events")
@@ -61,6 +69,10 @@ export async function createTeamEvent(input: {
       ends_at: input.endsAt,
       all_day: input.allDay,
       record_and_transcribe: input.recordAndTranscribe ?? false,
+      event_type: input.eventType ?? "event",
+      client_id: input.clientId ?? null,
+      planning_id: input.planningId ?? null,
+      is_default_capture: input.isDefaultCapture ?? false,
     })
     .select("id")
     .single();
