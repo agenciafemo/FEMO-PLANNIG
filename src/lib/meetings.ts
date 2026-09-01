@@ -39,11 +39,17 @@ export interface MeetingActionItem {
   suggested_due_date: string | null;
   task_id: string | null;
   position: number;
+  // Conclusão própria do item, independente de virar tarefa: boa parte do que
+  // sai de uma reunião se resolve na hora e não merece entrar no quadro.
+  done: boolean;
+  done_at: string | null;
+  done_by: string | null;
 }
 
 export interface MeetingDetail extends MeetingListItem {
   organization_id: string;
   meeting_link: string | null;
+  audio_storage_path: string | null;
   transcript_text: string | null;
   transcript_raw: Array<{ speaker: string; text: string; start_ms: number; end_ms: number }> | null;
   decisions: string[];
@@ -78,7 +84,7 @@ export async function getMeeting(id: string): Promise<MeetingDetail> {
   const { data, error } = await (supabase as AnyClient)
     .from("meetings")
     .select(
-      "id, organization_id, title, status, source, failure_reason, client_id, meeting_link, occurred_at, duration_seconds, summary, transcript_text, transcript_raw, decisions, created_by, meeting_action_items(id, title, suggested_assignee_id, suggested_due_date, task_id, position)",
+      "id, organization_id, title, status, source, failure_reason, client_id, meeting_link, occurred_at, duration_seconds, summary, transcript_text, transcript_raw, decisions, created_by, audio_storage_path, meeting_action_items(id, title, suggested_assignee_id, suggested_due_date, task_id, position, done, done_at, done_by)",
     )
     .eq("id", id)
     .single();
@@ -242,6 +248,69 @@ export async function generateMeetingMinutes(meetingId: string): Promise<void> {
   if (!code) throw new Error(error.message);
   const frase = MOTIVO_ATA[code] ?? "Não foi possível gerar a ata.";
   throw new Error(`${frase} (${code})`);
+}
+
+/**
+ * Marca (ou desmarca) um item de ação como resolvido, sem envolver tarefa.
+ *
+ * O `.select("id")` é obrigatório: um UPDATE barrado por RLS volta com zero
+ * linhas e erro nulo, e o checkbox ficaria marcado na tela sem nada ter sido
+ * gravado — voltando ao estado antigo no próximo carregamento.
+ */
+export async function setActionItemDone(input: {
+  actionItemId: string;
+  done: boolean;
+  userId: string;
+}): Promise<void> {
+  const { data, error } = await (supabase as AnyClient)
+    .from("meeting_action_items")
+    .update({
+      done: input.done,
+      done_at: input.done ? new Date().toISOString() : null,
+      done_by: input.done ? input.userId : null,
+    })
+    .eq("id", input.actionItemId)
+    .select("id");
+  if (error) throw new Error(error.message);
+  if (!data?.length) {
+    throw new Error("Sem permissão para alterar este item de ação.");
+  }
+}
+
+/**
+ * Exclui a reunião inteira: transcrição, ata, decisões, itens de ação e o
+ * áudio no storage.
+ *
+ * O áudio sai PRIMEIRO. Se a linha fosse apagada antes, o cascade levaria
+ * junto o `audio_storage_path` e o arquivo ficaria órfão no bucket para
+ * sempre — ocupando espaço pago que ninguém mais consegue nem localizar.
+ * Falha ao remover o arquivo interrompe a exclusão, para não deixar esse lixo.
+ *
+ * As tabelas filhas (itens de ação, participantes) saem por ON DELETE CASCADE.
+ */
+export async function deleteMeeting(input: {
+  meetingId: string;
+  audioStoragePath: string | null;
+}): Promise<void> {
+  if (input.audioStoragePath) {
+    const { error: storageError } = await supabase
+      .storage
+      .from("meeting-recordings")
+      .remove([input.audioStoragePath]);
+    if (storageError) {
+      throw new Error(`Não foi possível remover a gravação: ${storageError.message}`);
+    }
+  }
+
+  const { data, error } = await (supabase as AnyClient)
+    .from("meetings")
+    .delete()
+    .eq("id", input.meetingId)
+    .select("id");
+  if (error) throw new Error(error.message);
+  if (!data?.length) {
+    throw new Error("Sem permissão para excluir esta reunião.");
+  }
 }
 
 export async function createTaskFromActionItem(input: {
