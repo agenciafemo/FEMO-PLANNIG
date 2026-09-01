@@ -55,6 +55,9 @@ CREATE POLICY "org_delete_plannings" ON public.plannings
 
 DROP POLICY IF EXISTS "org_editors_insert_plannings" ON public.plannings;
 DROP POLICY IF EXISTS "org_managers_insert_plannings" ON public.plannings;
+-- Tambem o nome NOVO: sem isto, rodar a migration duas vezes quebra com
+-- 42710 (policy ja existe). Toda migration daqui tem que poder rodar de novo.
+DROP POLICY IF EXISTS "org_insert_plannings" ON public.plannings;
 
 -- As condicoes extras da policy original continuam: quem cria e o dono do
 -- registro, e o cliente tem que ser da mesma organizacao. A permissao troca
@@ -74,6 +77,7 @@ CREATE POLICY "org_insert_plannings" ON public.plannings
 
 DROP POLICY IF EXISTS "org_editors_update_plannings" ON public.plannings;
 DROP POLICY IF EXISTS "org_managers_update_plannings" ON public.plannings;
+DROP POLICY IF EXISTS "org_update_plannings" ON public.plannings;
 
 CREATE POLICY "org_update_plannings" ON public.plannings
   FOR UPDATE TO authenticated
