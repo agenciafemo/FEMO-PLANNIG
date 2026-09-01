@@ -20,6 +20,7 @@ import {
 import { isPublicPlanningStatus } from "@/lib/publicPlanningVisibility";
 import { PUBLIC_AUDIO_ENABLED } from "@/lib/featureFlags";
 import { getOrCreatePortalDeviceId } from "@/lib/agencyDevice";
+import { postThumbnailUrl } from "@/lib/postThumbnail";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -793,10 +794,11 @@ export default function ClientPublic() {
 
               const renderPostCard = (post: any, aspectClass: string) => {
                 const Icon = contentTypeIcons[post.content_type] || Image;
+                const thumbnail = postThumbnailUrl(post);
                 return (
                   <button key={post.id} onClick={() => setSelectedPost(post.id)} className={`group relative ${aspectClass} overflow-hidden rounded-sm bg-muted transition-all hover:opacity-90`}>
-                    {post.cover_image_url ? (
-                      <img src={post.cover_image_url} alt="" className="h-full w-full object-cover" />
+                    {thumbnail ? (
+                      <img src={thumbnail} alt="" className="h-full w-full object-cover" />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-muted-foreground"><Icon className="h-8 w-8" /></div>
                     )}

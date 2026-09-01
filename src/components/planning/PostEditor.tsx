@@ -141,6 +141,7 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
   const [blogBody, setBlogBody] = useState("");
   const [managerComment, setManagerComment] = useState("");
   const [expandedImageIndex, setExpandedImageIndex] = useState<number | null>(null);
+  const [expandedSource, setExpandedSource] = useState<"cover" | "media">("media");
   // Fechamento único do lightbox, reusado por X, backdrop, Escape e fallback.
   const closeImageLightbox = useCallback(() => {
     setExpandedImageIndex(null);
@@ -614,7 +615,12 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
     setMediaUrls(arr);
   };
 
+  // Qual conjunto o lightbox está mostrando. Antes isto era deduzido do tipo de
+  // conteúdo, e por isso clicar na capa de um carrossel abria o slide 1: o tipo
+  // dizia "carrossel" e a função devolvia mediaUrls, ignorando de onde veio o
+  // clique. Agora quem abre declara a origem.
   const getExpandedImages = () => {
+    if (expandedSource === "cover") return coverImageUrl ? [coverImageUrl] : [];
     if (contentType === "carousel") return mediaUrls;
     // Story (como static/reels/blog) guarda a imagem em coverImageUrl, não em
     // mediaUrls. Sem isto, o lightbox recebia array vazio e não abria.
@@ -739,14 +745,18 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
             </div>
           </div>
 
-          {/* Capa / Imagem — some no carrossel, onde os slides já são a mídia.
-              Além de duplicar o bloco de mídia, o clique na capa abria o slide 1
-              do carrossel: getExpandedImages() devolve mediaUrls nesse tipo. */}
+          {/* No carrossel não há campo de capa: o slide 1 é a capa (ver
+              postThumbnailUrl). Pedir uma capa à parte fazia subir o mesmo
+              arquivo duas vezes. Nos outros tipos a capa continua sendo o que
+              alimenta a miniatura do quadro, do portal e da Programação. */}
           {contentType !== "carousel" && (
           <div className="space-y-2">
             <Label>{contentType === "reels" ? "Capa do Reels (thumbnail)" : "Imagem"}</Label>
             {coverImageUrl && (
-              <div className="relative mb-2 cursor-pointer group" onClick={() => setExpandedImageIndex(0)}>
+              <div
+                className="relative mb-2 cursor-pointer group"
+                onClick={() => { setExpandedSource("cover"); setExpandedImageIndex(0); }}
+              >
                 <img src={coverImageUrl} alt="Preview" className="max-h-48 w-full rounded-lg object-cover group-hover:opacity-75 transition-opacity" />
                 <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
                   <span className="text-white font-semibold bg-black/40 px-4 py-2 rounded">Clique para ampliar</span>
@@ -771,7 +781,7 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
               {mediaUrls.length > 0 && (
                 <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                   {mediaUrls.map((url, idx) => (
-                    <div key={idx} className="group relative aspect-square overflow-hidden rounded-md border bg-muted cursor-pointer" onClick={() => setExpandedImageIndex(idx)}>
+                    <div key={idx} className="group relative aspect-square overflow-hidden rounded-md border bg-muted cursor-pointer" onClick={() => { setExpandedSource("media"); setExpandedImageIndex(idx); }}>
                       {isVideo(url) ? (
                         <div className="flex h-full w-full items-center justify-center bg-black group-hover:opacity-75 transition-opacity">
                           <Video className="h-6 w-6 text-white/80" />
@@ -801,7 +811,10 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
                 <Input placeholder="ou cole URL da imagem/vídeo (Canva, Drive, etc)" value={carouselUrlInput} onChange={(e) => setCarouselUrlInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCarouselUrl())} disabled={mediaUrls.length >= 20} />
                 <Button type="button" variant="outline" onClick={addCarouselUrl} disabled={mediaUrls.length >= 20}>Adicionar</Button>
               </div>
-              <p className="text-xs text-muted-foreground">Aceita imagens e vídeos (mp4, mov, webm). Até 20 arquivos por carrossel.</p>
+              <p className="text-xs text-muted-foreground">
+                O slide 1 é a capa: é ele que aparece no quadro e no portal do cliente.
+                Aceita imagens e vídeos (mp4, mov, webm). Até 20 arquivos por carrossel.
+              </p>
             </div>
           )}
 
