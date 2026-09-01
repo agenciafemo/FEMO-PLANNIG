@@ -216,16 +216,52 @@ export default function Plannings() {
           const mm = String(m).padStart(2, "0");
           let writingNotes: string | null = null;
           try {
+            // A mesma data existe uma vez por SEGMENTO no catálogo — a chave
+            // única de commemorative_dates inclui `segment`, então "Dia do
+            // Médico" é uma linha para médicos, outra para dentistas, outra
+            // universal. Sem filtrar, a nota saía com a mesma data repetida
+            // uma dúzia de vezes.
+            //
+            // A regra é a mesma do calendário: o cliente vê as datas do SEU
+            // segmento, as universais (segment nulo) e as criadas só para ele.
+            const segmentoDoCliente =
+              (clients?.find((c) => c.id === selectedClient) as { segment?: string | null } | undefined)
+                ?.segment ?? null;
+
+            let commQuery = (supabase as any)
+              .from("commemorative_dates")
+              .select("title, day, month, segment, client_id")
+              .eq("month", m);
+            commQuery = segmentoDoCliente
+              ? commQuery.or(`segment.is.null,segment.eq.${segmentoDoCliente}`)
+              : commQuery.is("segment", null);
+            commQuery = commQuery.or(`client_id.is.null,client_id.eq.${selectedClient}`);
+
             const [commRes, evtRes] = await Promise.all([
-              (supabase as any).from("commemorative_dates").select("title, day, month").eq("month", m),
+              commQuery,
               (supabase as any).from("calendar_events").select("title, event_date")
                 .eq("client_id", selectedClient)
                 .gte("event_date", `${year}-${mm}-01`)
                 .lte("event_date", `${year}-${mm}-31`),
             ]);
+
+            // Segunda rede: mesmo filtrando, o catálogo pode ter a mesma data
+            // cadastrada duas vezes (universal + do segmento, por exemplo).
+            // Dedupe por título+dia, preservando a ordem em que vieram.
+            const vistos = new Set<string>();
             const sug: string[] = [];
-            for (const c of (commRes.data ?? [])) sug.push(`${c.title} (${String(c.day).padStart(2, "0")}/${String(c.month).padStart(2, "0")})`);
-            for (const e of (evtRes.data ?? [])) sug.push(`${e.title} (${(e.event_date ?? "").slice(8, 10)}/${(e.event_date ?? "").slice(5, 7)})`);
+            const adicionar = (titulo: string, dia: string, mes: string) => {
+              const chave = `${titulo.trim().toLowerCase()}|${dia}/${mes}`;
+              if (vistos.has(chave)) return;
+              vistos.add(chave);
+              sug.push(`${titulo} (${dia}/${mes})`);
+            };
+            for (const c of (commRes.data ?? [])) {
+              adicionar(c.title, String(c.day).padStart(2, "0"), String(c.month).padStart(2, "0"));
+            }
+            for (const e of (evtRes.data ?? [])) {
+              adicionar(e.title, (e.event_date ?? "").slice(8, 10), (e.event_date ?? "").slice(5, 7));
+            }
             if (sug.length) writingNotes = "Sugestões do mês: " + sug.join(" · ");
           } catch { /* best-effort */ }
 
