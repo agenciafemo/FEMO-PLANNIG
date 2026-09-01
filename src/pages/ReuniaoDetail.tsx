@@ -1,16 +1,19 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   createTaskFromActionItem,
+  deleteMeeting,
   descreverMotivoAta,
   generateMeetingMinutes,
   getMeeting,
   listOrgMembers,
   MeetingActionItem,
+  setActionItemDone,
   stopMeetingRecording,
 } from "@/lib/meetings";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,7 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, CheckCircle2, Circle, Loader2, Sparkles, Square } from "lucide-react";
+import { ArrowLeft, Loader2, Sparkles, Square, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -67,6 +70,9 @@ export default function ReuniaoDetail() {
   const [creating, setCreating] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const navigate = useNavigate();
 
   const meetingQuery = useQuery({
     queryKey: ["meeting", id],
@@ -115,6 +121,39 @@ export default function ReuniaoDetail() {
       toast.error(err instanceof Error ? err.message : "Erro ao criar tarefa");
     } finally {
       setCreating(false);
+    }
+  };
+
+  // Concluir é independente de tarefa: um item pode ser resolvido na hora, ter
+  // virado tarefa, ou as duas coisas. O checkbox fica desabilitado durante a
+  // gravação para o clique não desaparecer sem feedback.
+  const handleToggleActionItem = async (item: MeetingActionItem) => {
+    if (!user || togglingItemId) return;
+    setTogglingItemId(item.id);
+    try {
+      await setActionItemDone({ actionItemId: item.id, done: !item.done, userId: user.id });
+      await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao atualizar o item");
+    } finally {
+      setTogglingItemId(null);
+    }
+  };
+
+  const handleDeleteMeeting = async () => {
+    if (!meetingQuery.data || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteMeeting({
+        meetingId: meetingQuery.data.id,
+        audioStoragePath: meetingQuery.data.audio_storage_path,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      toast.success("Reunião excluída.");
+      navigate("/reunioes");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao excluir a reunião");
+      setDeleting(false);
     }
   };
 
@@ -259,6 +298,48 @@ export default function ReuniaoDetail() {
                 : "Gerar ata com IA"}
             </Button>
           )}
+          {/* Excluir fica fora da gravação em curso: parar o bot primeiro evita
+              apagar a reunião enquanto a Vexa ainda escreve nela. */}
+          {meeting.status !== "recording" && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11 w-full text-destructive hover:text-destructive sm:w-auto"
+                  disabled={deleting}
+                  aria-busy={deleting}
+                >
+                  {deleting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-2 h-4 w-4" />
+                  )}
+                  {deleting ? "Excluindo..." : "Excluir"}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="w-[calc(100%-1rem)] max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:max-w-lg sm:p-6">
+                <AlertDialogHeader className="pr-8">
+                  <AlertDialogTitle>Excluir esta reunião?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Saem junto a transcrição, a ata, as decisões, os itens de ação e a
+                    gravação de áudio. As tarefas já criadas a partir dos itens continuam
+                    no quadro de Tarefas. Não dá para desfazer.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter className="gap-2 sm:gap-0">
+                  <AlertDialogCancel className="mt-0 min-h-11 w-full sm:w-auto">Manter reunião</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="min-h-11 w-full bg-destructive text-destructive-foreground hover:bg-destructive/90 sm:w-auto"
+                    onClick={handleDeleteMeeting}
+                  >
+                    Excluir reunião
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
           <Badge className="self-start sm:self-auto" variant={meeting.status === "failed" ? "destructive" : "secondary"}>
             {STATUS_LABEL[meeting.status] ?? meeting.status}
           </Badge>
@@ -331,7 +412,8 @@ export default function ReuniaoDetail() {
             <Card>
               <CardContent className="p-4 space-y-3">
                 <h3 className="text-sm font-semibold">
-                  ✅ Itens de ação ({meeting.action_items.length})
+                  ✅ Itens de ação ({meeting.action_items.filter((i) => i.done).length}/
+                  {meeting.action_items.length})
                 </h3>
                 <div className="space-y-2">
                   {meeting.action_items.map((item) => (
@@ -339,14 +421,21 @@ export default function ReuniaoDetail() {
                       key={item.id}
                       className="flex flex-col items-stretch gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        {item.task_id ? (
-                          <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                        ) : (
-                          <Circle className="h-4 w-4 text-muted-foreground shrink-0" />
-                        )}
-                        <span className="text-sm break-words">{item.title}</span>
-                      </div>
+                      <label className="flex items-center gap-2 min-w-0 cursor-pointer">
+                        <Checkbox
+                          checked={item.done}
+                          disabled={togglingItemId === item.id}
+                          onCheckedChange={() => handleToggleActionItem(item)}
+                          aria-label={item.done ? "Reabrir item" : "Marcar item como concluído"}
+                        />
+                        <span
+                          className={`text-sm break-words ${
+                            item.done ? "text-muted-foreground line-through" : ""
+                          }`}
+                        >
+                          {item.title}
+                        </span>
+                      </label>
                       {item.task_id ? (
                         <Link
                           to="/tasks"
