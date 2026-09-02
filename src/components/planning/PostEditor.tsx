@@ -33,7 +33,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, Copy, ChevronLeft, ChevronRight, X, FolderInput, MoreHorizontal } from "lucide-react";
+import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, Copy, ChevronLeft, ChevronRight, X, FolderInput, MoreHorizontal, ExternalLink } from "lucide-react";
+import { isSafeExternalUrl } from "@/lib/externalLink";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -628,6 +629,13 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
   };
 
   const expandedImages = getExpandedImages();
+
+  // Só vira botão de abrir se for http(s) de verdade: o campo é texto livre, e
+  // um `javascript:` colado ali executaria no clique de quem abrisse o post.
+  const podeAbrirVideo = isSafeExternalUrl(videoUrl);
+  // Arquivo que subiu pelo Norteia (bucket post-media) — a URL é longa e não
+  // diz nada, então em vez dela a tela confirma o envio.
+  const videoEnviado = videoUrl.includes("/post-media/");
   const handlePrevImage = () => {
     if (expandedImageIndex === null) return;
     const newIdx = expandedImageIndex === 0 ? expandedImages.length - 1 : expandedImageIndex - 1;
@@ -834,11 +842,56 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
                   <p className="text-xs text-muted-foreground">Enviando vídeo… {videoPct}% (não feche esta janela)</p>
                 </div>
               )}
-              <Input placeholder="ou cole um link (Drive, etc — só referência)" value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} />
-              {videoUrl && videoPct === null && (
-                <p className="text-xs text-muted-foreground truncate">
-                  Atual: {videoUrl.includes("/post-media/") ? "vídeo enviado ✓" : videoUrl}
-                </p>
+              {/* Abrir e copiar moram DENTRO do campo. Fora dele virariam mais
+                  duas linhas num editor que já é longo — e a linha "Atual:"
+                  que existia aqui só repetia o endereço já visível no input. */}
+              <div className="relative">
+                <Input
+                  placeholder="ou cole um link (Drive, etc — só referência)"
+                  value={videoUrl}
+                  onChange={(e) => setVideoUrl(e.target.value)}
+                  className={podeAbrirVideo ? "pr-[4.5rem]" : undefined}
+                />
+                {podeAbrirVideo && (
+                  <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                      title="Copiar link"
+                      aria-label="Copiar link do vídeo"
+                      onClick={() => {
+                        navigator.clipboard.writeText(videoUrl.trim());
+                        toast.success("Link copiado!");
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      asChild
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                      title="Abrir link em nova aba"
+                    >
+                      {/* noreferrer junto de noopener: o link vai para fora
+                          (Drive, Canva) e não precisa carregar de onde veio. */}
+                      <a
+                        href={videoUrl.trim()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="Abrir link do vídeo em nova aba"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    </Button>
+                  </div>
+                )}
+              </div>
+              {videoEnviado && videoPct === null && (
+                <p className="text-xs text-muted-foreground">Vídeo enviado ✓</p>
               )}
             </div>
           )}
