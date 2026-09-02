@@ -116,6 +116,8 @@ type TaskSubtask = {
   done: boolean;
   position: number;
   assignee_id: string | null;
+  due_date: string | null;
+  done_at: string | null;
 };
 
 type TaskTimeEntry = {
@@ -300,6 +302,13 @@ function TaskCardContent({
   const overdue = task.status !== "done" && isBefore(parseISO(task.due_date), startOfDay(new Date()));
   const priority = PRIORITIES[task.priority];
   const completedSubtasks = subtasks.filter((subtask) => subtask.done).length;
+  // Etapa vencida dentro de uma peça que ainda está no prazo: o prazo da
+  // tarefa-mãe só estoura no fim, então sem este aviso o atraso da arte só
+  // aparece quando já é tarde para a legenda e a edição que dependem dela.
+  const subtarefaAtrasada = subtasks.some(
+    (subtask) => !subtask.done && subtask.due_date
+      && isBefore(parseISO(subtask.due_date), startOfDay(new Date())),
+  );
   const totalSeconds = timeEntries.reduce((total, entry) => total + elapsedSeconds(entry, nowMs), 0);
   const hasRunningTimer = timeEntries.some((entry) => entry.ended_at === null);
   const currentUserTimerRunning = timeEntries.some(
@@ -390,9 +399,13 @@ function TaskCardContent({
           <div
             className={cn(
               "flex items-center gap-1 text-[11px] font-medium",
-              completedSubtasks === subtasks.length ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+              subtarefaAtrasada
+                ? "text-destructive"
+                : completedSubtasks === subtasks.length ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
             )}
-            title={`${completedSubtasks} de ${subtasks.length} subtarefas concluídas`}
+            title={subtarefaAtrasada
+              ? `${completedSubtasks} de ${subtasks.length} concluídas · há etapa com prazo vencido`
+              : `${completedSubtasks} de ${subtasks.length} subtarefas concluídas`}
           >
             <ListChecks className="h-3.5 w-3.5" />
             {completedSubtasks}/{subtasks.length}
@@ -956,7 +969,9 @@ export default function Tasks() {
     mutationFn: async ({ id, taskId, done }: { id: string; taskId: string; done: boolean }) => {
       const { error } = await taskSupabase
         .from<null>("task_subtasks")
-        .update({ done })
+        // done_at junto do done: sem ele, "o que a equipe entregou esta
+        // semana" nao tem como ser respondido — done e um booleano sem memoria.
+        .update({ done, done_at: done ? new Date().toISOString() : null })
         .eq("id", id)
         .eq("task_id", taskId);
       if (error) throw error;
@@ -978,6 +993,17 @@ export default function Tasks() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Não foi possível remover a subtarefa"),
   });
 
+  const setSubtaskDueDate = useMutation({
+    mutationFn: async ({ id, dueDate }: { id: string; dueDate: string | null }) => {
+      const { error } = await taskSupabase
+        .from<null>("task_subtasks")
+        .update({ due_date: dueDate })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tasks-board", organizationId] }),
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Nao foi possivel salvar o prazo"),
+  });
   const setSubtaskAssignee = useMutation({
     mutationFn: async ({ id, assigneeId }: { id: string; assigneeId: string | null }) => {
       const { error } = await taskSupabase
@@ -1352,6 +1378,30 @@ export default function Tasks() {
                               >
                                 {subtask.title}
                               </label>
+
+                              {/* Prazo da etapa. Vazio significa "segue a
+                                  tarefa-mãe" — a maioria das subtarefas não
+                                  precisa de data própria, e obrigar uma faria
+                                  todo mundo repetir o prazo de cima. Fica
+                                  vermelho quando venceu e ainda não foi feita. */}
+                              <input
+                                type="date"
+                                value={subtask.due_date ?? ""}
+                                aria-label={`Prazo da subtarefa ${subtask.title}`}
+                                title={subtask.due_date ? "Prazo da etapa" : "Sem prazo próprio — segue a tarefa"}
+                                disabled={setSubtaskDueDate.isPending}
+                                onChange={(e) => setSubtaskDueDate.mutate({
+                                  id: subtask.id,
+                                  dueDate: e.target.value || null,
+                                })}
+                                className={cn(
+                                  "h-7 shrink-0 rounded-md border-none bg-transparent px-1.5 text-xs text-muted-foreground shadow-none outline-none hover:bg-muted focus:ring-0",
+                                  !subtask.due_date && "opacity-50",
+                                  subtask.due_date && !subtask.done
+                                    && isBefore(parseISO(subtask.due_date), startOfDay(new Date()))
+                                    && "font-medium text-destructive opacity-100",
+                                )}
+                              />
 
                               {/* Direcionar a subtarefa a uma pessoa */}
                               <Select
