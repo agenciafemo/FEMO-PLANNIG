@@ -195,15 +195,19 @@ export async function createMeetingFromLink(input: {
 export type StopMeetingRecordingStatus =
   | "transcribed"
   | "transcript_pending"
+  | "no_transcript"
   | "failed"
   | "stopping";
 
 export async function stopMeetingRecording(
   meetingId: string,
+  /** Encerra mesmo sem transcrição. Saída para quando a Vexa nunca vai
+   *  devolver nada — sem isto a reunião fica em "Gravando" para sempre. */
+  forcarEncerramento = false,
 ): Promise<StopMeetingRecordingStatus> {
   const { data, error } = await invokeEdge<{ status?: string }>(
     "meeting-bot-stop",
-    { body: { meeting_id: meetingId } },
+    { body: { meeting_id: meetingId, force_end: forcarEncerramento } },
   );
   if (error) throw new Error(error.message);
   return (data?.status ?? "stopping") as StopMeetingRecordingStatus;

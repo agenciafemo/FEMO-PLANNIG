@@ -72,6 +72,9 @@ export default function ReuniaoDetail() {
   const [creating, setCreating] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // Quantas vezes finalizar voltou sem transcrição. Depois da primeira, a
+  // tela para de mandar esperar e oferece a saída.
+  const [tentativasSemTranscricao, setTentativasSemTranscricao] = useState(0);
   const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
@@ -159,16 +162,25 @@ export default function ReuniaoDetail() {
     }
   };
 
-  const handleStopRecording = async () => {
+  const handleStopRecording = async (forcarEncerramento = false) => {
     if (!id || stopping) return;
     setStopping(true);
     try {
-      const status = await stopMeetingRecording(id);
+      const status = await stopMeetingRecording(id, forcarEncerramento);
       if (status === "transcribed") {
+        setTentativasSemTranscricao(0);
         toast.success("Gravação finalizada e transcrita.");
+      } else if (status === "no_transcript") {
+        setTentativasSemTranscricao(0);
+        toast.info("Reunião encerrada sem transcrição.");
       } else if (status === "transcript_pending" || status === "stopping") {
+        // A partir da segunda tentativa a mensagem muda de tom: insistir com
+        // "alguns segundos" numa reunião de ontem seria mentir para o usuário.
+        setTentativasSemTranscricao((n) => n + 1);
         toast.info(
-          "O bot saiu da reunião. A Vexa ainda está finalizando a transcrição; tente novamente em alguns segundos.",
+          tentativasSemTranscricao === 0
+            ? "O bot saiu da reunião. A Vexa ainda está finalizando a transcrição; tente novamente em alguns segundos."
+            : "A Vexa continua sem devolver transcrição. Se a reunião não aconteceu ou o bot não foi admitido, encerre sem transcrição.",
         );
       } else if (status === "failed") {
         toast.error("A gravação terminou, mas a transcrição não veio.");
@@ -270,7 +282,7 @@ export default function ReuniaoDetail() {
                   <AlertDialogCancel className="mt-0 min-h-11 w-full sm:w-auto">Continuar gravando</AlertDialogCancel>
                   <AlertDialogAction
                     className="min-h-11 w-full bg-destructive text-destructive-foreground hover:bg-destructive/90 sm:w-auto"
-                    onClick={handleStopRecording}
+                    onClick={() => handleStopRecording(false)}
                   >
                     Finalizar gravação
                   </AlertDialogAction>
@@ -387,6 +399,48 @@ export default function ReuniaoDetail() {
               "Gravando a reunião. Ao terminar, use o botão “Finalizar gravação”."}
             {!stopping && meeting.status === "transcribing" && "Transcrevendo o áudio..."}
             {!stopping && meeting.status === "summarizing" && "Gerando a ata com IA..."}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* A saída do beco sem saída.
+          Se a Vexa nunca devolver transcrição — bot não admitido, reunião que
+          não aconteceu, ninguém falou —, "Finalizar gravação" responde
+          `transcript_pending` para sempre e a reunião trava em "Gravando".
+          Só aparece depois da primeira tentativa frustrada: oferecer de cara
+          convidaria a desistir antes da hora. */}
+      {meeting.status === "recording" && tentativasSemTranscricao > 0 && (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="p-4 text-sm">
+            <p className="font-medium">A Vexa não devolveu transcrição.</p>
+            <p className="mt-0.5 text-muted-foreground">
+              Isso acontece quando o bot não foi admitido na reunião, quando
+              ninguém falou, ou quando a reunião não chegou a acontecer. Nesses
+              casos a transcrição não vai chegar depois.
+            </p>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button size="sm" variant="outline" className="mt-3" disabled={stopping}>
+                  Encerrar sem transcrição
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Encerrar sem transcrição?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    A reunião sai de “Gravando” e fica marcada como sem
+                    transcrição. Não há ata para gerar, e isso não pode ser
+                    desfeito — mas você pode criar uma reunião nova.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Tentar de novo</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => handleStopRecording(true)}>
+                    Encerrar sem transcrição
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </CardContent>
         </Card>
       )}
