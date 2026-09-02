@@ -87,7 +87,9 @@ export default function ReuniaoDetail() {
   const [stopping, setStopping] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatingDetails, setGeneratingDetails] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  // A análise sai junto com a ata, então começa visível: escondê-la faria o
+  // trabalho que a IA acabou de fazer parecer inexistente.
+  const [detailsOpen, setDetailsOpen] = useState(true);
   // Quantas vezes finalizar voltou sem transcrição. Depois da primeira, a
   // tela para de mandar esperar e oferece a saída.
   const [tentativasSemTranscricao, setTentativasSemTranscricao] = useState(0);
@@ -339,7 +341,7 @@ export default function ReuniaoDetail() {
                 <Sparkles className="mr-2 h-4 w-4" />
               )}
               {generating
-                ? "Gerando ata..."
+                ? "Gerando ata e análise..."
                 : meeting.status === "ready"
                 ? "Gerar ata novamente"
                 : "Gerar ata com IA"}
