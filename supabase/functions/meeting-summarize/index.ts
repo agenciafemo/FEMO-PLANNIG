@@ -51,11 +51,23 @@ interface DetailedTopic {
   participantes_citados: string[];
 }
 
+/** Pauta que pode nascer da reuniao. E o unico campo GERATIVO da analise: os
+ *  demais so reorganizam o que foi dito. Por isso `origem` e obrigatoria — e
+ *  ela que amarra a sugestao a uma fala real e impede pauta generica de
+ *  qualquer agencia para qualquer cliente. */
+interface ContentSuggestion {
+  titulo: string;
+  formato: string;
+  angulo: string;
+  origem: string;
+}
+
 interface MeetingDetails {
   panorama: string;
   topicos: DetailedTopic[];
   divergencias: string[];
   questoes_em_aberto: string[];
+  sugestoes_conteudo: ContentSuggestion[];
   limitacoes: string[];
 }
 
@@ -109,9 +121,33 @@ const detailsResponseSchema = {
     },
     divergencias: { type: "ARRAY", items: { type: "STRING" }, maxItems: 10 },
     questoes_em_aberto: { type: "ARRAY", items: { type: "STRING" }, maxItems: 15 },
+    sugestoes_conteudo: {
+      type: "ARRAY",
+      maxItems: 8,
+      items: {
+        type: "OBJECT",
+        properties: {
+          titulo: { type: "STRING" },
+          formato: {
+            type: "STRING",
+            enum: ["reels", "carrossel", "estatico", "story", "blog"],
+          },
+          angulo: { type: "STRING" },
+          origem: { type: "STRING" },
+        },
+        required: ["titulo", "formato", "angulo", "origem"],
+      },
+    },
     limitacoes: { type: "ARRAY", items: { type: "STRING" }, maxItems: 10 },
   },
-  required: ["panorama", "topicos", "divergencias", "questoes_em_aberto", "limitacoes"],
+  required: [
+    "panorama",
+    "topicos",
+    "divergencias",
+    "questoes_em_aberto",
+    "sugestoes_conteudo",
+    "limitacoes",
+  ],
 };
 
 function isActionItem(value: unknown): value is ActionItem {
@@ -161,6 +197,17 @@ function isDetailedTopic(value: unknown): value is DetailedTopic {
     isStringArray(topic.participantes_citados);
 }
 
+const FORMATOS = ["reels", "carrossel", "estatico", "story", "blog"];
+
+function isContentSuggestion(value: unknown): value is ContentSuggestion {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.titulo === "string" &&
+    typeof item.formato === "string" &&
+    typeof item.angulo === "string" &&
+    typeof item.origem === "string";
+}
+
 function cleanStrings(values: string[], maxItems: number, maxLength: number) {
   return values.map((text) => text.trim().slice(0, maxLength)).filter(Boolean).slice(0, maxItems);
 }
@@ -176,6 +223,8 @@ function validateDetails(value: unknown): MeetingDetails {
     !item.topicos.every(isDetailedTopic) ||
     !isStringArray(item.divergencias) ||
     !isStringArray(item.questoes_em_aberto) ||
+    !Array.isArray(item.sugestoes_conteudo) ||
+    !item.sugestoes_conteudo.every(isContentSuggestion) ||
     !isStringArray(item.limitacoes)
   ) {
     throw new HttpError(502, "gemini_invalid_response");
@@ -191,8 +240,78 @@ function validateDetails(value: unknown): MeetingDetails {
     })).filter((topic) => topic.titulo && topic.contexto),
     divergencias: cleanStrings(item.divergencias, 10, 700),
     questoes_em_aberto: cleanStrings(item.questoes_em_aberto, 15, 700),
+    // Sugestao sem `origem` e descartada: sem a fala que a motivou, vira pauta
+    // generica que serviria para qualquer cliente — exatamente o que nao
+    // queremos que a equipe leve para o planejamento.
+    sugestoes_conteudo: item.sugestoes_conteudo.slice(0, 8).map((s) => ({
+      titulo: s.titulo.trim().slice(0, 200),
+      formato: FORMATOS.includes(s.formato.trim().toLowerCase())
+        ? s.formato.trim().toLowerCase()
+        : "estatico",
+      angulo: s.angulo.trim().slice(0, 700),
+      origem: s.origem.trim().slice(0, 500),
+    })).filter((s) => s.titulo && s.origem),
     limitacoes: cleanStrings(item.limitacoes, 10, 500),
   };
+}
+
+/**
+ * Ficha do cliente, em texto, para o prompt.
+ *
+ * O NICHO NAO E ADIVINHADO. O Norteia ja sabe quem e o cliente: o segmento, o
+ * posicionamento, as personas, as dores do publico e ate as palavras
+ * proibidas estao em client_content_profiles, preenchidos pela equipe na aba
+ * "Contexto para a IA". Pedir ao modelo que deduza o nicho de uma transcricao
+ * seria jogar fora dado melhor e mais confiavel do que qualquer inferencia.
+ *
+ * Best-effort de proposito: cliente sem ficha preenchida (ou reuniao interna,
+ * sem cliente) ainda gera ata. Sem contexto as sugestoes ficam mais genericas,
+ * o que e melhor que falhar.
+ */
+// deno-lint-ignore no-explicit-any
+async function carregarFichaDoCliente(supabase: any, clientId: string | null): Promise<string> {
+  if (!clientId) return "";
+  try {
+    const { data } = await supabase
+      .from("client_content_profiles")
+      .select(
+        "brand_summary, segment, specialties, positioning, differentiators, products_services, personas, audience_pains, audience_desires, audience_objections, voice_personality, forbidden_words, sensitive_topics",
+      )
+      .eq("client_id", clientId)
+      .maybeSingle();
+    if (!data) return "";
+
+    const linhas: string[] = [];
+    const texto = (rotulo: string, valor: unknown) => {
+      if (typeof valor === "string" && valor.trim()) {
+        linhas.push(`${rotulo}: ${valor.trim().slice(0, 600)}`);
+      }
+    };
+    const lista = (rotulo: string, valor: unknown) => {
+      if (Array.isArray(valor) && valor.length > 0) {
+        linhas.push(`${rotulo}: ${valor.slice(0, 12).join("; ").slice(0, 800)}`);
+      }
+    };
+
+    texto("Segmento/nicho", data.segment);
+    texto("A marca", data.brand_summary);
+    texto("Posicionamento", data.positioning);
+    lista("Especialidades", data.specialties);
+    lista("Produtos e servicos", data.products_services);
+    lista("Diferenciais", data.differentiators);
+    lista("Personas", data.personas);
+    lista("Dores do publico", data.audience_pains);
+    lista("Desejos do publico", data.audience_desires);
+    lista("Objecoes do publico", data.audience_objections);
+    texto("Voz da marca", data.voice_personality);
+    lista("Palavras proibidas", data.forbidden_words);
+    lista("Temas sensiveis", data.sensitive_topics);
+
+    return linhas.length > 0 ? linhas.join("
+") : "";
+  } catch {
+    return "";
+  }
 }
 
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503]);
@@ -207,6 +326,10 @@ interface GeminiAnalysisRequest {
   systemInstruction: string;
   schema: Record<string, unknown>;
   maxOutputTokens: number;
+  /** Ficha do cliente. Vai num bloco proprio, separado da transcricao: a
+   *  transcricao e dado nao confiavel, a ficha e dado da casa. Misturar os
+   *  dois no mesmo bloco apagaria essa distincao. */
+  fichaDoCliente?: string;
 }
 
 const SOURCE_RULES = [
@@ -219,6 +342,7 @@ const SOURCE_RULES = [
   "Agrupe repetições equivalentes e preserve diferenças reais de opinião, contexto, motivo e consequência.",
   "Escreva em português do Brasil, com linguagem profissional, concreta e sem frases genéricas de preenchimento.",
   "Não use conhecimento externo para corrigir ou ampliar o que foi dito.",
+  "O bloco <cliente>, quando presente, é a ficha que a agência mantém sobre o cliente. Use-a para entender o negócio e o vocabulário — nunca como se fosse fala da reunião, e nunca para inventar fatos que a transcrição não traz.",
 ];
 
 const MINUTES_INSTRUCTION = [
@@ -244,6 +368,11 @@ const DETAILS_INSTRUCTION = [
   "participantes_citados deve usar somente nomes ou rótulos de falante presentes na transcrição; deixe vazio se não for possível atribuir.",
   "divergencias: registre apenas discordâncias, alternativas ou mudanças de direção realmente expressas. Use lista vazia se não houver.",
   "questoes_em_aberto: registre perguntas sem resposta, definições pendentes e pontos que a reunião deixou sem conclusão.",
+  "sugestoes_conteudo: proponha de 0 a 8 pautas que a agência pode produzir a partir do que foi dito. É o ÚNICO campo em que você pode propor algo que não foi falado literalmente.",
+  "Cada sugestão precisa nascer de um assunto real da reunião: `origem` deve citar o que foi dito que a motiva. Sem essa âncora, não sugira.",
+  "Use a ficha do cliente em <cliente> para acertar nicho, linguagem, personas e dores. Se a ficha trouxer palavras proibidas ou temas sensíveis, respeite-as.",
+  "Não sugira pauta genérica que serviria para qualquer cliente de qualquer segmento. Se a reunião não deu material, devolva lista vazia — isso é uma resposta válida e melhor que encher.",
+  "angulo: diga a abordagem concreta, não o tema. `formato` deve ser o mais adequado ao conteúdo, não o mais fácil.",
   "limitacoes: informe apenas problemas reais da fonte, como trecho incompleto, falante não identificado ou afirmação contraditória.",
   "Não repita a ata em versão maior: priorize explicações, motivos, argumentos, restrições, exemplos e relações entre os assuntos.",
   "A resposta deve obedecer estritamente ao schema JSON solicitado.",
@@ -266,7 +395,11 @@ async function askGemini(transcript: string, request: GeminiAnalysisRequest): Pr
           systemInstruction: { parts: [{ text: request.systemInstruction }] },
           contents: [{
             role: "user",
-            parts: [{ text: `<transcricao>\n${transcript}\n</transcricao>` }],
+            parts: [{
+              text: request.fichaDoCliente
+                ? `<cliente>\n${request.fichaDoCliente}\n</cliente>\n\n<transcricao>\n${transcript}\n</transcricao>`
+                : `<transcricao>\n${transcript}\n</transcricao>`,
+            }],
           }],
           generationConfig: {
             temperature: 0.2,
@@ -365,7 +498,7 @@ Deno.serve(async (request) => {
     generationMode = body.mode ?? "minutes";
 
     const meetingResult = await supabase.from("meetings").select(
-      "id, organization_id, created_by, title, transcript_text",
+      "id, organization_id, created_by, title, transcript_text, client_id",
     ).eq("id", meetingId).single();
     if (meetingResult.error || !meetingResult.data) {
       throw new HttpError(404, "meeting_not_found");
@@ -394,12 +527,18 @@ Deno.serve(async (request) => {
       throw new HttpError(409, "missing_transcript");
     }
 
+    const fichaDoCliente = await carregarFichaDoCliente(
+      supabase,
+      (meeting.client_id as string | null) ?? null,
+    );
+
     if (generationMode === "details") {
       const raw = await askGemini(transcript.slice(0, MAX_TRANSCRIPT_CHARS), {
         operation: "details",
         systemInstruction: DETAILS_INSTRUCTION,
         schema: detailsResponseSchema,
         maxOutputTokens: 7_000,
+        fichaDoCliente,
       });
       const details = validateDetails(raw);
       const { error: detailsError } = await supabase.from("meetings").update({
@@ -417,6 +556,7 @@ Deno.serve(async (request) => {
       systemInstruction: MINUTES_INSTRUCTION,
       schema: responseSchema,
       maxOutputTokens: 4_000,
+      fichaDoCliente,
     });
     const summary = validateSummary(raw);
 
@@ -457,18 +597,48 @@ Deno.serve(async (request) => {
     }).eq("id", meetingId);
     if (updateError) throw new HttpError(502, "meeting_save_failed");
 
+    // A analise aprofundada sai no MESMO clique. Sao duas chamadas ao Gemini
+    // em vez de uma so por qualidade: um prompt focado em "o que ficou
+    // decidido" e outro em "o que foi discutido e o que da para produzir"
+    // rendem melhor que um pedido unico tentando as duas coisas.
+    //
+    // BEST-EFFORT de proposito, e nesta ordem: a ata ja esta salva e a reuniao
+    // ja esta 'ready'. Se o segundo pedido falhar, o usuario continua com a
+    // ata — e o botao "Gerar ata novamente" refaz as duas. Deixar a analise
+    // derrubar uma ata que deu certo seria repetir o erro que ja tivemos.
+    let details: MeetingDetails | null = null;
+    try {
+      const rawDetails = await askGemini(transcript.slice(0, MAX_TRANSCRIPT_CHARS), {
+        operation: "details",
+        systemInstruction: DETAILS_INSTRUCTION,
+        schema: detailsResponseSchema,
+        maxOutputTokens: 7_000,
+        fichaDoCliente,
+      });
+      details = validateDetails(rawDetails);
+      await supabase.from("meetings").update({
+        detailed_summary: details,
+        detailed_summary_generated_at: new Date().toISOString(),
+      }).eq("id", meetingId);
+    } catch {
+      details = null;
+    }
+
     if (meeting.created_by) {
+      const pautas = details?.sugestoes_conteudo.length ?? 0;
       await supabase.from("notifications").insert({
         organization_id: organizationId,
         user_id: meeting.created_by,
         title: `📝 Ata pronta: ${meeting.title}`,
-        body: `${summary.itens_acao.length} item(ns) de ação identificados.`,
+        body: pautas > 0
+          ? `${summary.itens_acao.length} item(ns) de ação e ${pautas} sugestão(ões) de pauta.`
+          : `${summary.itens_acao.length} item(ns) de ação identificados.`,
         type: "meeting_ready",
         read: false,
       }).then(() => {}, () => {});
     }
 
-    return jsonResponse({ ok: true, summary }, 200, headers);
+    return jsonResponse({ ok: true, summary, details }, 200, headers);
   } catch (error) {
     // 4xx (401/403/404/409/400) acontecem antes de qualquer geração de ata
     // ter começado — não há nada "em andamento" para marcar como falha, e

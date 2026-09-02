@@ -1,4 +1,4 @@
-import { AlertTriangle, BookOpenText, HelpCircle, RefreshCw, Split } from "lucide-react";
+import { AlertTriangle, BookOpenText, HelpCircle, Lightbulb, RefreshCw, Split } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -100,6 +100,39 @@ export function MeetingDetailsPanel({ details, refreshing, onRefresh }: MeetingD
               </section>
             )}
           </div>
+        )}
+
+        {/* Pautas que podem sair da reunião. É a parte que interessa a uma
+            agência: a conversa com o cliente vira material de planejamento sem
+            ninguém reler a transcrição. Cada uma mostra a `origem` — o que foi
+            dito que a motivou —, porque sugestão sem âncora é pauta genérica
+            que serviria para qualquer cliente. */}
+        {details.sugestoes_conteudo.length > 0 && (
+          <section className="rounded-xl border border-brand/30 bg-brand/5 p-4">
+            <h4 className="flex items-center gap-2 text-sm font-semibold">
+              <Lightbulb className="h-4 w-4 text-brand" />
+              Pautas que podem sair desta reunião
+            </h4>
+            <ul className="mt-3 space-y-3">
+              {details.sugestoes_conteudo.map((pauta, index) => (
+                <li
+                  key={`${pauta.titulo}-${index}`}
+                  className="rounded-lg border border-border/60 bg-card p-3"
+                >
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <span className="text-sm font-medium">{pauta.titulo}</span>
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase">
+                      {pauta.formato}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">{pauta.angulo}</p>
+                  <p className="mt-1.5 text-xs text-muted-foreground/80">
+                    <span className="font-medium">Veio de:</span> {pauta.origem}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         {details.limitacoes.length > 0 && (
