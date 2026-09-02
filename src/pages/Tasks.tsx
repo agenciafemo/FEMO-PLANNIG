@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
+import { PullFromProductionDialog } from "@/components/tasks/PullFromProductionDialog";
 import { ProjectRail } from "@/components/tasks/ProjectRail";
 import {
   DndContext,
@@ -38,6 +39,7 @@ import {
   Trash2,
   UserCheck,
   UserRound,
+  Workflow,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -651,6 +653,7 @@ export default function Tasks() {
   // guardamos localmente e inserimos depois que ela é criada).
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
   const [mostrarTodasConcluidas, setMostrarTodasConcluidas] = useState(false);
+  const [puxarProducaoAberto, setPuxarProducaoAberto] = useState(false);
   const { boardClientId } = useParams();
   const rotaInterna = useLocation().pathname === "/tasks/interno";
 
@@ -1336,6 +1339,9 @@ export default function Tasks() {
                   botão avulso davam a ela peso de entidade independente e
                   faziam a página abrir com duas leituras concorrentes. */}
               <div className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" className="gap-2" onClick={() => setPuxarProducaoAberto(true)}>
+                  <Workflow className="h-4 w-4" /> Puxar da Produção
+                </Button>
                 <Button className="gap-2" onClick={openCreateTask}>
                   <Plus className="h-4 w-4" /> Nova tarefa
                 </Button>
@@ -1885,6 +1891,17 @@ export default function Tasks() {
           </DndContext>
         )}
 
+        {organizationId && user && (
+          <PullFromProductionDialog
+            open={puxarProducaoAberto}
+            onOpenChange={setPuxarProducaoAberto}
+            organizationId={organizationId}
+            clientId={boardClientId ?? null}
+            clientName={boardClientId ? (clientsById.get(boardClientId)?.name ?? null) : null}
+            members={(boardQuery.data?.members ?? []).map((m) => ({ userId: m.userId, name: m.name }))}
+            createdBy={user.id}
+          />
+        )}
         {!canEditContent && !boardQuery.isLoading && !boardQuery.isError && (
           <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
             <UserRound className="h-3.5 w-3.5" /> Seu papel possui acesso somente para visualização.
