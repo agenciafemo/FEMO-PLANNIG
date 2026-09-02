@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { carregarConfig, salvarConfig } from "@/lib/configuracoes";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
   head: () => ({ meta: [{ title: "Configurações — FEMO FINANÇAS" }] }),
@@ -28,7 +29,6 @@ function Configuracoes() {
     <PageContainer>
       <PageHeader title="Configurações" subtitle="Aparência, importação, regras de comissão e penalidades" />
       <div className="grid gap-6 lg:grid-cols-2">
-        <Aparencia />
         <ImportacaoMeuDinheiro />
         <DistribuicaoLucro />
         <PenalidadeAtraso />
@@ -40,91 +40,9 @@ function Configuracoes() {
   );
 }
 
-function Aparencia() {
-  const qc = useQueryClient();
-  const { data } = useSuspenseQuery({
-    queryKey: ["config"],
-    queryFn: async () => (await supabase.from("configuracoes").select("*").eq("id", 1).single()).data!,
-  });
-  type Cfg = { cor_primaria?: string; cor_secundaria?: string; cor_fundo?: string; logo_url?: string };
-  const cfg = data as Cfg;
-  const [primaria, setPrimaria] = useState(cfg.cor_primaria ?? "#0F172A");
-  const [secundaria, setSecundaria] = useState(cfg.cor_secundaria ?? "#64748B");
-  const [fundo, setFundo] = useState(cfg.cor_fundo ?? "#FAFAF9");
-  const [logoUrl, setLogoUrl] = useState<string | undefined>(cfg.logo_url ?? undefined);
-  const [uploading, setUploading] = useState(false);
-
-  useEffect(() => {
-    setPrimaria(cfg.cor_primaria ?? "#0F172A");
-    setSecundaria(cfg.cor_secundaria ?? "#64748B");
-    setFundo(cfg.cor_fundo ?? "#FAFAF9");
-    setLogoUrl(cfg.logo_url ?? undefined);
-  }, [data]);
-
-  const save = useMutation({
-    mutationFn: async (patch: Record<string, unknown>) => {
-      const { error } = await supabase.from("configuracoes").update(patch as never).eq("id", 1);
-      if (error) throw error;
-    },
-    onSuccess: () => { qc.invalidateQueries(); window.dispatchEvent(new Event("os-theme:refresh")); toast.success("Aparência salva"); },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const onLogo = async (file: File) => {
-    setUploading(true);
-    try {
-      const ext = file.name.split(".").pop() || "png";
-      const path = `logo-${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("branding").upload(path, file, { upsert: true });
-      if (upErr) throw upErr;
-      const { data: signed } = await supabase.storage.from("branding").createSignedUrl(path, 60 * 60 * 24 * 365 * 5);
-      if (!signed?.signedUrl) throw new Error("Falha ao gerar URL do logo");
-      setLogoUrl(signed.signedUrl);
-      await save.mutateAsync({ logo_url: signed.signedUrl });
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally { setUploading(false); }
-  };
-
-  return (
-    <div className="rounded-xl border bg-surface p-6 space-y-5">
-      <div>
-        <h3 className="font-semibold">Aparência da marca</h3>
-        <p className="text-sm text-muted-foreground mt-1">Logo e cores do sistema. As mudanças refletem em todo o app.</p>
-      </div>
-      <div className="space-y-3">
-        <Label>Logo da agência</Label>
-        <div className="flex items-center gap-4">
-          <div className="h-16 w-16 rounded-lg border bg-surface-2 flex items-center justify-center overflow-hidden">
-            {logoUrl ? <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain" /> : <span className="text-xs text-muted-foreground">Sem logo</span>}
-          </div>
-          <Input type="file" accept="image/*" disabled={uploading} onChange={(e) => { const f = e.target.files?.[0]; if (f) onLogo(f); }} />
-        </div>
-      </div>
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Primária", value: primaria, set: setPrimaria },
-          { label: "Secundária", value: secundaria, set: setSecundaria },
-          { label: "Fundo", value: fundo, set: setFundo },
-        ].map((c) => (
-          <div key={c.label} className="space-y-1.5">
-            <Label className="text-xs">{c.label}</Label>
-            <div className="flex items-center gap-2">
-              <input type="color" value={c.value} onChange={(e) => c.set(e.target.value)} className="h-9 w-12 rounded border bg-transparent cursor-pointer" />
-              <Input value={c.value} onChange={(e) => c.set(e.target.value)} className="tabular text-xs" />
-            </div>
-          </div>
-        ))}
-      </div>
-      <Button onClick={() => save.mutate({ cor_primaria: primaria, cor_secundaria: secundaria, cor_fundo: fundo })} disabled={save.isPending}>
-        {save.isPending ? "Salvando…" : "Aplicar cores"}
-      </Button>
-    </div>
-  );
-}
-
-type ParsedRow = Record<string, string>;
-type NormalRow = { descricao: string; valor: number; data: string; tipo: "Entrada" | "Saída" };
+// A seção de Aparência saiu: cores e logo eram colunas de `configuracoes`, que
+// deixaram de existir. A identidade visual é a do Norteia — um segundo lugar
+// para trocar a mesma cor garante que uma hora as duas telas divergem.
 
 function normalizeHeader(h: string): string {
   return (h ?? "").replace(/^\uFEFF/, "").trim();
@@ -364,7 +282,7 @@ function DistribuicaoLucro() {
   const qc = useQueryClient();
   const { data } = useSuspenseQuery({
     queryKey: ["config"],
-    queryFn: async () => (await supabase.from("configuracoes").select("*").eq("id", 1).single()).data!,
+    queryFn: carregarConfig,
   });
   const [rot, setRot] = useState<number>(Number(data.pct_rotativa));
   const [res, setRes] = useState<number>(Number(data.pct_reserva));
@@ -374,8 +292,7 @@ function DistribuicaoLucro() {
   const save = useMutation({
     mutationFn: async () => {
       if (Math.abs(total - 100) > 0.01) throw new Error("A soma deve ser 100%.");
-      const { error } = await supabase.from("configuracoes").update({ pct_rotativa: rot, pct_reserva: res }).eq("id", 1);
-      if (error) throw error;
+      await salvarConfig({ pct_rotativa: rot, pct_reserva: res });
     },
     onSuccess: () => { qc.invalidateQueries(); toast.success("Configurações salvas"); },
     onError: (e: Error) => toast.error(e.message),
@@ -415,15 +332,14 @@ function PenalidadeAtraso() {
   const qc = useQueryClient();
   const { data } = useSuspenseQuery({
     queryKey: ["config"],
-    queryFn: async () => (await supabase.from("configuracoes").select("*").eq("id", 1).single()).data!,
+    queryFn: carregarConfig,
   });
   const [pct, setPct] = useState<number>(Number(data.pct_penalidade_atraso));
   useEffect(() => setPct(Number(data.pct_penalidade_atraso)), [data]);
 
   const save = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("configuracoes").update({ pct_penalidade_atraso: pct }).eq("id", 1);
-      if (error) throw error;
+      await salvarConfig({ pct_penalidade_atraso: pct });
     },
     onSuccess: () => { qc.invalidateQueries(); toast.success("Penalidade atualizada"); },
     onError: (e: Error) => toast.error(e.message),
@@ -462,15 +378,14 @@ function PenalidadeChurn() {
   const qc = useQueryClient();
   const { data } = useSuspenseQuery({
     queryKey: ["config"],
-    queryFn: async () => (await supabase.from("configuracoes").select("*").eq("id", 1).single()).data!,
+    queryFn: carregarConfig,
   });
   const [pct, setPct] = useState<number>(Number((data as { pct_penalidade_churn?: number }).pct_penalidade_churn ?? 100));
   useEffect(() => setPct(Number((data as { pct_penalidade_churn?: number }).pct_penalidade_churn ?? 100)), [data]);
 
   const save = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("configuracoes").update({ pct_penalidade_churn: pct } as never).eq("id", 1);
-      if (error) throw error;
+      await salvarConfig({ pct_penalidade_churn: pct });
     },
     onSuccess: () => { qc.invalidateQueries(); toast.success("Penalidade de churn atualizada"); },
     onError: (e: Error) => toast.error(e.message),
