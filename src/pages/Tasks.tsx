@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
+import { ProjectRail } from "@/components/tasks/ProjectRail";
 import {
   DndContext,
   DragEndEvent,
@@ -1172,6 +1173,28 @@ export default function Tasks() {
     ).length;
   }, [filteredTasks, mostrarTodasConcluidas]);
 
+  // Contadores da lateral. Saem de localTasks (a organizacao inteira), nao de
+  // filteredTasks: a lateral tem que dizer o estado de TODOS os clientes,
+  // inclusive o daquele que voce nao esta olhando agora.
+  const { abertasPorCliente, atrasadasPorCliente } = useMemo(() => {
+    const abertas = new Map<string, number>();
+    const atrasadas = new Map<string, number>();
+    const hoje = startOfDay(new Date());
+    const soma = (mapa: Map<string, number>, chave: string) =>
+      mapa.set(chave, (mapa.get(chave) ?? 0) + 1);
+
+    for (const task of localTasks) {
+      if (task.done) continue;
+      const chave = task.client_id ?? "__interno__";
+      soma(abertas, chave);
+      soma(abertas, "__todas__");
+      if (isBefore(parseISO(task.due_date), hoje)) {
+        soma(atrasadas, chave);
+        soma(atrasadas, "__todas__");
+      }
+    }
+    return { abertasPorCliente: abertas, atrasadasPorCliente: atrasadas };
+  }, [localTasks]);
   const tasksByStatus = useMemo(() => {
     const limite = new Date();
     limite.setDate(limite.getDate() - DIAS_CONCLUIDAS_VISIVEIS);
@@ -1279,7 +1302,14 @@ export default function Tasks() {
 
   return (
     <div className="nrt-surface -mx-4 -mt-4 min-h-[calc(100vh-4rem)] px-4 pb-10 pt-6 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-8">
-      <div className="mx-auto max-w-[1500px]">
+      <div className="mx-auto flex max-w-[1500px] gap-5">
+        <ProjectRail
+          clients={boardQuery.data?.clients ?? []}
+          abertasPorCliente={abertasPorCliente}
+          atrasadasPorCliente={atrasadasPorCliente}
+          loading={boardQuery.isLoading}
+        />
+        <div className="min-w-0 flex-1">
         <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
@@ -1860,6 +1890,7 @@ export default function Tasks() {
             <UserRound className="h-3.5 w-3.5" /> Seu papel possui acesso somente para visualização.
           </div>
         )}
+        </div>
       </div>
     </div>
   );
