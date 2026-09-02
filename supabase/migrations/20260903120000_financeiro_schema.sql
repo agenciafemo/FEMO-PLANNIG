@@ -194,7 +194,13 @@ CREATE TABLE IF NOT EXISTS public.lancamentos_financeiros (
   -- Mês a que a cobrança se refere, derivado do vencimento. Coluna gerada para
   -- poder entrar no índice único — a regra vive no banco, não na função que
   -- gera. Função esquece de conferir; índice não.
-  competencia DATE GENERATED ALWAYS AS (date_trunc('month', data_lancamento)::date) STORED,
+  --
+  -- O cast para `timestamp` é obrigatório, não estilo: com um DATE puro o
+  -- Postgres escolhe a versão de date_trunc que recebe `timestamptz`, e essa é
+  -- STABLE (depende do fuso da sessão). Coluna gerada exige IMMUTABLE, e a
+  -- criação falha com 42P17. Forçar `timestamp` sem fuso escolhe a sobrecarga
+  -- imutável.
+  competencia DATE GENERATED ALWAYS AS (date_trunc('month', data_lancamento::timestamp)::date) STORED,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
