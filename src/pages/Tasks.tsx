@@ -184,6 +184,25 @@ const taskSupabase = supabase as unknown as {
   rpc<T>(functionName: string, params: Record<string, unknown>): PromiseLike<QueryResult<T>>;
 };
 
+type LinhasAfetadas = Array<{ id: string }>;
+
+/**
+ * Confere que a escrita pegou alguma linha.
+ *
+ * Um UPDATE ou DELETE barrado por RLS no PostgREST volta com ZERO linhas e
+ * `error` nulo. Sem esta checagem o `onSuccess` dispara, a tela mostra "Tarefa
+ * atualizada" e nada foi gravado — o mesmo bug que já custou o rascunho de
+ * posts inteiros no editor de planejamento. `productionToTask.ts` documenta o
+ * padrão; este arquivo não seguia.
+ */
+function exigirLinhaEscrita(
+  resultado: QueryResult<LinhasAfetadas>,
+  semPermissao: string,
+): void {
+  if (resultado.error) throw new Error(resultado.error.message);
+  if (!resultado.data?.length) throw new Error(semPermissao);
+}
+
 function isMissingTaskAssigneeRpc(error: QueryError) {
   if (error.code === "PGRST202" || error.code === "42883") return true;
 
@@ -905,12 +924,15 @@ export default function Tasks() {
       };
 
       if (editingTask) {
-        const { error } = await taskSupabase
-          .from<null>("tasks")
-          .update(values)
-          .eq("id", editingTask.id)
-          .eq("organization_id", organizationId!);
-        if (error) throw error;
+        exigirLinhaEscrita(
+          await taskSupabase
+            .from<LinhasAfetadas>("tasks")
+            .update(values)
+            .eq("id", editingTask.id)
+            .eq("organization_id", organizationId!)
+            .select("id"),
+          "Sem permissão para editar esta tarefa.",
+        );
         return "updated" as const;
       }
 
@@ -954,12 +976,15 @@ export default function Tasks() {
   const deleteTask = useMutation({
     mutationFn: async () => {
       if (!editingTask) return;
-      const { error } = await taskSupabase
-        .from<null>("tasks")
-        .delete()
-        .eq("id", editingTask.id)
-        .eq("organization_id", organizationId!);
-      if (error) throw error;
+      exigirLinhaEscrita(
+        await taskSupabase
+          .from<LinhasAfetadas>("tasks")
+          .delete()
+          .eq("id", editingTask.id)
+          .eq("organization_id", organizationId!)
+          .select("id"),
+        "Sem permissão para excluir esta tarefa.",
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks-board", organizationId] });
@@ -991,14 +1016,17 @@ export default function Tasks() {
 
   const toggleSubtask = useMutation({
     mutationFn: async ({ id, taskId, done }: { id: string; taskId: string; done: boolean }) => {
-      const { error } = await taskSupabase
-        .from<null>("task_subtasks")
-        // done_at junto do done: sem ele, "o que a equipe entregou esta
-        // semana" nao tem como ser respondido — done e um booleano sem memoria.
-        .update({ done, done_at: done ? new Date().toISOString() : null })
-        .eq("id", id)
-        .eq("task_id", taskId);
-      if (error) throw error;
+      exigirLinhaEscrita(
+        await taskSupabase
+          .from<LinhasAfetadas>("task_subtasks")
+          // done_at junto do done: sem ele, "o que a equipe entregou esta
+          // semana" nao tem como ser respondido — done e um booleano sem memoria.
+          .update({ done, done_at: done ? new Date().toISOString() : null })
+          .eq("id", id)
+          .eq("task_id", taskId)
+          .select("id"),
+        "Sem permissão para alterar esta subtarefa.",
+      );
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tasks-board", organizationId] }),
     onError: (error) => toast.error(error instanceof Error ? error.message : "Não foi possível atualizar a subtarefa"),
@@ -1006,12 +1034,15 @@ export default function Tasks() {
 
   const removeSubtask = useMutation({
     mutationFn: async ({ id, taskId }: { id: string; taskId: string }) => {
-      const { error } = await taskSupabase
-        .from<null>("task_subtasks")
-        .delete()
-        .eq("id", id)
-        .eq("task_id", taskId);
-      if (error) throw error;
+      exigirLinhaEscrita(
+        await taskSupabase
+          .from<LinhasAfetadas>("task_subtasks")
+          .delete()
+          .eq("id", id)
+          .eq("task_id", taskId)
+          .select("id"),
+        "Sem permissão para remover esta subtarefa.",
+      );
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tasks-board", organizationId] }),
     onError: (error) => toast.error(error instanceof Error ? error.message : "Não foi possível remover a subtarefa"),
@@ -1019,22 +1050,28 @@ export default function Tasks() {
 
   const setSubtaskDueDate = useMutation({
     mutationFn: async ({ id, dueDate }: { id: string; dueDate: string | null }) => {
-      const { error } = await taskSupabase
-        .from<null>("task_subtasks")
-        .update({ due_date: dueDate })
-        .eq("id", id);
-      if (error) throw error;
+      exigirLinhaEscrita(
+        await taskSupabase
+          .from<LinhasAfetadas>("task_subtasks")
+          .update({ due_date: dueDate })
+          .eq("id", id)
+          .select("id"),
+        "Sem permissão para alterar o prazo desta subtarefa.",
+      );
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tasks-board", organizationId] }),
     onError: (error) => toast.error(error instanceof Error ? error.message : "Nao foi possivel salvar o prazo"),
   });
   const setSubtaskAssignee = useMutation({
     mutationFn: async ({ id, assigneeId }: { id: string; assigneeId: string | null }) => {
-      const { error } = await taskSupabase
-        .from<null>("task_subtasks")
-        .update({ assignee_id: assigneeId })
-        .eq("id", id);
-      if (error) throw error;
+      exigirLinhaEscrita(
+        await taskSupabase
+          .from<LinhasAfetadas>("task_subtasks")
+          .update({ assignee_id: assigneeId })
+          .eq("id", id)
+          .select("id"),
+        "Sem permissão para direcionar esta subtarefa.",
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks-board", organizationId] });
