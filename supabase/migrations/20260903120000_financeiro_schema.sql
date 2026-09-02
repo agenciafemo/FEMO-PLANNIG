@@ -1,24 +1,25 @@
 -- ============================================================================
--- MÓDULO FINANCEIRO — schema no banco do Norteia
+-- MÓDULO FINANCEIRO — criação do schema no banco do Norteia
 -- ----------------------------------------------------------------------------
--- O FEMO FINANÇAS vive hoje num projeto Supabase separado (xgnqhaxwileijallnumb),
--- com o schema existindo APENAS no Lovable Cloud: não há migration nenhuma no
--- repositório dele. Duas consequências: não dá para recriar o banco, e não dá
--- para revisar uma mudança antes de aplicá-la.
+-- O FEMO FINANÇAS é hoje só um front gerado pelo Lovable: nunca foi instalado
+-- (não há node_modules), o banco que o .env aponta não existe, e não há
+-- migration nem dado em lugar nenhum. Isso é uma boa notícia — não há nada
+-- para migrar, e dá para desenhar certo de primeira.
 --
--- Esta migration traz esse schema para o banco do Norteia (cdalntmqromwpnurdnle),
--- versionado, com multi-tenant e RLS iguais aos do resto do produto. O app
--- financeiro passa a apontar para cá; as telas continuam as mesmas por enquanto.
+-- DECISÃO CENTRAL: não existe tabela `clientes` paralela.
 --
--- O QUE ESTA MIGRATION NÃO FAZ (de propósito):
---   • não move dados — a cópia é passo separado, para poder ser conferida;
---   • não mexe em `clients` do Norteia;
---   • não força ligação entre as duas carteiras. `clientes.client_id` é
---     NULLABLE: cliente financeiro sem correspondente no Norteia (histórico,
---     churn antigo, receita avulsa) continua existindo sozinho.
+-- O rascunho do Lovable trazia uma carteira própria, que criaria duas listas de
+-- cliente divergindo em silêncio — o problema que motivou juntar os dois
+-- produtos. Aqui a carteira é a do Norteia (`clients`), e o financeiro
+-- acrescenta os campos que só ele conhece, numa tabela 1:1.
 --
--- NÃO recria `user_roles` nem o enum `app_role`: os dois já existem no Norteia
--- com o mesmo papel, e o financeiro passa a usar os de lá.
+-- O que já existe em `clients` NÃO é repetido:
+--   • data de entrada  → clients.agency_since
+--   • segmento         → clients.segment
+--   • nome, logo, cor  → clients.*
+--
+-- NÃO recria `user_roles` nem o enum `app_role`: já existem no Norteia com o
+-- mesmo papel.
 --
 -- Idempotente.
 -- ============================================================================
@@ -50,14 +51,11 @@ END $$;
 -- ---------------------------------------------------------------------------
 -- 2) Tenancy automática
 --
--- O app financeiro não conhece organização — ele nasceu para uma agência só e
--- não envia organization_id em nenhum insert. Exigir a coluna quebraria todas
--- as telas de uma vez.
---
--- Este trigger preenche a organização a partir de quem está escrevendo, e só
--- quando a pessoa pertence a exatamente UMA. Com duas ou mais, ele recusa em
--- vez de escolher: gravar dado financeiro na organização errada é pior que
--- falhar na cara do usuário.
+-- O front financeiro não conhece organização e não envia organization_id em
+-- nenhum insert. Este trigger preenche a partir de quem está escrevendo, e só
+-- quando a pessoa pertence a exatamente UMA organização. Com duas ou mais ele
+-- RECUSA em vez de escolher: gravar dado financeiro na organização errada é
+-- pior que falhar na cara do usuário.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.fin_set_organization_id()
 RETURNS TRIGGER
@@ -101,8 +99,9 @@ CREATE TABLE IF NOT EXISTS public.categorias (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
   nome TEXT NOT NULL CHECK (btrim(nome) <> ''),
-  tipo TEXT NOT NULL DEFAULT 'Ambos',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  tipo TEXT NOT NULL DEFAULT 'Ambos' CHECK (tipo IN ('Entrada', 'Saída', 'Ambos')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (organization_id, nome)
 );
 
 -- Funções de comissão personalizadas.
@@ -111,44 +110,49 @@ CREATE TABLE IF NOT EXISTS public.funcoes (
   organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
   nome TEXT NOT NULL CHECK (btrim(nome) <> ''),
   descricao TEXT,
-  tipo_base TEXT NOT NULL,
+  tipo_base TEXT NOT NULL CHECK (tipo_base IN ('fatia_social_media', 'fatia_trafego', 'valor_total')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Carteira do financeiro.
+-- O lado financeiro de um cliente que já existe no Norteia.
 --
--- `client_id` é a ponte com a carteira do Norteia, e é OPCIONAL de propósito:
--- o financeiro guarda histórico que o Norteia nunca teve (cliente que saiu
--- antes do produto existir, receita avulsa). ON DELETE SET NULL porque apagar
--- um cliente no Norteia não pode levar junto o histórico de faturamento dele.
-CREATE TABLE IF NOT EXISTS public.clientes (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+-- A chave primária É o client_id: um cliente tem no máximo uma ficha
+-- financeira, e ela deixa de existir junto com ele. Cliente sem linha aqui é
+-- simplesmente um cliente que ninguém cadastrou no financeiro ainda.
+CREATE TABLE IF NOT EXISTS public.client_financeiro (
+  client_id UUID PRIMARY KEY REFERENCES public.clients(id) ON DELETE CASCADE,
   organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
-  client_id UUID REFERENCES public.clients(id) ON DELETE SET NULL,
-  nome TEXT NOT NULL CHECK (btrim(nome) <> ''),
+  -- Situação comercial. Fica aqui por ora; quando o Norteia quiser esconder
+  -- cliente encerrado do quadro de planejamento, isto sobe para `clients`.
   status public.client_status NOT NULL DEFAULT 'Ativo',
-  data_entrada DATE NOT NULL,
   data_saida DATE,
   data_status_alterado TIMESTAMPTZ,
   data_aniversario DATE,
-  valor_mensalidade NUMERIC(12,2) NOT NULL DEFAULT 0,
+  -- Mensalidade
+  valor_mensalidade NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (valor_mensalidade >= 0),
   is_recorrente BOOLEAN NOT NULL DEFAULT true,
   dia_vencimento INTEGER NOT NULL DEFAULT 10 CHECK (dia_vencimento BETWEEN 1 AND 31),
-  pct_social_media NUMERIC(6,3) NOT NULL DEFAULT 0,
-  pct_trafego NUMERIC(6,3) NOT NULL DEFAULT 0,
+  -- Fatias que servem de base para comissão
+  pct_social_media NUMERIC(6,3) NOT NULL DEFAULT 0 CHECK (pct_social_media BETWEEN 0 AND 100),
+  pct_trafego NUMERIC(6,3) NOT NULL DEFAULT 0 CHECK (pct_trafego BETWEEN 0 AND 100),
   socios TEXT[] NOT NULL DEFAULT '{}',
   id_cliente_asaas TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON COLUMN public.clientes.client_id IS
-  'Cliente correspondente no Norteia. NULL = existe só no financeiro.';
+COMMENT ON TABLE public.client_financeiro IS
+  'Lado financeiro de um cliente do Norteia. A data de entrada não é repetida '
+  'aqui: ela é clients.agency_since, e é dela que sai o tempo de casa usado no '
+  'cálculo de comissão progressiva.';
 
 CREATE TABLE IF NOT EXISTS public.colaboradores (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
+  -- Pessoa da equipe no Norteia, quando houver. NULL = colaborador que só
+  -- existe na folha (prestador, alguém que saiu antes de ter conta).
+  user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   nome TEXT NOT NULL CHECK (btrim(nome) <> ''),
   cargo public.cargo_colaborador NOT NULL DEFAULT 'Outros',
   salario_base NUMERIC(12,2) NOT NULL DEFAULT 0,
@@ -168,7 +172,9 @@ CREATE TABLE IF NOT EXISTS public.lancamentos_financeiros (
   descricao TEXT,
   status_pagamento public.payment_status NOT NULL DEFAULT 'Pendente',
   categoria_id UUID REFERENCES public.categorias(id) ON DELETE SET NULL,
-  cliente_id UUID REFERENCES public.clientes(id) ON DELETE SET NULL,
+  -- Aponta direto para a carteira do Norteia. ON DELETE SET NULL: apagar um
+  -- cliente não pode apagar o histórico de dinheiro que entrou por ele.
+  client_id UUID REFERENCES public.clients(id) ON DELETE SET NULL,
   colaborador_id UUID REFERENCES public.colaboradores(id) ON DELETE SET NULL,
   -- Cobrança no Asaas
   id_cobranca_asaas TEXT,
@@ -181,20 +187,46 @@ CREATE TABLE IF NOT EXISTS public.lancamentos_financeiros (
   -- Estorno de comissão paga a mais
   is_clawback BOOLEAN NOT NULL DEFAULT false,
   origem_lancamento_id UUID REFERENCES public.lancamentos_financeiros(id) ON DELETE SET NULL,
+  -- Mensalidade gerada pela rotina mensal, e não lançamento avulso. Separar os
+  -- dois é o que permite o índice único abaixo garantir "uma por cliente por
+  -- mês" sem impedir que alguém lance uma segunda entrada do mesmo cliente.
+  is_mensalidade BOOLEAN NOT NULL DEFAULT false,
+  -- Mês a que a cobrança se refere, derivado do vencimento. Coluna gerada para
+  -- poder entrar no índice único — a regra vive no banco, não na função que
+  -- gera. Função esquece de conferir; índice não.
+  --
+  -- O cast para `timestamp` é obrigatório, não estilo: com um DATE puro o
+  -- Postgres escolhe a versão de date_trunc que recebe `timestamptz`, e essa é
+  -- STABLE (depende do fuso da sessão). Coluna gerada exige IMMUTABLE, e a
+  -- criação falha com 42P17. Forçar `timestamp` sem fuso escolhe a sobrecarga
+  -- imutável.
+  competencia DATE GENERATED ALWAYS AS (date_trunc('month', data_lancamento::timestamp)::date) STORED,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Uma cobrança do Asaas não pode virar dois lançamentos.
+CREATE UNIQUE INDEX IF NOT EXISTS lancamentos_cobranca_asaas_key
+  ON public.lancamentos_financeiros (id_cobranca_asaas)
+  WHERE id_cobranca_asaas IS NOT NULL;
+
+-- Um cliente não pode receber duas mensalidades da mesma competência. Rodar a
+-- geração duas vezes no mesmo mês passa a ser inofensivo por construção.
+CREATE UNIQUE INDEX IF NOT EXISTS lancamentos_mensalidade_unica
+  ON public.lancamentos_financeiros (client_id, competencia)
+  WHERE is_mensalidade;
 
 -- Liga colaborador → cliente para o cálculo de comissão.
 CREATE TABLE IF NOT EXISTS public.contratos_fatiamento (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
-  cliente_id UUID NOT NULL REFERENCES public.clientes(id) ON DELETE CASCADE,
+  client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
   colaborador_id UUID NOT NULL REFERENCES public.colaboradores(id) ON DELETE CASCADE,
   valor_base_calculo NUMERIC(12,2) NOT NULL DEFAULT 0,
   status_entrega_mes_atual public.status_entrega NOT NULL DEFAULT 'Entregue no Prazo',
   prazo_entrega_planejamentos INTEGER,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (client_id, colaborador_id)
 );
 
 -- Faixas de meses × percentual. funcao_id NULL = tabela padrão.
@@ -202,9 +234,9 @@ CREATE TABLE IF NOT EXISTS public.tabela_progressiva_ltv (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
   funcao_id UUID REFERENCES public.funcoes(id) ON DELETE CASCADE,
-  meses_min INTEGER NOT NULL,
+  meses_min INTEGER NOT NULL CHECK (meses_min >= 0),
   meses_max INTEGER,
-  percentual NUMERIC(6,3) NOT NULL,
+  percentual NUMERIC(6,3) NOT NULL CHECK (percentual >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (meses_max IS NULL OR meses_max >= meses_min)
@@ -214,7 +246,7 @@ CREATE TABLE IF NOT EXISTS public.recebimentos_extras (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
   colaborador_id UUID NOT NULL REFERENCES public.colaboradores(id) ON DELETE CASCADE,
-  descricao TEXT NOT NULL,
+  descricao TEXT NOT NULL CHECK (btrim(descricao) <> ''),
   valor NUMERIC(12,2) NOT NULL,
   data_referencia DATE NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -244,33 +276,32 @@ CREATE TABLE IF NOT EXISTS public.pesos_comissao_folha (
   organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
   colaborador_id UUID NOT NULL REFERENCES public.colaboradores(id) ON DELETE CASCADE,
   mes_competencia DATE NOT NULL,
-  peso NUMERIC(6,3) NOT NULL DEFAULT 100,
+  peso NUMERIC(6,3) NOT NULL DEFAULT 100 CHECK (peso BETWEEN 0 AND 100),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (colaborador_id, mes_competencia)
 );
 
--- Configuração da agência. Uma linha por organização.
+-- Configuração financeira da agência: uma linha por organização.
 --
--- O app pede `id = 1`. A coluna continua existindo por compatibilidade, mas a
--- chave de verdade é a organização — sem isso, uma segunda agência
--- sobrescreveria as cores e os percentuais da primeira.
-CREATE TABLE IF NOT EXISTS public.configuracoes (
-  -- IDENTITY em vez de DEFAULT 1: com default fixo, a segunda organização
-  -- colidiria na chave primária. Assim a primeira linha ainda pode ser gravada
-  -- como id = 1 (que é o que o app pede hoje) e as seguintes se viram sozinhas.
-  id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-  organization_id UUID UNIQUE REFERENCES public.organizations(id) ON DELETE CASCADE,
-  cor_primaria TEXT NOT NULL DEFAULT '#0F766E',
-  cor_secundaria TEXT NOT NULL DEFAULT '#F97316',
-  cor_fundo TEXT NOT NULL DEFAULT '#0B0F14',
-  logo_url TEXT,
+-- A chave é a organização, não um `id = 1` fixo como no rascunho — com default
+-- fixo, a segunda agência colidiria na chave primária.
+CREATE TABLE IF NOT EXISTS public.configuracoes_financeiro (
+  organization_id UUID PRIMARY KEY REFERENCES public.organizations(id) ON DELETE CASCADE,
   pct_rotativa NUMERIC(6,3) NOT NULL DEFAULT 50,
   pct_reserva NUMERIC(6,3) NOT NULL DEFAULT 50,
   pct_penalidade_atraso NUMERIC(6,3) NOT NULL DEFAULT 0,
   pct_penalidade_churn NUMERIC(6,3) NOT NULL DEFAULT 0,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- A distribuição do lucro precisa fechar em 100%: sem isto, sobra ou falta
+  -- dinheiro na conta e ninguém percebe até o fim do mês.
+  CHECK (pct_rotativa + pct_reserva = 100)
 );
+
+COMMENT ON TABLE public.configuracoes_financeiro IS
+  'Só o que é financeiro. Cores e logo do rascunho ficaram de fora: a '
+  'identidade visual já é do Norteia, e duplicá-la criaria dois lugares para '
+  'trocar a mesma logo.';
 
 CREATE TABLE IF NOT EXISTS public.dashboard_anual (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -295,13 +326,16 @@ CREATE TABLE IF NOT EXISTS public.crm_leads (
   phone TEXT,
   instagram TEXT,
   cdp_validated TEXT NOT NULL DEFAULT 'nao',
-  current_stage INTEGER NOT NULL DEFAULT 1,
+  current_stage INTEGER NOT NULL DEFAULT 1 CHECK (current_stage BETWEEN 1 AND 8),
   response_status TEXT NOT NULL DEFAULT 'sem_resposta',
   referrals_count INTEGER NOT NULL DEFAULT 0,
   pain_identified TEXT,
   meeting_date TIMESTAMPTZ,
   last_action TEXT,
   general_notes TEXT,
+  -- Lead que virou cliente. Fecha o funil: dá para medir quanto do faturamento
+  -- veio de prospecção sem ninguém cruzar planilha na mão.
+  converted_client_id UUID REFERENCES public.clients(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -309,7 +343,7 @@ CREATE TABLE IF NOT EXISTS public.crm_leads (
 CREATE TABLE IF NOT EXISTS public.checklist_prospeccao (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
-  activity TEXT NOT NULL,
+  activity TEXT NOT NULL CHECK (btrim(activity) <> ''),
   meta TEXT,
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,
@@ -321,40 +355,52 @@ CREATE TABLE IF NOT EXISTS public.checklist_prospeccao (
 
 -- ---------------------------------------------------------------------------
 -- 4) Índices
---
--- Só o que as telas realmente consultam: fluxo por período, comissão por
--- colaborador, e a ponte com a carteira do Norteia.
 -- ---------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS lancamentos_org_data_idx
   ON public.lancamentos_financeiros (organization_id, data_lancamento DESC);
-CREATE INDEX IF NOT EXISTS lancamentos_cliente_idx
-  ON public.lancamentos_financeiros (cliente_id) WHERE cliente_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS lancamentos_client_idx
+  ON public.lancamentos_financeiros (client_id) WHERE client_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS lancamentos_colaborador_idx
   ON public.lancamentos_financeiros (colaborador_id) WHERE colaborador_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS lancamentos_recorrencia_idx
   ON public.lancamentos_financeiros (recorrencia_grupo_id) WHERE recorrencia_grupo_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS clientes_org_status_idx
-  ON public.clientes (organization_id, status);
-CREATE INDEX IF NOT EXISTS clientes_client_id_idx
-  ON public.clientes (client_id) WHERE client_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS client_financeiro_org_status_idx
+  ON public.client_financeiro (organization_id, status);
 CREATE INDEX IF NOT EXISTS contratos_colaborador_idx
   ON public.contratos_fatiamento (colaborador_id);
 CREATE INDEX IF NOT EXISTS folha_competencia_idx
   ON public.historico_folha_pagamento (organization_id, mes_competencia DESC);
+CREATE INDEX IF NOT EXISTS crm_leads_org_stage_idx
+  ON public.crm_leads (organization_id, current_stage);
 
 -- ---------------------------------------------------------------------------
--- 5) Trigger de tenancy em todas as tabelas
+-- 5) updated_at e tenancy
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
   t TEXT;
-BEGIN
-  FOREACH t IN ARRAY ARRAY[
-    'categorias', 'funcoes', 'clientes', 'colaboradores', 'lancamentos_financeiros',
-    'contratos_fatiamento', 'tabela_progressiva_ltv', 'recebimentos_extras',
-    'historico_folha_pagamento', 'pesos_comissao_folha', 'configuracoes',
+  com_updated TEXT[] := ARRAY[
+    'funcoes', 'client_financeiro', 'colaboradores', 'lancamentos_financeiros',
+    'tabela_progressiva_ltv', 'historico_folha_pagamento', 'pesos_comissao_folha',
+    'configuracoes_financeiro', 'dashboard_anual', 'crm_leads', 'checklist_prospeccao'
+  ];
+  com_org TEXT[] := ARRAY[
+    'categorias', 'funcoes', 'client_financeiro', 'colaboradores',
+    'lancamentos_financeiros', 'contratos_fatiamento', 'tabela_progressiva_ltv',
+    'recebimentos_extras', 'historico_folha_pagamento', 'pesos_comissao_folha',
     'dashboard_anual', 'crm_leads', 'checklist_prospeccao'
-  ] LOOP
+  ];
+BEGIN
+  FOREACH t IN ARRAY com_updated LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS fin_set_updated_at ON public.%I', t);
+    EXECUTE format(
+      'CREATE TRIGGER fin_set_updated_at BEFORE UPDATE ON public.%I
+         FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column()', t);
+  END LOOP;
+
+  -- configuracoes_financeiro tem a organização como chave primária: o trigger
+  -- de tenancy não se aplica, quem insere já sabe de quem é a configuração.
+  FOREACH t IN ARRAY com_org LOOP
     EXECUTE format('DROP TRIGGER IF EXISTS fin_set_org ON public.%I', t);
     EXECUTE format(
       'CREATE TRIGGER fin_set_org BEFORE INSERT ON public.%I
@@ -367,18 +413,18 @@ END $$;
 --
 -- Mesma regra do resto do produto: membro da organização lê, quem pode editar
 -- conteúdo escreve. Dado financeiro é sensível — quando existir a permissão
--- própria de "Financeiro", estas políticas passam a consultá-la; até lá,
--- seguem o padrão já em uso para não inventar uma terceira regra de acesso.
+-- própria de "Financeiro", estas políticas passam a consultá-la. Até lá,
+-- seguem o padrão em uso, para não inventar uma terceira regra de acesso.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
   t TEXT;
 BEGIN
   FOREACH t IN ARRAY ARRAY[
-    'categorias', 'funcoes', 'clientes', 'colaboradores', 'lancamentos_financeiros',
-    'contratos_fatiamento', 'tabela_progressiva_ltv', 'recebimentos_extras',
-    'historico_folha_pagamento', 'pesos_comissao_folha', 'configuracoes',
-    'dashboard_anual', 'crm_leads', 'checklist_prospeccao'
+    'categorias', 'funcoes', 'client_financeiro', 'colaboradores',
+    'lancamentos_financeiros', 'contratos_fatiamento', 'tabela_progressiva_ltv',
+    'recebimentos_extras', 'historico_folha_pagamento', 'pesos_comissao_folha',
+    'configuracoes_financeiro', 'dashboard_anual', 'crm_leads', 'checklist_prospeccao'
   ] LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
 
@@ -400,29 +446,14 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 7) O QUE FALTA, E POR QUE NÃO ESTÁ AQUI
+-- 7) O QUE FALTA
 --
--- A função `gerar_cobrancas_recorrentes(_mes text) RETURNS integer` existe no
--- banco antigo e é ela que cria as mensalidades do mês. O `types.ts` guarda só
--- a ASSINATURA — o corpo não está em lugar nenhum do repositório.
---
--- Reconstruí-la a partir da descrição em prosa seria adivinhar regra de
--- cobrança: quem é elegível, como o dia de vencimento cai em mês curto, como a
--- duplicidade é evitada. Errar qualquer uma delas gera cobrança a mais ou a
--- menos para cliente real. Fica de fora de propósito.
---
--- Para trazer a original, rode isto no SQL Editor do projeto ANTIGO
--- (xgnqhaxwileijallnumb) e me mande o resultado:
---
---   SELECT pg_get_functiondef(oid)
---     FROM pg_proc
---    WHERE proname = 'gerar_cobrancas_recorrentes';
---
--- O mesmo vale para qualquer trigger do banco antigo: o types.ts não os mostra.
---
---   SELECT event_object_table, trigger_name, action_statement
---     FROM information_schema.triggers
---    WHERE trigger_schema = 'public';
+-- A geração das mensalidades do mês (`gerar_cobrancas_recorrentes` no rascunho)
+-- NÃO entra aqui. Ela nunca existiu de verdade — o banco nunca foi criado — e
+-- escrevê-la agora é decidir regra de cobrança: quem é elegível, o que fazer
+-- quando o dia de vencimento não existe no mês, como garantir uma cobrança por
+-- cliente por mês. Isso vai em migration própria, depois de confirmadas as
+-- regras com quem cobra.
 -- ---------------------------------------------------------------------------
 
 COMMIT;
