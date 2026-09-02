@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import {
   enviarPecaParaKanban,
   PecaJaNoKanbanError,
+  tituloDaPeca,
 } from "@/lib/productionToTask";
 import {
   EMPTY_ROLE_MAP, PIECE_LABEL, ROLE_LABELS, STEP_KIND_LABELS, assigneeForRole,
@@ -87,14 +88,6 @@ const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho",
   "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "")
   .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-
-/** Nome da peça como ele aparece no quadro. A tarefa do Kanban nasce com
- *  exatamente este nome — se divergisse, ninguém ligaria uma coisa à outra. */
-function tituloDaPeca(peca: { title: string | null; content_type: string; piece_number: number }) {
-  return peca.title?.trim()
-    ? peca.title.trim()
-    : `${PIECE_LABEL[peca.content_type] ?? peca.content_type} ${peca.piece_number}`;
-}
 
 function localDay(value: string | null) {
   if (!value) return null;

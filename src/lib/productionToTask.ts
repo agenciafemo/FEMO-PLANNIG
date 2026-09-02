@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { PIECE_LABEL } from "@/lib/productionPipeline";
 
 // A tabela production_items ganhou task_id numa migration nova, e o types.ts
 // gerado ainda não a conhece — mesmo padrão de cast já usado em Producao.tsx.
@@ -22,6 +23,23 @@ export interface EnviarParaKanbanInput {
   assigneeId: string;
   dueDate: string;
   createdBy: string;
+}
+
+/**
+ * Nome que a peça leva para o Kanban.
+ *
+ * Vivia dentro de Producao.tsx. Subiu para cá quando a tela de Tarefas passou a
+ * puxar peças também: duas telas montando o mesmo título por conta própria é
+ * como se chega em "Reel 1" num lugar e "Reels 1" no outro.
+ */
+export function tituloDaPeca(peca: {
+  title: string | null;
+  content_type: string;
+  piece_number: number;
+}): string {
+  return peca.title?.trim()
+    ? peca.title.trim()
+    : `${PIECE_LABEL[peca.content_type] ?? peca.content_type} ${peca.piece_number}`;
 }
 
 /** A peça já foi enviada antes — a tela deve levar à tarefa em vez de criar outra. */
