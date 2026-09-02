@@ -33,7 +33,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, Copy, ChevronLeft, ChevronRight, X, FolderInput, MoreHorizontal, ExternalLink } from "lucide-react";
+import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, Copy, ChevronLeft, ChevronRight, X, FolderInput, MoreHorizontal, ExternalLink, Pencil } from "lucide-react";
 import { isSafeExternalUrl } from "@/lib/externalLink";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -135,6 +135,8 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
   const [publishDate, setPublishDate] = useState<Date | undefined>();
   const [videoUrl, setVideoUrl] = useState("");
   const [videoPct, setVideoPct] = useState<number | null>(null);
+  // Enquanto true, o campo volta a ser editavel mesmo tendo link valido.
+  const [editandoLinkVideo, setEditandoLinkVideo] = useState(false);
   const [coverImageUrl, setCoverImageUrl] = useState("");
   const [mediaUrls, setMediaUrls] = useState<string[]>([]);
   const [carouselUrlInput, setCarouselUrlInput] = useState("");
@@ -842,17 +844,28 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
                   <p className="text-xs text-muted-foreground">Enviando vídeo… {videoPct}% (não feche esta janela)</p>
                 </div>
               )}
-              {/* Abrir e copiar moram DENTRO do campo. Fora dele virariam mais
-                  duas linhas num editor que já é longo — e a linha "Atual:"
-                  que existia aqui só repetia o endereço já visível no input. */}
-              <div className="relative">
-                <Input
-                  placeholder="ou cole um link (Drive, etc — só referência)"
-                  value={videoUrl}
-                  onChange={(e) => setVideoUrl(e.target.value)}
-                  className={podeAbrirVideo ? "pr-[4.5rem]" : undefined}
-                />
-                {podeAbrirVideo && (
+              {/* O campo tem dois estados. Com link válido e fora de edição, o
+                  retângulo INTEIRO vira o link: o vídeo é colado uma vez e
+                  aberto muitas, então o clique no lugar óbvio precisa levar ao
+                  Drive. Editar continua a um clique, pelo lápis — trocar o link
+                  é raro perto de abri-lo. Copiar e editar ficam dentro da
+                  moldura para não virarem mais uma linha no editor. */}
+              {podeAbrirVideo && !editandoLinkVideo ? (
+                <div className="relative">
+                  {/* noreferrer junto de noopener: o link vai para fora (Drive,
+                      Canva) e não precisa carregar de onde veio. */}
+                  <a
+                    href={videoUrl.trim()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={videoUrl.trim()}
+                    className="flex h-10 w-full items-center gap-2 rounded-md border border-input bg-background pl-3 pr-[4.5rem] text-sm text-primary underline-offset-4 ring-offset-background transition-colors hover:bg-muted/50 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">
+                      {videoEnviado ? "Vídeo enviado pelo Norteia — abrir" : videoUrl.trim()}
+                    </span>
+                  </a>
                   <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
                     <Button
                       type="button"
@@ -869,27 +882,27 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
                     <Button
-                      asChild
                       type="button"
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                      title="Abrir link em nova aba"
+                      title="Trocar o link"
+                      aria-label="Trocar o link do vídeo"
+                      onClick={() => setEditandoLinkVideo(true)}
                     >
-                      {/* noreferrer junto de noopener: o link vai para fora
-                          (Drive, Canva) e não precisa carregar de onde veio. */}
-                      <a
-                        href={videoUrl.trim()}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label="Abrir link do vídeo em nova aba"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
+                      <Pencil className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <Input
+                  placeholder="Cole aqui o link do vídeo no Drive"
+                  value={videoUrl}
+                  onChange={(e) => setVideoUrl(e.target.value)}
+                  onBlur={() => setEditandoLinkVideo(false)}
+                  autoFocus={editandoLinkVideo}
+                />
+              )}
               {videoEnviado && videoPct === null && (
                 <p className="text-xs text-muted-foreground">Vídeo enviado ✓</p>
               )}
