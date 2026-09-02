@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { loadContract } from "@/lib/clientContract";
-import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
-import { buildProductionItems, buildStepRows, loadPipelines, loadRoleMap } from "@/lib/productionPipeline";
+import { buildProductionItems, buildStepRows, loadFunctionAssignees, loadPipelines, loadRoleMap } from "@/lib/productionPipeline";
 import { supabase } from "@/integrations/supabase/client";
 import { insertPosts } from "@/lib/postsInsert";
 import { countPlanningPosts, deletePlanningCascade } from "@/lib/deletePlanning";

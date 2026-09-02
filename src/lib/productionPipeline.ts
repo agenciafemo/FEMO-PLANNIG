@@ -1,5 +1,15 @@
-import type { AssigneeResolver } from "@/lib/subtaskTemplates";
 import { supabase } from "@/integrations/supabase/client";
+
+/**
+ * Quem assume uma etapa quando a organizacao NAO configurou responsavel fixo
+ * para a funcao. Recebe as palavras-chave da funcao e devolve a pessoa.
+ *
+ * Vivia num modulo separado, ao lado de um segundo modelo de "etapas por tipo
+ * de peca" que ninguem mais chamava. Trazido para ca porque e aqui que moram
+ * ROLE_KW e assigneeForRole, os unicos lugares que consomem isso — e para que
+ * exista uma fonte de verdade so sobre etapas e responsaveis.
+ */
+export type AssigneeResolver = (keywords: string[]) => string | null;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = any;
@@ -229,6 +239,40 @@ const ROLE_KW: Record<RoleKey, string[]> = {
   review: ["head", "gestor", "adm", "diretor"],
 };
 
+const norm = (valor: string) => valor.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/**
+ * Carrega as funcoes da equipe e devolve um resolvedor: dadas as palavras-chave
+ * de uma funcao, entrega a primeira pessoa daquela funcao.
+ *
+ * E o plano B de assigneeForRole: so entra em acao quando a organizacao nao
+ * apontou um responsavel fixo em production_role_assignees. O casamento por
+ * nome e fragil de proposito — vale como palpite, nao como regra.
+ */
+export async function loadFunctionAssignees(organizationId: string): Promise<AssigneeResolver> {
+  const [tagsRes, memRes] = await Promise.all([
+    (supabase as AnyClient).from("team_function_tags").select("id, name").eq("organization_id", organizationId),
+    (supabase as AnyClient).from("team_member_functions").select("user_id, tag_id").eq("organization_id", organizationId),
+  ]);
+  const tags = (tagsRes.data ?? []) as { id: string; name: string }[];
+  const mems = (memRes.data ?? []) as { user_id: string; tag_id: string }[];
+  const firstMemberByTag = new Map<string, string>();
+  for (const m of mems) if (!firstMemberByTag.has(m.tag_id)) firstMemberByTag.set(m.tag_id, m.user_id);
+
+  // A ORDEM das palavras-chave importa: a primeira que casar vence. E o que faz
+  // "roteir" (Roteirista) ganhar de "social" (Social Midia) quando as duas existem.
+  return (keywords) => {
+    for (const k of keywords) {
+      const nk = norm(k);
+      const tag = tags.find((t) => norm(t.name).includes(nk));
+      if (tag) {
+        const u = firstMemberByTag.get(tag.id);
+        if (u) return u;
+      }
+    }
+    return null;
+  };
+}
 export async function loadRoleMap(organizationId: string): Promise<RoleMap> {
   const { data } = await (supabase as AnyClient)
     .from("production_role_assignees")
