@@ -3,11 +3,20 @@ export interface FrameioStatusPresentation {
   className: string;
 }
 
+export function isFrameioUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" && /(^|\.)frame\.io$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function frameioFileIdFromUrl(value: string | undefined): string | null {
   if (!value) return null;
   try {
     const url = new URL(value);
-    if (url.protocol !== "https:" || !/(^|\.)frame\.io$/i.test(url.hostname)) {
+    if (!isFrameioUrl(value)) {
       return null;
     }
     const segments = url.pathname.split("/").filter(Boolean);

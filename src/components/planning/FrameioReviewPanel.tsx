@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { frameioFileIdFromUrl, frameioReviewStatus } from "@/lib/frameio";
+import { frameioFileIdFromUrl, frameioReviewStatus, isFrameioUrl } from "@/lib/frameio";
 
 // As tabelas entram pela migration desta feature e ainda não existem nos tipos
 // gerados. O cast fica restrito a este adaptador até a próxima geração de tipos.
@@ -137,8 +137,8 @@ export function FrameioReviewPanel({
       const normalizedId = fileId.trim();
       const normalizedUrl = fileUrl.trim();
       if (!normalizedId) throw new Error("Informe o ID do arquivo no Frame.io.");
-      if (normalizedUrl && !/^https:\/\//i.test(normalizedUrl)) {
-        throw new Error("O link do Frame.io precisa começar com https://.");
+      if (normalizedUrl && !isFrameioUrl(normalizedUrl)) {
+        throw new Error("Use um link oficial do Frame.io (https://app.frame.io/…)");
       }
 
       const { data, error } = await db.from("frameio_asset_links").insert({

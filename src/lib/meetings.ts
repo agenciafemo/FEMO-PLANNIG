@@ -1,5 +1,9 @@
 import { supabase } from "@/integrations/supabase/client";
 import { edgeReasonCode, invokeEdge } from "@/lib/edgeInvoke";
+import {
+  parseMeetingDetailedSummary,
+  type MeetingDetailedSummary,
+} from "@/lib/meetingDetails";
 
 // Tabelas de "Reuniões" ainda não estão no types.ts gerado (migration nova) —
 // mesmo padrão de cast usado em src/lib/teamCalendar.ts até rodar
@@ -47,6 +51,8 @@ export interface MeetingDetail extends MeetingListItem {
   transcript_text: string | null;
   transcript_raw: Array<{ speaker: string; text: string; start_ms: number; end_ms: number }> | null;
   decisions: string[];
+  detailed_summary: MeetingDetailedSummary | null;
+  detailed_summary_generated_at: string | null;
   created_by: string;
   action_items: MeetingActionItem[];
 }
@@ -78,7 +84,7 @@ export async function getMeeting(id: string): Promise<MeetingDetail> {
   const { data, error } = await (supabase as AnyClient)
     .from("meetings")
     .select(
-      "id, organization_id, title, status, source, failure_reason, client_id, meeting_link, occurred_at, duration_seconds, summary, transcript_text, transcript_raw, decisions, created_by, meeting_action_items(id, title, suggested_assignee_id, suggested_due_date, task_id, position)",
+      "id, organization_id, title, status, source, failure_reason, client_id, meeting_link, occurred_at, duration_seconds, summary, transcript_text, transcript_raw, decisions, detailed_summary, detailed_summary_generated_at, created_by, meeting_action_items(id, title, suggested_assignee_id, suggested_due_date, task_id, position)",
     )
     .eq("id", id)
     .single();
@@ -87,7 +93,11 @@ export async function getMeeting(id: string): Promise<MeetingDetail> {
   const actionItems = ((row.meeting_action_items as MeetingActionItem[]) ?? [])
     .slice()
     .sort((a, b) => a.position - b.position);
-  return { ...(row as unknown as MeetingDetail), action_items: actionItems };
+  return {
+    ...(row as unknown as MeetingDetail),
+    detailed_summary: parseMeetingDetailedSummary(row.detailed_summary),
+    action_items: actionItems,
+  };
 }
 
 export async function listOrgMembers(
@@ -215,6 +225,7 @@ const MOTIVO_ATA: Record<string, string> = {
   meeting_summarize_forbidden: "Você não tem permissão para gerar a ata desta reunião.",
   action_items_save_failed: "A ata saiu, mas os itens de ação não puderam ser salvos.",
   meeting_save_failed: "A ata saiu, mas não pôde ser salva.",
+  meeting_details_save_failed: "A análise saiu, mas não pôde ser salva.",
   meeting_not_found: "Reunião não encontrada.",
 };
 
@@ -234,13 +245,26 @@ export function descreverMotivoAta(code: string | null | undefined): string {
  */
 export async function generateMeetingMinutes(meetingId: string): Promise<void> {
   const { error } = await invokeEdge("meeting-summarize", {
-    body: { meeting_id: meetingId },
+    body: { meeting_id: meetingId, mode: "minutes" },
   });
   if (!error) return;
 
   const code = await edgeReasonCode(error);
   if (!code) throw new Error(error.message);
   const frase = MOTIVO_ATA[code] ?? "Não foi possível gerar a ata.";
+  throw new Error(`${frase} (${code})`);
+}
+
+/** Gera uma leitura aprofundada sem alterar a ata, decisões ou itens de ação. */
+export async function generateMeetingDetails(meetingId: string): Promise<void> {
+  const { error } = await invokeEdge("meeting-summarize", {
+    body: { meeting_id: meetingId, mode: "details" },
+  });
+  if (!error) return;
+
+  const code = await edgeReasonCode(error);
+  if (!code) throw new Error(error.message);
+  const frase = MOTIVO_ATA[code] ?? "Não foi possível gerar a análise detalhada.";
   throw new Error(`${frase} (${code})`);
 }
 

@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   createTaskFromActionItem,
   descreverMotivoAta,
+  generateMeetingDetails,
   generateMeetingMinutes,
   getMeeting,
   listOrgMembers,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/meetings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { MeetingDetailsPanel } from "@/components/meetings/MeetingDetailsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,7 +42,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, CheckCircle2, Circle, Loader2, Sparkles, Square } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Circle,
+  FileSearch,
+  Loader2,
+  Sparkles,
+  Square,
+} from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -67,6 +79,8 @@ export default function ReuniaoDetail() {
   const [creating, setCreating] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [generatingDetails, setGeneratingDetails] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const meetingQuery = useQuery({
     queryKey: ["meeting", id],
@@ -170,6 +184,23 @@ export default function ReuniaoDetail() {
     }
   };
 
+  const handleGenerateDetails = async () => {
+    if (!id || generatingDetails || generating) return;
+    setGeneratingDetails(true);
+    setDetailsOpen(true);
+    try {
+      await generateMeetingDetails(id);
+      toast.success("Análise detalhada gerada.");
+      await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Não foi possível gerar a análise detalhada.",
+      );
+    } finally {
+      setGeneratingDetails(false);
+    }
+  };
+
   if (meetingQuery.isLoading) {
     return <div className="p-4 sm:p-6 text-sm text-muted-foreground">Carregando reunião...</div>;
   }
@@ -244,7 +275,7 @@ export default function ReuniaoDetail() {
               className="min-h-11 w-full sm:w-auto"
               variant={meeting.status === "ready" ? "outline" : "default"}
               onClick={handleGenerateMinutes}
-              disabled={generating}
+              disabled={generating || generatingDetails}
               aria-busy={generating}
             >
               {generating ? (
@@ -308,10 +339,50 @@ export default function ReuniaoDetail() {
           {meeting.summary && (
             <Card>
               <CardContent className="p-4 space-y-2">
-                <h3 className="text-sm font-semibold">✨ Resumo</h3>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="text-sm font-semibold">✨ Resumo</h3>
+                  {meeting.status === "ready" && (
+                    meeting.detailed_summary ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="min-h-9 gap-1.5 self-start text-xs sm:self-auto"
+                        onClick={() => setDetailsOpen((open) => !open)}
+                        aria-expanded={detailsOpen}
+                      >
+                        {detailsOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        {detailsOpen ? "Ocultar detalhes" : "Ver mais detalhes"}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="min-h-9 gap-1.5 self-start text-xs sm:self-auto"
+                        onClick={handleGenerateDetails}
+                        disabled={generatingDetails || generating}
+                        aria-busy={generatingDetails}
+                      >
+                        {generatingDetails
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : <FileSearch className="h-3.5 w-3.5" />}
+                        {generatingDetails ? "Analisando..." : "Me dê mais detalhes"}
+                      </Button>
+                    )
+                  )}
+                </div>
                 <p className="text-sm whitespace-pre-wrap">{meeting.summary}</p>
               </CardContent>
             </Card>
+          )}
+
+          {meeting.detailed_summary && detailsOpen && (
+            <MeetingDetailsPanel
+              details={meeting.detailed_summary}
+              refreshing={generatingDetails}
+              onRefresh={handleGenerateDetails}
+            />
           )}
 
           {meeting.decisions.length > 0 && (

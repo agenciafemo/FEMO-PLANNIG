@@ -763,12 +763,14 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
             </div>
           )}
 
-          <FrameioReviewPanel
-            organizationId={organizationId}
-            userId={user?.id ?? null}
-            postId={postId}
-            videoUrl={videoUrl}
-          />
+          {contentType === "reels" && (
+            <FrameioReviewPanel
+              organizationId={organizationId}
+              userId={user?.id ?? null}
+              postId={postId}
+              videoUrl={videoUrl}
+            />
+          )}
 
           {/* Blog Body */}
           {contentType === "blog" && (
