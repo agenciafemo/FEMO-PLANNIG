@@ -57,16 +57,17 @@ export function NotificationBell() {
   const { data: notifications } = useQuery({
     queryKey: ["notifications", organizationId, user?.id],
     queryFn: async () => {
-      try {
-        let query = supabase.from("notifications" as any).select("*") as any;
-        if (!isLegacy) query = query.eq("organization_id", organizationId!);
-        query = query.or(mineOrBroadcast);
-        const { data, error } = await query.order("created_at", { ascending: false }).limit(20);
-        if (error) return [];
-        return (data ?? []) as NotificationRow[];
-      } catch {
-        return [];
-      }
+      // Falha NÃO vira lista vazia. Devolver [] aqui fazia o sino "esvaziar" e
+      // "encher" a cada erro transitório — e como o alerta era disparado por
+      // aumento de contagem, cada oscilação dessas tocava o som de novo, para
+      // notificações antigas. Lançando, o React Query mantém o último resultado
+      // bom em `data` e a tela simplesmente não muda.
+      let query = supabase.from("notifications" as any).select("*") as any;
+      if (!isLegacy) query = query.eq("organization_id", organizationId!);
+      query = query.or(mineOrBroadcast);
+      const { data, error } = await query.order("created_at", { ascending: false }).limit(20);
+      if (error) throw new Error(error.message);
+      return (data ?? []) as NotificationRow[];
     },
     enabled: isLegacy || !!organizationId,
     refetchInterval: 30000,
@@ -102,7 +103,6 @@ export function NotificationBell() {
   // os navegadores bloqueiam áudio até a pessoa interagir com a página.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const audioCtxRef = useRef<any>(null);
-  const prevUnreadRef = useRef<number | null>(null);
 
   const playChime = () => {
     try {
@@ -147,12 +147,14 @@ export function NotificationBell() {
     };
   }, []);
 
-  useEffect(() => {
-    if (prevUnreadRef.current !== null && unreadCount > prevUnreadRef.current) {
-      playChime();
-    }
-    prevUnreadRef.current = unreadCount;
-  }, [unreadCount]);
+  // O alerta é disparado por ID NOVO, não por aumento de contagem.
+  //
+  // Contagem é frágil: qualquer oscilação — erro transitório, troca de
+  // organização, uma marcada como lida e outra chegando — sobe o número e
+  // tocava o som outra vez, para notificação que a pessoa já tinha visto. Era
+  // por isso que um lembrete de evento das 15h continuava alertando às 15h46.
+  // Um conjunto de ids já anunciados não tem esse problema: o que já tocou
+  // nunca toca de novo, e só id inédito alerta.
 
   // ---- Aviso do sistema operacional (aparece com o Norteia fora da guia) ----
   // Escopo desta versão: o navegador precisa estar aberto, com o Norteia numa
@@ -187,12 +189,25 @@ export function NotificationBell() {
       return;
     }
 
+    // Segunda trava, independente da primeira: notificação com mais de 10
+    // minutos nunca alerta, aconteça o que acontecer com o conjunto de ids.
+    // Um lembrete de "começa em 30 minutos" perde o sentido depois que o
+    // evento começou — e alertar sobre ele é pior que não alertar.
+    const limiteAlerta = Date.now() - 10 * 60 * 1000;
     const novas = notifications.filter(
-      (n) => !n.read && !announcedRef.current!.has(String(n.id)),
+      (n) => !n.read
+        && !announcedRef.current!.has(String(n.id))
+        && new Date(n.created_at).getTime() >= limiteAlerta,
     );
     novas.forEach((n) => announcedRef.current!.add(String(n.id)));
 
     if (novas.length === 0) return;
+
+    // Som primeiro: vale com a aba à vista ou não, e é o mesmo gatilho do
+    // pop-up do sistema. Antes eram dois mecanismos diferentes, e o do som
+    // disparava sozinho em situações em que nada tinha chegado.
+    playChime();
+
     if (notifPermission !== "granted" || typeof Notification === "undefined") return;
     // Com a aba à vista, o sininho e o som já dão o recado; um pop-up do SO por
     // cima seria barulho duplicado.
