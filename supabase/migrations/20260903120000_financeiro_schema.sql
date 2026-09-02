@@ -187,6 +187,14 @@ CREATE TABLE IF NOT EXISTS public.lancamentos_financeiros (
   -- Estorno de comissão paga a mais
   is_clawback BOOLEAN NOT NULL DEFAULT false,
   origem_lancamento_id UUID REFERENCES public.lancamentos_financeiros(id) ON DELETE SET NULL,
+  -- Mensalidade gerada pela rotina mensal, e não lançamento avulso. Separar os
+  -- dois é o que permite o índice único abaixo garantir "uma por cliente por
+  -- mês" sem impedir que alguém lance uma segunda entrada do mesmo cliente.
+  is_mensalidade BOOLEAN NOT NULL DEFAULT false,
+  -- Mês a que a cobrança se refere, derivado do vencimento. Coluna gerada para
+  -- poder entrar no índice único — a regra vive no banco, não na função que
+  -- gera. Função esquece de conferir; índice não.
+  competencia DATE GENERATED ALWAYS AS (date_trunc('month', data_lancamento)::date) STORED,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -195,6 +203,12 @@ CREATE TABLE IF NOT EXISTS public.lancamentos_financeiros (
 CREATE UNIQUE INDEX IF NOT EXISTS lancamentos_cobranca_asaas_key
   ON public.lancamentos_financeiros (id_cobranca_asaas)
   WHERE id_cobranca_asaas IS NOT NULL;
+
+-- Um cliente não pode receber duas mensalidades da mesma competência. Rodar a
+-- geração duas vezes no mesmo mês passa a ser inofensivo por construção.
+CREATE UNIQUE INDEX IF NOT EXISTS lancamentos_mensalidade_unica
+  ON public.lancamentos_financeiros (client_id, competencia)
+  WHERE is_mensalidade;
 
 -- Liga colaborador → cliente para o cálculo de comissão.
 CREATE TABLE IF NOT EXISTS public.contratos_fatiamento (
