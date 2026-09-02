@@ -43,10 +43,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Sparkles, Square, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, Loader2, Sparkles, Square, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
+import { AtaFeedback } from "@/components/meetings/AtaFeedback";
+import { copiarTexto, formatarAtaParaCopiar } from "@/lib/meetingFeedback";
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "Aguardando",
@@ -298,6 +300,35 @@ export default function ReuniaoDetail() {
                 : "Gerar ata com IA"}
             </Button>
           )}
+
+          {/* Copiar só aparece quando há ata: botão que copia o vazio é pior
+              que botão nenhum. O destino mais comum é o WhatsApp do cliente. */}
+          {meeting.summary && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                try {
+                  await copiarTexto(
+                    formatarAtaParaCopiar({
+                      title: meeting.title,
+                      occurred_at: meeting.occurred_at,
+                      summary: meeting.summary,
+                      decisions: meeting.decisions,
+                      actionItems: meeting.action_items.map((i) => i.title),
+                    }),
+                  );
+                  toast.success("Ata copiada.");
+                } catch (error) {
+                  toast.error(
+                    error instanceof Error ? error.message : "Não foi possível copiar.",
+                  );
+                }
+              }}
+            >
+              <Copy className="mr-2 h-4 w-4" /> Copiar ata
+            </Button>
+          )}
           {/* Excluir fica fora da gravação em curso: parar o bot primeiro evita
               apagar a reunião enquanto a Vexa ainda escreve nela. */}
           {meeting.status !== "recording" && (
@@ -391,6 +422,14 @@ export default function ReuniaoDetail() {
               <CardContent className="p-4 space-y-2">
                 <h3 className="text-sm font-semibold">✨ Resumo</h3>
                 <p className="text-sm whitespace-pre-wrap">{meeting.summary}</p>
+                {user && (
+                  <AtaFeedback
+                    meetingId={meeting.id}
+                    organizationId={meeting.organization_id}
+                    currentUserId={user.id}
+                    summarySnapshot={meeting.summary}
+                  />
+                )}
               </CardContent>
             </Card>
           )}
