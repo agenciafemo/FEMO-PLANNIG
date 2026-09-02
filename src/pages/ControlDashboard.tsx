@@ -43,7 +43,7 @@ const DAILY_SECONDS = 8 * 60 * 60;
 type Status = "todo" | "doing" | "review" | "done";
 type Kind = "entrada" | "saida_almoco" | "volta_almoco" | "saida";
 type DashboardPeriod = "week" | "month";
-type TaskRow = { status: Status; due_date: string; updated_at: string; assignee_id: string };
+type TaskRow = { status: Status; due_date: string; updated_at: string; done_at: string | null; assignee_id: string };
 // Tarefa extra do Quadro de Produção (peça avulsa, fora de planejamento).
 type ExtraRow = {
   updated_at: string;
@@ -216,7 +216,7 @@ export default function ControlDashboard() {
   const tasks = useQuery({
     queryKey: ["control-dashboard", "tasks", organizationId, today],
     queryFn: async () => {
-      const { data, error } = await db.from<TaskRow>("tasks").select("status,due_date,updated_at,assignee_id").eq("organization_id", organizationId);
+      const { data, error } = await db.from<TaskRow>("tasks").select("status,due_date,updated_at,done_at,assignee_id").eq("organization_id", organizationId);
       if (error) throw error;
       return data ?? [];
     }, enabled: !!organizationId,
@@ -361,7 +361,12 @@ export default function ControlDashboard() {
         + filteredExtras.filter((row) => row.status !== "done").length,
       // Tarefa extra não tem prazo, então nunca entra no atraso.
       overdue: filteredTasks.filter((row) => row.status !== "done" && row.due_date < today).length,
-      completed: filteredTasks.filter((row) => row.status === "done" && row.updated_at.slice(0, 10) >= periodStart).length
+      // done_at, nao updated_at: editar o titulo de uma tarefa concluida em
+      // agosto a fazia contar como entrega deste periodo. Sem done_at (tarefa
+      // concluida antes da coluna existir) cai no updated_at, que era o unico
+      // dado disponivel antes.
+      completed: filteredTasks.filter((row) => row.status === "done"
+        && (row.done_at ?? row.updated_at).slice(0, 10) >= periodStart).length
         + filteredExtras.filter((row) => row.status === "done" && row.updated_at.slice(0, 10) >= periodStart).length,
       distribution,
       total: filteredTasks.length + filteredExtras.length,

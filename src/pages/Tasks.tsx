@@ -82,6 +82,11 @@ import { DateRangeFields } from "@/components/filters/DateRangeFields";
 import { isDayWithinRange } from "@/lib/dateRange";
 
 type TaskStatus = "todo" | "doing" | "review" | "done";
+
+// Quantos dias de trabalho entregue o quadro mostra por padrao. O kanban serve
+// ao trabalho em andamento; o mes inteiro de concluidas e historico, e vira uma
+// parede que empurra as outras colunas para fora da tela.
+const DIAS_CONCLUIDAS_VISIVEIS = 7;
 type TaskPriority = "low" | "medium" | "high";
 type TaskFilters = {
   assigneeId: string;
@@ -107,6 +112,8 @@ type TaskRecord = {
   created_by: string;
   created_at: string;
   updated_at: string;
+  done: boolean;
+  done_at: string | null;
 };
 
 type TaskSubtask = {
@@ -513,6 +520,8 @@ function TaskColumn({
   draggingDisabled,
   onEdit,
   hasActiveFilters,
+  ocultas,
+  onVerTodas,
 }: {
   column: (typeof COLUMNS)[number];
   tasks: TaskRecord[];
@@ -528,6 +537,8 @@ function TaskColumn({
   draggingDisabled: boolean;
   onEdit?: (task: TaskRecord) => void;
   hasActiveFilters: boolean;
+  ocultas?: number;
+  onVerTodas?: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
@@ -578,6 +589,18 @@ function TaskColumn({
               {hasActiveFilters ? "Nenhuma tarefa com estes filtros" : "Arraste uma tarefa para cá"}
             </div>
           )}
+
+          {/* O que ficou fora da janela é contado, não some calado: some sem
+              aviso e a pessoa procura uma tarefa que jura ter concluído. */}
+          {!!ocultas && ocultas > 0 && onVerTodas && (
+            <button
+              type="button"
+              onClick={onVerTodas}
+              className="mt-1 rounded-xl border border-dashed border-border/70 px-3 py-2.5 text-center text-xs text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+            >
+              +{ocultas} {ocultas === 1 ? "concluída há mais tempo" : "concluídas há mais tempo"}
+            </button>
+          )}
         </div>
       </SortableContext>
     </section>
@@ -607,6 +630,7 @@ export default function Tasks() {
   // Subtarefas em rascunho ao CRIAR uma tarefa (a tarefa ainda não existe, então
   // guardamos localmente e inserimos depois que ela é criada).
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
+  const [mostrarTodasConcluidas, setMostrarTodasConcluidas] = useState(false);
   const { boardClientId } = useParams();
   const rotaInterna = useLocation().pathname === "/tasks/interno";
 
@@ -1100,16 +1124,38 @@ export default function Tasks() {
     setTaskDialogOpen(true);
   };
 
+  // Concluídas fora da janela. Guardado à parte para o rodapé da coluna poder
+  // dizer quantas ficaram de fora em vez de simplesmente escondê-las.
+  const concluidasAntigas = useMemo(() => {
+    if (mostrarTodasConcluidas) return 0;
+    const limite = new Date();
+    limite.setDate(limite.getDate() - DIAS_CONCLUIDAS_VISIVEIS);
+    return filteredTasks.filter(
+      (task) => task.status === "done" && task.done_at !== null && new Date(task.done_at) < limite,
+    ).length;
+  }, [filteredTasks, mostrarTodasConcluidas]);
+
   const tasksByStatus = useMemo(() => {
+    const limite = new Date();
+    limite.setDate(limite.getDate() - DIAS_CONCLUIDAS_VISIVEIS);
+
     return Object.fromEntries(
       COLUMNS.map((column) => [
         column.id,
         filteredTasks
-          .filter((task) => task.status === column.id)
+          .filter((task) => {
+            if (task.status !== column.id) return false;
+            if (column.id !== "done" || mostrarTodasConcluidas) return true;
+            // Sem done_at a data é desconhecida (concluída antes da coluna
+            // existir): fica visível, porque esconder por falta de dado seria
+            // sumir com trabalho sem conseguir explicar o motivo.
+            if (task.done_at === null) return true;
+            return new Date(task.done_at) >= limite;
+          })
           .sort((a, b) => a.position - b.position),
       ])
     ) as Record<TaskStatus, TaskRecord[]>;
-  }, [filteredTasks]);
+  }, [filteredTasks, mostrarTodasConcluidas]);
 
   const activeTask = activeTaskId ? localTasks.find((task) => task.id === activeTaskId) : undefined;
 
@@ -1746,6 +1792,8 @@ export default function Tasks() {
                   draggingDisabled={!canEditContent || moveTask.isPending}
                   onEdit={canEditContent ? openEditTask : undefined}
                   hasActiveFilters={hasActiveFilters}
+                  ocultas={column.id === "done" ? concluidasAntigas : 0}
+                  onVerTodas={column.id === "done" ? () => setMostrarTodasConcluidas(true) : undefined}
                 />
               ))}
             </div>
