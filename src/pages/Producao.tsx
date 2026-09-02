@@ -23,15 +23,15 @@ import { DateRangeFields } from "@/components/filters/DateRangeFields";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { hasActiveDateRange, isDayWithinRange } from "@/lib/dateRange";
 import { cn } from "@/lib/utils";
-import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
 import {
   enviarPecaParaKanban,
   PecaJaNoKanbanError,
 } from "@/lib/productionToTask";
 import {
   EMPTY_ROLE_MAP, PIECE_LABEL, ROLE_LABELS, STEP_KIND_LABELS, assigneeForRole,
-  isCustomStep, loadRoleMap, newCustomKey, pieceProgress, reasonsFor, saveRoleMap,
-  stepsFor, stepsToReopen, EDITABLE_PIECE_TYPES, loadPipelines, savePipeline, resetPipeline,
+  isCustomStep, loadFunctionAssignees, loadRoleMap, newCustomKey, pieceProgress,
+  reasonsFor, saveRoleMap, stepsFor, stepsToReopen, EDITABLE_PIECE_TYPES,
+  loadPipelines, savePipeline, resetPipeline,
   type RoleKey, type RoleMap, type StepDef, type StepKind,
 } from "@/lib/productionPipeline";
 
