@@ -13,6 +13,16 @@ export interface ProjectRailClient {
   id: string;
   name: string;
   accent_color?: string | null;
+  logo_url?: string | null;
+}
+
+function iniciais(nome: string) {
+  return nome
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((parte) => parte.charAt(0).toUpperCase())
+    .join("") || "?";
 }
 
 /** Acima disto a lista deixa de caber na tela e procurar vira caçar. */
@@ -42,12 +52,40 @@ export function ProjectRail({
     return clients.filter((cliente) => semAcento(cliente.name).includes(termo));
   }, [busca, clients]);
 
+  /**
+   * A marca do cliente vem primeiro: logo se existir, senão as iniciais sobre a
+   * cor de destaque dele. Reconhecer o cliente por imagem é mais rápido que ler
+   * 24 nomes em sequência — e é o que faz a lista parecer a carteira da agência
+   * em vez de um menu.
+   */
+  const marca = (cliente: ProjectRailClient) => {
+    const cor = cliente.accent_color || "hsl(var(--muted-foreground))";
+    if (cliente.logo_url) {
+      return (
+        <img
+          src={cliente.logo_url}
+          alt=""
+          loading="lazy"
+          className="h-5 w-5 shrink-0 rounded-full object-cover ring-1 ring-border/60"
+        />
+      );
+    }
+    return (
+      <span
+        aria-hidden
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-white"
+        style={{ background: cor }}
+      >
+        {iniciais(cliente.name)}
+      </span>
+    );
+  };
+
   const item = (
     to: string,
     label: string,
-    cor: string | null,
+    marcador: React.ReactNode,
     chave: string,
-    icone?: React.ReactNode,
   ) => {
     const ativo = pathname === to;
     const abertas = abertasPorCliente.get(chave) ?? 0;
@@ -63,12 +101,7 @@ export function ProjectRail({
             : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
         )}
       >
-        {icone ?? (
-          <span
-            className="h-2.5 w-2.5 shrink-0 rounded-full"
-            style={{ background: cor || "hsl(var(--muted-foreground))" }}
-          />
-        )}
+        {marcador}
         <span className="min-w-0 flex-1 truncate">{label}</span>
 
         {/* Só exceção vira número. Mostrar o total de tarefas de cada cliente
@@ -93,8 +126,8 @@ export function ProjectRail({
   return (
     <aside className="sticky top-6 hidden max-h-[calc(100vh-7rem)] w-[220px] shrink-0 flex-col self-start rounded-2xl border border-border/60 bg-muted/25 p-2 lg:flex">
       <div className="space-y-0.5">
-        {item("/tasks", "Todas as tarefas", null, "__todas__", <Users className="h-4 w-4 shrink-0" />)}
-        {item("/tasks/interno", "Interno", null, "__interno__", <Building2 className="h-4 w-4 shrink-0" />)}
+        {item("/tasks", "Todas as tarefas", <Users className="h-4 w-4 shrink-0" />, "__todas__")}
+        {item("/tasks/interno", "Interno", <Building2 className="h-4 w-4 shrink-0" />, "__interno__")}
       </div>
 
       <div className="mt-3 flex items-center justify-between px-2.5 pb-1.5">
@@ -122,7 +155,7 @@ export function ProjectRail({
             <p className="px-2.5 py-2 text-xs text-muted-foreground">Carregando…</p>
           )}
           {visiveis.map((cliente) =>
-            item(`/tasks/cliente/${cliente.id}`, cliente.name, cliente.accent_color ?? null, cliente.id),
+            item(`/tasks/cliente/${cliente.id}`, cliente.name, marca(cliente), cliente.id),
           )}
           {!loading && visiveis.length === 0 && (
             <p className="px-2.5 py-2 text-xs text-muted-foreground">

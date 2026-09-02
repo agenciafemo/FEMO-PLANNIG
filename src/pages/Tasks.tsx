@@ -139,7 +139,7 @@ type TaskTimeEntry = {
   duration_seconds: number | null;
 };
 
-type ClientOption = { id: string; name: string };
+type ClientOption = { id: string; name: string; logo_url: string | null; accent_color: string | null };
 type MemberOption = {
   userId: string;
   name: string;
@@ -685,7 +685,7 @@ export default function Tasks() {
           .order("position", { ascending: true }),
         supabase
           .from("clients")
-          .select("id, name")
+          .select("id, name, logo_url, accent_color")
           .eq("organization_id", organizationId!)
           .order("name", { ascending: true }),
         taskSupabase.rpc<TaskAssigneeRow[]>("get_task_assignees", {
