@@ -153,6 +153,11 @@ const App = () => (
                 <Route path="/programacao" element={<Programacao />} />
                 <Route path="/relatorios" element={<Relatorios />} />
                 <Route path="/tasks" element={<Tasks />} />
+                {/* Quadro de um cliente só. O cliente vem da rota, não do
+                    filtro guardado: assim o link é compartilhável e voltar
+                    para /tasks devolve a visão geral sem resíduo. */}
+                <Route path="/tasks/cliente/:boardClientId" element={<Tasks />} />
+                <Route path="/tasks/interno" element={<Tasks />} />
                 <Route path="/producao" element={<Producao />} />
                 <Route path="/ponto" element={<TimeClock />} />
                 <Route path="/calendario" element={<Calendario />} />

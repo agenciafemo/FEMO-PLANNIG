@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useParams } from "react-router-dom";
 import {
   DndContext,
   DragEndEvent,
@@ -593,6 +594,9 @@ export default function Tasks() {
   // Subtarefas em rascunho ao CRIAR uma tarefa (a tarefa ainda não existe, então
   // guardamos localmente e inserimos depois que ela é criada).
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
+  const { boardClientId } = useParams();
+  const rotaInterna = useLocation().pathname === "/tasks/interno";
+
   const [filtersByOrganization, setFiltersByOrganization] = usePersistedState<Record<string, TaskFilters>>(
     "norteia.tasks.filters.v1",
     {}
@@ -775,11 +779,21 @@ export default function Tasks() {
     || (membersById.has(storedFilters.assigneeId) && (!membersForFunction || membersForFunction.has(storedFilters.assigneeId)))
     ? storedFilters.assigneeId
     : "all";
-  const clientFilter = storedFilters.clientId === "all"
+  // Quadro de projeto: o cliente vem da ROTA e vence o filtro guardado.
+  // /tasks/interno reusa o valor "none" que o filtro já entende como "sem cliente".
+  const clienteDaRota = boardClientId ?? (rotaInterna ? "none" : null);
+  const quadroFixo = clienteDaRota !== null;
+  const filtroGuardadoValido = storedFilters.clientId === "all"
     || storedFilters.clientId === "none"
     || clientsById.has(storedFilters.clientId)
     ? storedFilters.clientId
     : "all";
+  const clientFilter = clienteDaRota ?? filtroGuardadoValido;
+  const tituloDoQuadro = !quadroFixo
+    ? "Tarefas"
+    : rotaInterna
+      ? "Interno"
+      : clientsById.get(boardClientId!)?.name ?? "Projeto";
   const priorityFilter: TaskFilters["priority"] = ["all", "low", "medium", "high"].includes(storedFilters.priority)
     ? storedFilters.priority
     : "all";
@@ -1162,10 +1176,17 @@ export default function Tasks() {
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
               <ListTodo className="h-4 w-4" /> Gestão da equipe
             </div>
-            <h1 className="text-3xl font-semibold tracking-tight">Tarefas</h1>
+            <h1 className="text-3xl font-semibold tracking-tight">{tituloDoQuadro}</h1>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              Acompanhe o trabalho da equipe e mova os cards conforme avançam.
+              {quadroFixo
+                ? "Somente as tarefas deste projeto. O filtro de cliente fica travado aqui."
+                : "Acompanhe o trabalho da equipe e mova os cards conforme avançam."}
             </p>
+            {quadroFixo && (
+              <Link to="/tasks" className="mt-1.5 inline-block text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+                ← Ver todas as tarefas
+              </Link>
+            )}
           </div>
 
           {canEditContent && (
@@ -1571,7 +1592,10 @@ export default function Tasks() {
                 </Select>
               </div>
 
-              <div className="min-w-[190px] flex-1 space-y-1 sm:max-w-[240px]">
+              {/* Num quadro de projeto o cliente já está decidido pela rota;
+                  deixar o seletor aqui permitiria sair do projeto sem sair da
+                  página, e o título passaria a mentir. */}
+              <div className={cn("min-w-[190px] flex-1 space-y-1 sm:max-w-[240px]", quadroFixo && "hidden")}>
                 <Label className="text-[11px] text-muted-foreground">Cliente</Label>
                 <Select value={clientFilter} onValueChange={(value) => updateFilters({ clientId: value })}>
                   <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
