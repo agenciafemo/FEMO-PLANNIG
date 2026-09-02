@@ -115,6 +115,8 @@ interface TeamQueryBuilder<T> extends PromiseLike<TeamQueryResult<T>> {
   delete(): TeamQueryBuilder<T>;
 }
 
+import { PermissionsPanel } from "@/components/team/PermissionsPanel";
+
 const teamSupabase = supabase as unknown as {
   from<T>(relation: string): TeamQueryBuilder<T>;
   rpc<T>(functionName: string, params: Record<string, unknown>): PromiseLike<TeamQueryResult<T>>;
@@ -444,6 +446,19 @@ export default function TeamCollaborators() {
             </div>
           ) : undefined}
         />
+
+        {organizationId && user && (
+          <PermissionsPanel
+            organizationId={organizationId}
+            currentUserId={user.id}
+            podeEditar={role === "owner" || role === "admin"}
+            membros={(teamQuery.data?.members ?? []).map((m) => ({
+              user_id: m.user_id,
+              display_name: m.display_name,
+              role: m.role,
+            }))}
+          />
+        )}
 
         <div className="rounded-2xl border border-border/70 bg-card/70 p-4 shadow-sm sm:p-5">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">

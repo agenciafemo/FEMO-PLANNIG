@@ -15,7 +15,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,7 +33,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, ExternalLink, Copy, ChevronLeft, ChevronRight, X, FolderInput } from "lucide-react";
+import { CalendarIcon, Image, Video, Layers, Save, Trash2, Send, FileText, Copy, ChevronLeft, ChevronRight, X, FolderInput, MoreHorizontal } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -34,6 +41,32 @@ import { FrameioReviewPanel } from "@/components/planning/FrameioReviewPanel";
 
 const MONTHS_SHORT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const DRAFT_DEBOUNCE_MS = 500;
+
+// O cabeçalho diz o que está sendo editado. Sem isto o título era só
+// "Editar Post" — igual para as 5 peças de um planejamento.
+const CONTENT_TYPE_LABELS: Record<string, string> = {
+  static: "Arte estática",
+  reels: "Reels",
+  carousel: "Carrossel",
+  story: "Story",
+  blog: "Blog",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: "Rascunho",
+  pending: "Pendente",
+  approved: "Aprovado",
+  needs_revision: "Em revisão",
+};
+
+// Mesma leitura de cor do quadro de planejamento: aprovado é o único verde,
+// revisão é âmbar. Cor aqui significa estado da peça, nada mais.
+const STATUS_BADGE: Record<string, string> = {
+  draft: "border-muted-foreground/20 bg-muted text-muted-foreground",
+  pending: "border-muted-foreground/20 bg-muted text-muted-foreground",
+  approved: "border-emerald-500/30 bg-emerald-500/15 text-emerald-600",
+  needs_revision: "border-amber-500/30 bg-amber-500/15 text-amber-600",
+};
 
 interface PostDraftData {
   caption: string;
@@ -108,6 +141,7 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
   const [blogBody, setBlogBody] = useState("");
   const [managerComment, setManagerComment] = useState("");
   const [expandedImageIndex, setExpandedImageIndex] = useState<number | null>(null);
+  const [expandedSource, setExpandedSource] = useState<"cover" | "media">("media");
   // Fechamento único do lightbox, reusado por X, backdrop, Escape e fallback.
   const closeImageLightbox = useCallback(() => {
     setExpandedImageIndex(null);
@@ -126,10 +160,9 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
     return () => document.removeEventListener("keydown", onKey, true);
   }, [expandedImageIndex, closeImageLightbox]);
   const [targetPlanningId, setTargetPlanningId] = useState("");
-  const now = new Date();
-  const [newPlanningMonth, setNewPlanningMonth] = useState(String(now.getMonth() + 1));
-  const [newPlanningYear, setNewPlanningYear] = useState(String(now.getFullYear()));
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
   const [hydratedPostId, setHydratedPostId] = useState<string | null>(null);
   const { organizationId } = useOrganization();
   const { loadDraft, saveDraft, clearDraft } = usePostEditorDraft<PostDraftData>({
@@ -355,7 +388,10 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
 
   const updatePost = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
+      // O `.select("id")` não é enfeite: um UPDATE barrado por RLS volta com
+      // ZERO linhas e `error` nulo. Sem conferir o retorno, o onSuccess rodava,
+      // apagava o rascunho local e mostrava "Post salvo!" com o trabalho perdido.
+      const { data, error } = await supabase
         .from("posts")
         .update({
           caption,
@@ -368,8 +404,12 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
           status,
           blog_body: blogBody || null,
         } as any)
-        .eq("id", postId);
+        .eq("id", postId)
+        .select("id");
       if (error) throw error;
+      if (!data?.length) {
+        throw new Error("Não foi possível salvar: você não tem permissão para editar este post.");
+      }
     },
     onSuccess: () => {
       clearLocalDraft();
@@ -378,13 +418,20 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
       toast.success("Post salvo!");
       onClose("saved");
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const deletePost = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("posts").delete().eq("id", postId);
+      const { data, error } = await supabase
+        .from("posts")
+        .delete()
+        .eq("id", postId)
+        .select("id");
       if (error) throw error;
+      if (!data?.length) {
+        throw new Error("Não foi possível excluir: você não tem permissão para remover este post.");
+      }
     },
     onSuccess: () => {
       clearLocalDraft();
@@ -392,6 +439,7 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
       toast.success("Post removido");
       onClose("deleted");
     },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const movePost = useMutation({
@@ -405,11 +453,15 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
         .limit(1);
       if (fetchError) throw fetchError;
       const newPosition = targetPosts && targetPosts.length > 0 ? targetPosts[0].position + 1 : 0;
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("posts")
         .update({ planning_id: targetPlanningId, position: newPosition })
-        .eq("id", postId);
+        .eq("id", postId)
+        .select("id");
       if (error) throw error;
+      if (!data?.length) {
+        throw new Error("Não foi possível mover: você não tem permissão para editar este post.");
+      }
     },
     onSuccess: () => {
       clearLocalDraft();
@@ -418,27 +470,7 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
       toast.success("Post movido com sucesso!");
       onClose("moved");
     },
-    onError: (e: any) => toast.error(e.message),
-  });
-
-  const createTargetPlanning = useMutation({
-    mutationFn: async () => {
-      if (!clientId) throw new Error("Cliente não identificado");
-      const { data, error } = await supabase
-        .from("plannings")
-        .insert({ client_id: clientId, created_by: user!.id, month: parseInt(newPlanningMonth), year: parseInt(newPlanningYear) } as any)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["other-plannings", clientId, planningId] });
-      queryClient.invalidateQueries({ queryKey: ["plannings"] });
-      setTargetPlanningId(data.id);
-      toast.success("Planejamento criado! Agora selecione-o para mover o post.");
-    },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const addManagerComment = useMutation({
@@ -456,17 +488,26 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
       setManagerComment("");
       toast.success("Comentário enviado!");
     },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const deleteComment = useMutation({
     mutationFn: async (commentId: string) => {
-      const { error } = await supabase.from("post_comments").delete().eq("id", commentId);
+      const { data, error } = await supabase
+        .from("post_comments")
+        .delete()
+        .eq("id", commentId)
+        .select("id");
       if (error) throw error;
+      if (!data?.length) {
+        throw new Error("Não foi possível remover: sem permissão para excluir este comentário.");
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["post-comments-manager", postId] });
       toast.success("Comentário removido");
     },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const handleUploadMedia = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -500,7 +541,10 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
       const { data: urlData } = supabase.storage.from("post-media").getPublicUrl(path);
       uploaded.push(urlData.publicUrl);
     }
-    setMediaUrls([...mediaUrls, ...uploaded]);
+    // Forma funcional: o upload é sequencial e demorado, e `mediaUrls` foi
+    // capturado antes do loop. Sem o `prev`, remover ou reordenar um slide
+    // durante o envio era desfeito quando o último arquivo terminava.
+    setMediaUrls((prev) => [...prev, ...uploaded]);
     if (uploaded.length) toast.success(`${uploaded.length} arquivo(s) adicionado(s)!`);
     e.target.value = "";
   };
@@ -571,7 +615,12 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
     setMediaUrls(arr);
   };
 
+  // Qual conjunto o lightbox está mostrando. Antes isto era deduzido do tipo de
+  // conteúdo, e por isso clicar na capa de um carrossel abria o slide 1: o tipo
+  // dizia "carrossel" e a função devolvia mediaUrls, ignorando de onde veio o
+  // clique. Agora quem abre declara a origem.
   const getExpandedImages = () => {
+    if (expandedSource === "cover") return coverImageUrl ? [coverImageUrl] : [];
     if (contentType === "carousel") return mediaUrls;
     // Story (como static/reels/blog) guarda a imagem em coverImageUrl, não em
     // mediaUrls. Sem isto, o lightbox recebia array vazio e não abria.
@@ -613,7 +662,27 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
         }}
         className="max-h-[90vh] w-[95vw] max-w-2xl overflow-y-auto p-4 sm:p-6"
       >
-        <div className="absolute right-4 top-4">
+        <div className="absolute right-4 top-4 flex items-center gap-1">
+          {/* Ações de gestão da peça. Saíram do corpo do formulário: são raras e
+              não são conteúdo — no meio dos campos competiam com a legenda. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Mais ações">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setMoveOpen(true)}>
+                <FolderInput className="mr-2 h-4 w-4" /> Mover para outro planejamento
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onSelect={() => setConfirmDelete(true)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" /> Excluir post
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <button
             type="button"
             onClick={requestClose}
@@ -623,28 +692,28 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
             <X className="h-4 w-4" />
           </button>
         </div>
-        <DialogHeader>
-          <DialogTitle>Editar {contentType === "blog" ? "Blog" : "Post"}</DialogTitle>
+        <DialogHeader className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2 pr-16">
+            <DialogTitle className="text-base">
+              {CONTENT_TYPE_LABELS[contentType] ?? "Post"}
+              {publishDate ? ` · ${format(publishDate, "dd/MM")}` : ""}
+            </DialogTitle>
+            <Badge variant="outline" className={STATUS_BADGE[status] ?? STATUS_BADGE.draft}>
+              {STATUS_LABELS[status] ?? status}
+            </Badge>
+            {/* dirtyRef é atualizado no corpo do componente, antes deste render,
+                e todo keystroke re-renderiza — então ler .current aqui é fiel.
+                Torna visível o rascunho automático, que hoje é invisível. */}
+            <Badge variant="outline" className="font-normal text-muted-foreground">
+              {dirtyRef.current ? "Alterações não salvas" : "Rascunho salvo"}
+            </Badge>
+          </div>
+          <DialogDescription className="sr-only">
+            Editar conteúdo, mídia e aprovação desta peça do planejamento.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">
-          {/* Reels Video Banner */}
-          {contentType === "reels" && videoUrl && (
-            <a
-              href={videoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 rounded-lg bg-primary/10 border border-primary/20 p-4 text-primary hover:bg-primary/20 transition-colors"
-            >
-              <Video className="h-6 w-6 shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="font-medium text-sm">Assistir Vídeo</p>
-                <p className="text-xs text-muted-foreground truncate">{videoUrl}</p>
-              </div>
-              <ExternalLink className="h-4 w-4 shrink-0" />
-            </a>
-          )}
-
           {/* Content Type & Date */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
@@ -676,11 +745,18 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
             </div>
           </div>
 
-          {/* Media */}
+          {/* No carrossel não há campo de capa: o slide 1 é a capa (ver
+              postThumbnailUrl). Pedir uma capa à parte fazia subir o mesmo
+              arquivo duas vezes. Nos outros tipos a capa continua sendo o que
+              alimenta a miniatura do quadro, do portal e da Programação. */}
+          {contentType !== "carousel" && (
           <div className="space-y-2">
-            <Label>Capa / Imagem</Label>
+            <Label>{contentType === "reels" ? "Capa do Reels (thumbnail)" : "Imagem"}</Label>
             {coverImageUrl && (
-              <div className="relative mb-2 cursor-pointer group" onClick={() => setExpandedImageIndex(0)}>
+              <div
+                className="relative mb-2 cursor-pointer group"
+                onClick={() => { setExpandedSource("cover"); setExpandedImageIndex(0); }}
+              >
                 <img src={coverImageUrl} alt="Preview" className="max-h-48 w-full rounded-lg object-cover group-hover:opacity-75 transition-opacity" />
                 <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
                   <span className="text-white font-semibold bg-black/40 px-4 py-2 rounded">Clique para ampliar</span>
@@ -693,10 +769,11 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
               <Input placeholder="ou cole URL da imagem (Canva)" value={coverImageUrl} onChange={(e) => setCoverImageUrl(e.target.value)} className="flex-1" />
             </div>
           </div>
+          )}
 
           {/* Carousel Multi-image */}
           {contentType === "carousel" && (
-            <div className="space-y-2 rounded-lg border-2 border-primary/30 bg-primary/5 p-3">
+            <div className="space-y-2 rounded-lg border p-3">
               <div className="flex items-center justify-between">
                 <Label className="flex items-center gap-2"><Layers className="h-4 w-4" /> Mídia do Carrossel</Label>
                 <span className="text-xs text-muted-foreground">{mediaUrls.length}/20</span>
@@ -704,7 +781,7 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
               {mediaUrls.length > 0 && (
                 <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                   {mediaUrls.map((url, idx) => (
-                    <div key={idx} className="group relative aspect-square overflow-hidden rounded-md border bg-muted cursor-pointer" onClick={() => setExpandedImageIndex(idx)}>
+                    <div key={idx} className="group relative aspect-square overflow-hidden rounded-md border bg-muted cursor-pointer" onClick={() => { setExpandedSource("media"); setExpandedImageIndex(idx); }}>
                       {isVideo(url) ? (
                         <div className="flex h-full w-full items-center justify-center bg-black group-hover:opacity-75 transition-opacity">
                           <Video className="h-6 w-6 text-white/80" />
@@ -734,7 +811,10 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
                 <Input placeholder="ou cole URL da imagem/vídeo (Canva, Drive, etc)" value={carouselUrlInput} onChange={(e) => setCarouselUrlInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCarouselUrl())} disabled={mediaUrls.length >= 20} />
                 <Button type="button" variant="outline" onClick={addCarouselUrl} disabled={mediaUrls.length >= 20}>Adicionar</Button>
               </div>
-              <p className="text-xs text-muted-foreground">Aceita imagens e vídeos (mp4, mov, webm). Até 20 arquivos por carrossel.</p>
+              <p className="text-xs text-muted-foreground">
+                O slide 1 é a capa: é ele que aparece no quadro e no portal do cliente.
+                Aceita imagens e vídeos (mp4, mov, webm). Até 20 arquivos por carrossel.
+              </p>
             </div>
           )}
 
@@ -763,6 +843,8 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
             </div>
           )}
 
+          {/* Revisão externa só existe para vídeo — o Frame.io revisa o arquivo
+              do Reels. Em estático/carrossel/blog o bloco só poluía o editor. */}
           {contentType === "reels" && (
             <FrameioReviewPanel
               organizationId={organizationId}
@@ -823,58 +905,15 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
             </Select>
           </div>
 
-          {/* Move to another planning */}
-          <div className="space-y-2 rounded-lg border p-4">
-            <Label className="flex items-center gap-2"><FolderInput className="h-4 w-4" /> Mover para outro planejamento</Label>
-            {otherPlannings && otherPlannings.length > 0 ? (
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Select value={targetPlanningId} onValueChange={setTargetPlanningId}>
-                  <SelectTrigger className="flex-1"><SelectValue placeholder="Selecione o planejamento de destino" /></SelectTrigger>
-                  <SelectContent>
-                    {otherPlannings.map((p: any) => (
-                      <SelectItem key={p.id} value={p.id}>{MONTHS_SHORT[p.month - 1]} {p.year}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  variant="outline"
-                  disabled={!targetPlanningId || movePost.isPending}
-                  onClick={() => movePost.mutate()}
-                >
-                  <FolderInput className="mr-1 h-4 w-4" />
-                  {movePost.isPending ? "Movendo..." : "Mover"}
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Este cliente ainda não tem outro planejamento criado, por isso não é possível mover o post agora. Crie um novo planejamento abaixo para liberar a opção de mover.
-                </p>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Select value={newPlanningMonth} onValueChange={setNewPlanningMonth}>
-                    <SelectTrigger className="sm:w-[160px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {MONTHS_SHORT.map((m, i) => (<SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    type="number"
-                    value={newPlanningYear}
-                    onChange={(e) => setNewPlanningYear(e.target.value)}
-                    className="sm:w-24"
-                    min={2020}
-                    max={2099}
-                  />
-                  <Button
-                    variant="outline"
-                    disabled={createTargetPlanning.isPending}
-                    onClick={() => createTargetPlanning.mutate()}
-                  >
-                    <FolderInput className="mr-1 h-4 w-4" />
-                    {createTargetPlanning.isPending ? "Criando..." : "Criar planejamento"}
-                  </Button>
-                </div>
-              </div>
+          {/* Do cliente — o que volta de fora: observação, comentários e a
+              revisão externa. Agrupado porque é a única parte do editor que a
+              agência não escreve, e é o que se lê antes de mexer na peça. */}
+          <div className="flex items-baseline gap-2 border-b pb-2">
+            <h3 className="text-sm font-semibold">Do cliente</h3>
+            {comments && comments.length > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {comments.length} {comments.length === 1 ? "comentário" : "comentários"}
+              </span>
             )}
           </div>
 
@@ -932,20 +971,24 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-            <Button variant="destructive" size="sm" onClick={() => deletePost.mutate()}>
-              <Trash2 className="mr-1 h-4 w-4" /> Excluir
-            </Button>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={requestClose}>Cancelar</Button>
-              <Button size="sm" onClick={() => updatePost.mutate()} disabled={updatePost.isPending}>
-                <Save className="mr-1 h-4 w-4" />
-                {updatePost.isPending ? "Salvando..." : "Salvar"}
-              </Button>
-            </div>
-          </div>
         </div>
+
+        {/* Rodapé fixo: o Salvar ficava no fim de um scroll de 13 blocos, e em
+            Reels chegava a mais de mil pixels abaixo da dobra. Agora acompanha
+            a rolagem. O upload em andamento também avisa aqui, fora da seção
+            de mídia — senão o aviso de "não feche a janela" saía de vista. */}
+        <DialogFooter className="sticky bottom-0 -mx-4 -mb-4 flex-row items-center justify-end gap-2 border-t bg-background px-4 py-3 sm:-mx-6 sm:-mb-6 sm:px-6">
+          {videoPct !== null && (
+            <span className="mr-auto text-xs text-muted-foreground">
+              Enviando vídeo… {videoPct}% (não feche esta janela)
+            </span>
+          )}
+          <Button variant="outline" size="sm" onClick={requestClose}>Cancelar</Button>
+          <Button size="sm" onClick={() => updatePost.mutate()} disabled={updatePost.isPending}>
+            <Save className="mr-1 h-4 w-4" />
+            {updatePost.isPending ? "Salvando..." : "Salvar"}
+          </Button>
+        </DialogFooter>
 
         {/* Expanded Image View */}
         {expandedImageIndex !== null && expandedImages.length > 0 && createPortal(
@@ -1078,6 +1121,72 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    {/* Excluir agora pergunta. Antes o clique apagava o post direto — e o
+        cancelar da edição, que é reversível, é que tinha confirmação. */}
+    <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Excluir esta peça?</AlertDialogTitle>
+          <AlertDialogDescription>
+            O post sai do planejamento junto com a legenda, a mídia vinculada e os
+            comentários. Não dá para desfazer.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Manter post</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              setConfirmDelete(false);
+              deletePost.mutate();
+            }}
+          >
+            Excluir post
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Mover saiu do corpo do editor para cá. A criação de planejamento que
+        existia embutida aqui foi removida: criar um planejamento de dentro do
+        editor de um post inverte a hierarquia: o caminho é a tela de
+        Planejamentos. */}
+    <Dialog open={moveOpen} onOpenChange={setMoveOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Mover para outro planejamento</DialogTitle>
+          <DialogDescription>
+            A peça sai deste mês e entra no planejamento escolhido, no fim da lista.
+          </DialogDescription>
+        </DialogHeader>
+        {otherPlannings && otherPlannings.length > 0 ? (
+          <Select value={targetPlanningId} onValueChange={setTargetPlanningId}>
+            <SelectTrigger><SelectValue placeholder="Selecione o planejamento de destino" /></SelectTrigger>
+            <SelectContent>
+              {otherPlannings.map((p: any) => (
+                <SelectItem key={p.id} value={p.id}>{MONTHS_SHORT[p.month - 1]} {p.year}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Este cliente só tem este planejamento. Crie outro mês na tela de
+            Planejamentos para liberar a opção de mover.
+          </p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => setMoveOpen(false)}>Cancelar</Button>
+          <Button
+            size="sm"
+            disabled={!targetPlanningId || movePost.isPending}
+            onClick={() => movePost.mutate()}
+          >
+            <FolderInput className="mr-1 h-4 w-4" />
+            {movePost.isPending ? "Movendo..." : "Mover"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }

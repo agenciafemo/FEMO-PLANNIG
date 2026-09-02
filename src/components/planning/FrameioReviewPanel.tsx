@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { frameioFileIdFromUrl, frameioReviewStatus, isFrameioUrl } from "@/lib/frameio";
+import { frameioFileIdFromUrl, frameioReviewStatus, isFrameioReviewUrl } from "@/lib/frameio";
 
 // As tabelas entram pela migration desta feature e ainda não existem nos tipos
 // gerados. O cast fica restrito a este adaptador até a próxima geração de tipos.
@@ -137,8 +137,11 @@ export function FrameioReviewPanel({
       const normalizedId = fileId.trim();
       const normalizedUrl = fileUrl.trim();
       if (!normalizedId) throw new Error("Informe o ID do arquivo no Frame.io.");
-      if (normalizedUrl && !isFrameioUrl(normalizedUrl)) {
-        throw new Error("Use um link oficial do Frame.io (https://app.frame.io/…)");
+      // Só link oficial do Frame.io: este valor vira um <a href> na tela, então
+      // aceitar qualquer https deixaria a equipe a um clique de um domínio
+      // falso apresentado como "revisão do cliente".
+      if (normalizedUrl && !isFrameioReviewUrl(normalizedUrl)) {
+        throw new Error("Use o link oficial de revisão do Frame.io (https://…frame.io/…).");
       }
 
       const { data, error } = await db.from("frameio_asset_links").insert({
@@ -181,10 +184,13 @@ export function FrameioReviewPanel({
 
   const loading = itemLoading || linksLoading;
 
+  // Sem cor própria: o Frame.io é uma funcionalidade do Norteia, não uma marca
+  // dentro dele. O violeta e o azul daqui eram os únicos tons do editor fora do
+  // tema, e roubavam a atenção do conteúdo da peça.
   return (
-    <section className="space-y-4 rounded-lg border border-violet-500/25 bg-violet-500/5 p-4">
+    <section className="space-y-4 rounded-lg border p-4">
       <div className="flex items-start gap-3">
-        <div className="rounded-md bg-violet-500/15 p-2 text-violet-500">
+        <div className="rounded-md bg-muted p-2 text-muted-foreground">
           <MessageSquareText className="h-4 w-4" />
         </div>
         <div>
@@ -206,8 +212,8 @@ export function FrameioReviewPanel({
       ) : (
         <>
           {detectedFileId && links.length === 0 && (
-            <div className="flex items-start gap-2 rounded-md border border-sky-500/25 bg-sky-500/10 p-3 text-sm">
-              <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+            <div className="flex items-start gap-2 rounded-md border bg-muted/50 p-3 text-sm">
+              <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
               <p>
                 Link do Frame.io detectado no vídeo. O ID já foi preenchido; clique em
                 <strong> Vincular</strong> para acompanhar a revisão.

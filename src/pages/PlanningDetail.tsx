@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { insertPosts } from "@/lib/postsInsert";
+import { postThumbnailUrl } from "@/lib/postThumbnail";
 import { deletePlanningCascade } from "@/lib/deletePlanning";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -969,6 +970,7 @@ function SortableFeedTile({ post, onOpen, onToggleScheduled }: { post: any; onOp
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: post.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
   const Icon = contentTypeIcons[post.content_type] || Image;
+  const thumbnail = postThumbnailUrl(post);
   const isReels = post.content_type === "reels";
   return (
     <div
@@ -978,8 +980,8 @@ function SortableFeedTile({ post, onOpen, onToggleScheduled }: { post: any; onOp
     >
       <AspectRatio ratio={4 / 5}>
         <button onClick={onOpen} className="group/tile block h-full w-full">
-          {post.cover_image_url ? (
-            <img src={post.cover_image_url} alt="" className="h-full w-full object-cover" />
+          {thumbnail ? (
+            <img src={thumbnail} alt="" className="h-full w-full object-cover" />
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
               <Icon className="h-8 w-8" />
@@ -1048,6 +1050,7 @@ function SortableFeedRow({ post, onOpen, onToggleScheduled }: { post: any; onOpe
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: post.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
   const Icon = contentTypeIcons[post.content_type] || Image;
+  const thumbnail = postThumbnailUrl(post);
   return (
     <div ref={setNodeRef} style={style}>
       <Card className="transition-shadow hover:shadow-md">
@@ -1062,8 +1065,8 @@ function SortableFeedRow({ post, onOpen, onToggleScheduled }: { post: any; onOpe
           </button>
           <button onClick={onOpen} className="flex flex-1 items-center gap-4 text-left">
             <div className="flex h-20 w-16 shrink-0 items-center justify-center rounded-lg bg-muted overflow-hidden">
-              {post.cover_image_url ? (
-                <img src={post.cover_image_url} alt="" className="h-full w-full object-cover" />
+              {thumbnail ? (
+                <img src={thumbnail} alt="" className="h-full w-full object-cover" />
               ) : (
                 <Icon className="h-6 w-6 text-muted-foreground" />
               )}

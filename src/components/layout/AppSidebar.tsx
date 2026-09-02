@@ -27,6 +27,17 @@ const navItems = [
   { to: "/vault", icon: KeyRound, label: "Cofre" },
 ];
 
+// A tabela `notifications` ainda não está no types.ts gerado, então o cast é
+// inevitável — mas ele fica num lugar só, com o formato declarado, em vez de
+// `any` espalhado por cada uso.
+interface NotificationRow {
+  id: string;
+  title: string | null;
+  body: string | null;
+  read: boolean | null;
+  created_at: string;
+}
+
 export function NotificationBell() {
   const queryClient = useQueryClient();
   const { organizationId, isLegacy } = useOrganization();
@@ -51,13 +62,20 @@ export function NotificationBell() {
         query = query.or(mineOrBroadcast);
         const { data, error } = await query.order("created_at", { ascending: false }).limit(20);
         if (error) return [];
-        return (data ?? []) as any[];
+        return (data ?? []) as NotificationRow[];
       } catch {
         return [];
       }
     },
     enabled: isLegacy || !!organizationId,
     refetchInterval: 30000,
+    // O padrão do React Query é PAUSAR o refetchInterval quando a aba sai de
+    // foco — era por isso que ninguém era avisado de nada estando em outra
+    // guia. E o QueryClient do app desliga refetchOnWindowFocus globalmente,
+    // então nem ao voltar a aba o sino atualizava: esperava até 30s.
+    // Notificação é o único dado do app que precisa chegar sem ninguém pedir.
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
     retry: false,
   });
 
@@ -76,7 +94,7 @@ export function NotificationBell() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications", organizationId, user?.id] }),
   });
 
-  const unreadCount = notifications?.filter((n: any) => !n.read).length ?? 0;
+  const unreadCount = notifications?.filter((n) => !n.read).length ?? 0;
 
   // Som quando chega notificação nova (além do sininho). Dois beeps curtos via
   // Web Audio. Reaproveita um único AudioContext e o "acorda" (resume) porque
@@ -135,6 +153,73 @@ export function NotificationBell() {
     prevUnreadRef.current = unreadCount;
   }, [unreadCount]);
 
+  // ---- Aviso do sistema operacional (aparece com o Norteia fora da guia) ----
+  // Escopo desta versão: o navegador precisa estar aberto, com o Norteia numa
+  // aba (mesmo em segundo plano). Notificação com o app FECHADO exigiria push
+  // com service worker, que este projeto ainda não tem.
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">(
+    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+  );
+  // IDs já anunciados. Começa preenchido com o que veio na primeira carga: sem
+  // isso, abrir o app dispararia um alerta para cada notificação antiga.
+  const announcedRef = useRef<Set<string> | null>(null);
+
+  const requestNotifPermission = async () => {
+    if (typeof Notification === "undefined") return;
+    try {
+      const result = await Notification.requestPermission();
+      setNotifPermission(result);
+      if (result === "granted") {
+        new Notification("Avisos ativados", {
+          body: "O Norteia vai avisar por aqui mesmo com a aba em segundo plano.",
+        });
+      }
+    } catch { /* permissão é best-effort */ }
+  };
+
+  useEffect(() => {
+    if (!notifications) return;
+
+    // Primeira carga: só memoriza, não anuncia.
+    if (announcedRef.current === null) {
+      announcedRef.current = new Set(notifications.map((n) => String(n.id)));
+      return;
+    }
+
+    const novas = notifications.filter(
+      (n) => !n.read && !announcedRef.current!.has(String(n.id)),
+    );
+    novas.forEach((n) => announcedRef.current!.add(String(n.id)));
+
+    if (novas.length === 0) return;
+    if (notifPermission !== "granted" || typeof Notification === "undefined") return;
+    // Com a aba à vista, o sininho e o som já dão o recado; um pop-up do SO por
+    // cima seria barulho duplicado.
+    if (!document.hidden) return;
+
+    try {
+      // Uma notificação por item, com `tag` = id: reenviar o mesmo id substitui
+      // em vez de empilhar, então um refetch repetido não vira pilha de avisos.
+      novas.slice(0, 3).forEach((n) => {
+        const aviso = new Notification(String(n.title ?? "Norteia"), {
+          body: n.body ? String(n.body) : undefined,
+          tag: `norteia-${n.id}`,
+          icon: "/favicon.ico",
+        });
+        aviso.onclick = () => {
+          window.focus();
+          aviso.close();
+        };
+      });
+      if (novas.length > 3) {
+        new Notification(`+${novas.length - 3} novas notificações`, {
+          tag: "norteia-resumo",
+          icon: "/favicon.ico",
+        });
+      }
+    } catch { /* aviso do SO é best-effort */ }
+  }, [notifications, notifPermission]);
+
   // Na primeira vez que a pessoa abre o app no dia, o painel de notificações
   // abre sozinho (uma vez por dia) para ela conferir o que aconteceu.
   useEffect(() => {
@@ -173,11 +258,29 @@ export function NotificationBell() {
             🔊 Testar som
           </button>
         </div>
+        {/* Opt-in explícito em vez de pedir permissão sozinho ao abrir o app:
+            navegador bloqueia pedido sem gesto do usuário, e um pedido do nada
+            costuma ser negado para sempre — o que mataria o recurso. */}
+        {notifPermission === "default" && (
+          <button
+            onClick={requestNotifPermission}
+            className="flex w-full items-center gap-2 border-b bg-muted/40 px-4 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Bell className="h-3.5 w-3.5 shrink-0" />
+            <span>Avisar mesmo com o Norteia em outra aba</span>
+          </button>
+        )}
+        {notifPermission === "denied" && (
+          <p className="border-b bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
+            Os avisos fora da aba estão bloqueados no navegador. Para religar, use o
+            cadeado ao lado do endereço do site.
+          </p>
+        )}
         <div className="max-h-80 overflow-y-auto">
           {!notifications || notifications.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">Nenhuma notificação</p>
           ) : (
-            notifications.map((n: any) => (
+            notifications.map((n) => (
               <div key={n.id} className={cn("border-b px-4 py-3 last:border-0", !n.read && "bg-info/10")}>
                 <div className="flex items-start gap-2">
                   {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-info" />}

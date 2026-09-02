@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
   CalendarClock, Check, ChevronDown, ChevronRight, CircleCheck, ExternalLink, Flag,
-  Loader2, Plus, RotateCcw, Send, Settings2, UserRound, Workflow, X,
+  ListChecks, Loader2, Plus, RotateCcw, Send, Settings2, UserRound, Workflow, X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -24,6 +24,10 @@ import { usePersistedState } from "@/hooks/usePersistedState";
 import { hasActiveDateRange, isDayWithinRange } from "@/lib/dateRange";
 import { cn } from "@/lib/utils";
 import { loadFunctionAssignees } from "@/lib/subtaskTemplates";
+import {
+  enviarPecaParaKanban,
+  PecaJaNoKanbanError,
+} from "@/lib/productionToTask";
 import {
   EMPTY_ROLE_MAP, PIECE_LABEL, ROLE_LABELS, STEP_KIND_LABELS, assigneeForRole,
   isCustomStep, loadRoleMap, newCustomKey, pieceProgress, reasonsFor, saveRoleMap,
@@ -59,6 +63,8 @@ type Item = {
   planning_id: string | null;
   notes: string | null;
   position: number;
+  /** Tarefa do Kanban gerada a partir desta peça. null = ainda não enviada. */
+  task_id: string | null;
   production_item_steps: Step[];
 };
 
@@ -81,6 +87,14 @@ const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho",
   "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "")
   .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+/** Nome da peça como ele aparece no quadro. A tarefa do Kanban nasce com
+ *  exatamente este nome — se divergisse, ninguém ligaria uma coisa à outra. */
+function tituloDaPeca(peca: { title: string | null; content_type: string; piece_number: number }) {
+  return peca.title?.trim()
+    ? peca.title.trim()
+    : `${PIECE_LABEL[peca.content_type] ?? peca.content_type} ${peca.piece_number}`;
+}
 
 function localDay(value: string | null) {
   if (!value) return null;
@@ -111,6 +125,14 @@ export default function Producao() {
   const [modeloTipo, setModeloTipo] = useState<string>("reels");
   const [modeloDraft, setModeloDraft] = useState<StepDef[]>([]);
   const [roleDraft, setRoleDraft] = useState<RoleMap>(EMPTY_ROLE_MAP);
+
+  // Peça escolhida para virar tarefa no Kanban. `tasks` exige responsável e
+  // prazo (ambos NOT NULL), então não dá para enviar num clique só.
+  const [paraKanban, setParaKanban] = useState<Item | null>(null);
+  const [kanbanResponsavel, setKanbanResponsavel] = useState("");
+  const [kanbanPrazo, setKanbanPrazo] = useState(
+    () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+  );
 
   // Modelos de etapas da organização (tipos sem modelo salvo caem no padrão).
   const { data: pipelines = null } = useQuery({
@@ -164,7 +186,7 @@ export default function Producao() {
     queryKey: ["production-items", organizationId],
     queryFn: async () => {
       const { data, error } = await (supabase as AnyClient).from("production_items")
-        .select("id, content_type, piece_number, title, client_id, planning_id, notes, position, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, reason_codes, reason_note, assignee_id, capture_event_id, schedule_source)")
+        .select("id, content_type, piece_number, title, client_id, planning_id, notes, position, task_id, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, reason_codes, reason_note, assignee_id, capture_event_id, schedule_source)")
         .eq("organization_id", organizationId!)
         .order("position");
       if (error) throw new Error(error.message);
@@ -324,6 +346,48 @@ export default function Producao() {
       queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] });
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  // ---- Enviar peça para o Kanban ----
+  const enviarKanban = useMutation({
+    mutationFn: async () => {
+      if (!paraKanban || !organizationId || !user) {
+        throw new Error("Faltam dados para enviar.");
+      }
+      if (!kanbanResponsavel) throw new Error("Escolha o responsável.");
+      if (!kanbanPrazo) throw new Error("Escolha o prazo.");
+      return enviarPecaParaKanban({
+        itemId: paraKanban.id,
+        organizationId,
+        clientId: paraKanban.client_id,
+        titulo: tituloDaPeca(paraKanban),
+        etapas: (paraKanban.production_item_steps ?? []).map((etapa) => ({
+          label: etapa.label,
+          position: etapa.position,
+          done: etapa.done,
+        })),
+        assigneeId: kanbanResponsavel,
+        dueDate: kanbanPrazo,
+        createdBy: user.id,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Peça enviada para o Kanban.");
+      setParaKanban(null);
+      queryClient.invalidateQueries({ queryKey: ["production-items"] });
+      queryClient.invalidateQueries({ queryKey: ["tasks-board"] });
+    },
+    onError: (e: unknown) => {
+      // Outra pessoa enviou a mesma peça enquanto este quadro estava aberto:
+      // não é erro do usuário, é só a tela desatualizada.
+      if (e instanceof PecaJaNoKanbanError) {
+        toast.info("Esta peça já está no Kanban.");
+        setParaKanban(null);
+        queryClient.invalidateQueries({ queryKey: ["production-items"] });
+        return;
+      }
+      toast.error(e instanceof Error ? e.message : "Não foi possível enviar.");
+    },
   });
 
   // ---- Nova produção (peça avulsa ou tarefa extra, para qualquer cliente) ----
@@ -640,9 +704,7 @@ export default function Producao() {
                           <div key={piece.id} className="p-4">
                             <div className="mb-2.5 flex items-center gap-2">
                               <span className="text-sm font-medium">
-                                {piece.title
-                                  ? piece.title
-                                  : `${PIECE_LABEL[piece.content_type] ?? piece.content_type} ${piece.piece_number}`}
+                                {tituloDaPeca(piece)}
                               </span>
                               <span className="text-xs text-muted-foreground tabular-nums">
                                 {pp.done}/{pp.total}
@@ -652,10 +714,31 @@ export default function Producao() {
                                   Concluída
                                 </span>
                               )}
+                              {/* Já enviada vira link, não botão: reoferecer "enviar"
+                                  numa peça que já está no Kanban só gera duplicata. */}
+                              {piece.task_id ? (
+                                <Link
+                                  to="/tasks"
+                                  className="ml-auto inline-flex items-center gap-1 rounded-lg border border-success/40 bg-success/10 px-2 py-1 text-[11px] font-medium text-success transition-colors hover:bg-success/20"
+                                >
+                                  <ListChecks className="h-3 w-3" /> No Kanban
+                                </Link>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setParaKanban(piece);
+                                    setKanbanResponsavel(user?.id ?? "");
+                                  }}
+                                  className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border/70 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-brand/50 hover:text-brand"
+                                >
+                                  <ListChecks className="h-3 w-3" /> Enviar para o Kanban
+                                </button>
+                              )}
                               {planningHref(piece) && (
                                 <Link
                                   to={planningHref(piece)!}
-                                  className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border/70 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-brand/50 hover:text-brand"
+                                  className="inline-flex items-center gap-1 rounded-lg border border-border/70 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-brand/50 hover:text-brand"
                                 >
                                   <ExternalLink className="h-3 w-3" /> Abrir no planejamento
                                 </Link>
@@ -874,6 +957,86 @@ export default function Producao() {
                   Aprovar
                 </Button>
               </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Enviar peça para o Kanban: precisa de responsável e prazo, que a tabela
+          `tasks` exige (assignee_id e due_date são NOT NULL). */}
+      <Dialog open={!!paraKanban} onOpenChange={(v) => { if (!v) setParaKanban(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Enviar para o Kanban</DialogTitle>
+          </DialogHeader>
+          {paraKanban && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-border/70 bg-muted/30 p-3">
+                <p className="text-sm font-medium">{tituloDaPeca(paraKanban)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Vira uma tarefa com{" "}
+                  {(paraKanban.production_item_steps ?? []).length} subtarefa
+                  {(paraKanban.production_item_steps ?? []).length === 1 ? "" : "s"},
+                  uma por etapa.
+                </p>
+                <ul className="mt-2 flex flex-wrap gap-1">
+                  {[...(paraKanban.production_item_steps ?? [])]
+                    .sort((a, b) => a.position - b.position)
+                    .map((etapa) => (
+                      <li
+                        key={etapa.id}
+                        className={cn(
+                          "rounded-md border px-1.5 py-0.5 text-[11px]",
+                          etapa.done
+                            ? "border-success/40 bg-success/10 text-success"
+                            : "border-border/70 text-muted-foreground",
+                        )}
+                      >
+                        {etapa.label}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+
+              <div>
+                <Label className="text-xs">Responsável</Label>
+                <Select value={kanbanResponsavel} onValueChange={setKanbanResponsavel}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Escolha quem cuida" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {members.map((m) => (
+                      <SelectItem key={m.user_id} value={m.user_id}>
+                        {m.display_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label className="text-xs">Prazo</Label>
+                <Input
+                  type="date"
+                  className="mt-1"
+                  value={kanbanPrazo}
+                  onChange={(e) => setKanbanPrazo(e.target.value)}
+                />
+              </div>
+
+              <Button
+                className="w-full"
+                disabled={enviarKanban.isPending || !kanbanResponsavel || !kanbanPrazo}
+                onClick={() => enviarKanban.mutate()}
+              >
+                {enviarKanban.isPending ? "Enviando..." : "Enviar para o Kanban"}
+              </Button>
+
+              <p className="text-[11px] leading-4 text-muted-foreground">
+                O quadro de produção continua como está. Marcar a subtarefa no
+                Kanban não marca a etapa aqui — são duas visões do mesmo trabalho,
+                para públicos diferentes.
+              </p>
             </div>
           )}
         </DialogContent>
