@@ -28,6 +28,11 @@ const TRANSCRIPT_DELAY_MS = 1_500;
 
 interface Body {
   meeting_id?: string;
+  /** Encerra a reuniao mesmo sem transcricao. E a saida para o caso em que a
+   *  Vexa nunca vai devolver nada: bot nao admitido, reuniao que nao
+   *  aconteceu, ninguem falou. Sem isto a reuniao fica em 'recording' para
+   *  sempre e o usuario tenta "de novo em alguns segundos" indefinidamente. */
+  force_end?: boolean;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -55,6 +60,7 @@ Deno.serve(async (request) => {
     if (userError || !userData?.user) throw new HttpError(401, "unauthorized");
 
     const body = await readJson<Body>(request);
+    const forcarEncerramento = body.force_end === true;
     const meetingId = body.meeting_id?.trim();
     if (!meetingId) throw new HttpError(400, "missing_meeting_id");
 
@@ -65,6 +71,30 @@ Deno.serve(async (request) => {
       throw new HttpError(404, "meeting_not_found");
     }
     const meeting = meetingResult.data;
+
+    /**
+     * Fecha a reuniao assumindo que nao havera transcricao.
+     *
+     * 'failed' e o status honesto aqui: a transcricao — o ativo da reuniao —
+     * de fato nao existe. Nao e 'transcribed', que promete um texto que nao
+     * esta la, nem 'recording', que e o buraco de onde estamos saindo.
+     */
+    const encerrarSemTranscricao = async () => {
+      const { data, error } = await supabase.from("meetings").update({
+        status: "failed",
+        failure_reason: "no_transcript",
+      }).eq("id", meetingId).select("id");
+      if (error) throw new HttpError(502, "meeting_save_failed");
+      // UPDATE barrado por RLS devolve zero linhas SEM erro neste projeto.
+      if (!data || data.length === 0) {
+        throw new HttpError(403, "meeting_update_forbidden");
+      }
+      return jsonResponse(
+        { ok: true, status: "no_transcript", meeting_id: meetingId },
+        200,
+        headers,
+      );
+    };
 
     if (meeting.source !== "bot" || !meeting.vexa_bot_id) {
       throw new HttpError(409, "not_a_bot_meeting");
@@ -154,6 +184,7 @@ Deno.serve(async (request) => {
     }
 
     if (!segments.some((segment) => segment.text?.trim())) {
+      if (forcarEncerramento) return await encerrarSemTranscricao();
       return jsonResponse(
         { ok: true, status: "transcript_pending", meeting_id: meetingId },
         200,
@@ -171,6 +202,7 @@ Deno.serve(async (request) => {
     };
     const built = buildTranscript(finalBot, segments);
     if (!built) {
+      if (forcarEncerramento) return await encerrarSemTranscricao();
       return jsonResponse(
         { ok: true, status: "transcript_pending", meeting_id: meetingId },
         200,
