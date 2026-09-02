@@ -59,14 +59,14 @@ export const gerarMensalidadesClientes = createServerFn({ method: "POST" })
 
     const { data: existentes, error: existentesError } = await supabase
       .from("lancamentos_financeiros")
-      .select("cliente_id")
+      .select("client_id")
       .eq("tipo", "Entrada")
       .eq("categoria_id", categoriaId)
       .gte("data_lancamento", bounds.start)
       .lte("data_lancamento", bounds.end);
     if (existentesError) throw new Error(existentesError.message);
 
-    const clientesComMensalidade = new Set((existentes ?? []).map((l) => l.cliente_id).filter(Boolean));
+    const clientesComMensalidade = new Set((existentes ?? []).map((l) => l.client_id).filter(Boolean));
     const novos = (clientes ?? [])
       .filter((cliente) => !clientesComMensalidade.has(cliente.id))
       .map((cliente) => ({
@@ -76,7 +76,7 @@ export const gerarMensalidadesClientes = createServerFn({ method: "POST" })
         data_lancamento: dueDate(bounds.year, bounds.month, cliente.dia_vencimento ?? 5, bounds.lastDay),
         valor: Number(cliente.valor_mensalidade ?? 0),
         status_pagamento: "Pendente" as const,
-        cliente_id: cliente.id,
+        client_id: cliente.id,
       }));
 
     if (novos.length > 0) {

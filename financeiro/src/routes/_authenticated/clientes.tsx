@@ -45,10 +45,10 @@ function Clientes() {
     queryFn: async () => {
       const { data } = await supabase
         .from("lancamentos_financeiros")
-        .select("cliente_id,id_cobranca_asaas")
+        .select("client_id,id_cobranca_asaas")
         .not("id_cobranca_asaas", "is", null);
       const set = new Set<string>();
-      (data ?? []).forEach((r) => { if (r.cliente_id) set.add(r.cliente_id); });
+      (data ?? []).forEach((r) => { if (r.client_id) set.add(r.client_id); });
       return set;
     },
   });

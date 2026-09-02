@@ -19,6 +19,7 @@ import {
 import { toast } from "sonner";
 import { formatBRL, formatDateBR, parseISODate, todayISO } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { listarClientes } from "@/lib/clientes";
 
 
 export const Route = createFileRoute("/_authenticated/fluxo")({
@@ -90,7 +91,7 @@ function Fluxo() {
       const [lanc, cats, clis, colabs] = await Promise.all([
         supabase.from("lancamentos_financeiros").select("*").order("data_lancamento", { ascending: true }),
         supabase.from("categorias").select("*").order("nome"),
-        supabase.from("clientes").select("id,nome").order("nome"),
+        listarClientes(),
         supabase.from("colaboradores").select("id,nome").order("nome"),
       ]);
       return { lanc: (lanc.data ?? []) as any[], cats: (cats.data ?? []) as Cat[], clis: clis.data ?? [], colabs: colabs.data ?? [] };
@@ -132,14 +133,14 @@ function Fluxo() {
 
       const { data: existentes, error: exErr } = await supabase
         .from("lancamentos_financeiros")
-        .select("cliente_id")
+        .select("client_id")
         .eq("tipo", "Entrada")
         .eq("categoria_id", categoriaId)
         .gte("data_lancamento", start)
         .lte("data_lancamento", end);
       if (exErr) throw new Error(exErr.message);
 
-      const jaTem = new Set((existentes ?? []).map((l: any) => l.cliente_id).filter(Boolean));
+      const jaTem = new Set((existentes ?? []).map((l: any) => l.client_id).filter(Boolean));
       const novos = (clientes ?? [])
         .filter((c: any) => !jaTem.has(c.id))
         .map((c: any) => {
@@ -151,7 +152,7 @@ function Fluxo() {
             data_lancamento: `${year}-${String(month).padStart(2, "0")}-${String(dia).padStart(2, "0")}`,
             valor: Number(c.valor_mensalidade ?? 0),
             status_pagamento: "Pendente" as const,
-            cliente_id: c.id,
+            client_id: c.id,
           };
         });
 
@@ -247,13 +248,13 @@ function Fluxo() {
     if (tipoFiltro !== "Todos") items = items.filter((l) => l.tipo === tipoFiltro);
     if (activeStatus.length) items = items.filter((l) => activeStatus.includes(l.status_pagamento));
     if (categoriaFiltro !== "all") items = items.filter((l) => l.categoria_id === categoriaFiltro);
-    if (clienteFiltro !== "all") items = items.filter((l) => l.cliente_id === clienteFiltro);
+    if (clienteFiltro !== "all") items = items.filter((l) => l.client_id === clienteFiltro);
     if (colaboradorFiltro !== "all") items = items.filter((l) => l.colaborador_id === colaboradorFiltro);
     const termo = busca.trim().toLowerCase();
     if (termo) {
       items = items.filter((l) => {
         const cat = catById.get(l.categoria_id) ?? "";
-        const cli = l.cliente_id ? (cliById.get(l.cliente_id) ?? "") : "";
+        const cli = l.client_id ? (cliById.get(l.client_id) ?? "") : "";
         const colab = l.colaborador_id ? (colabById.get(l.colaborador_id) ?? "") : "";
         return [l.descricao, cat, cli, colab, l.status_pagamento, l.tipo].filter(Boolean).some((v) => String(v).toLowerCase().includes(termo));
       });
@@ -261,8 +262,8 @@ function Fluxo() {
     items = [...items].sort((a, b) => {
       const byDate = String(a.data_lancamento).localeCompare(String(b.data_lancamento));
       if (byDate !== 0) return byDate;
-      const aRef = a.cliente_id ? (cliById.get(a.cliente_id) ?? "") : a.colaborador_id ? (colabById.get(a.colaborador_id) ?? "") : (a.descricao ?? "");
-      const bRef = b.cliente_id ? (cliById.get(b.cliente_id) ?? "") : b.colaborador_id ? (colabById.get(b.colaborador_id) ?? "") : (b.descricao ?? "");
+      const aRef = a.client_id ? (cliById.get(a.client_id) ?? "") : a.colaborador_id ? (colabById.get(a.colaborador_id) ?? "") : (a.descricao ?? "");
+      const bRef = b.client_id ? (cliById.get(b.client_id) ?? "") : b.colaborador_id ? (colabById.get(b.colaborador_id) ?? "") : (b.descricao ?? "");
       return String(aRef).localeCompare(String(bRef), "pt-BR", { sensitivity: "base" });
     });
 
@@ -560,8 +561,8 @@ function Fluxo() {
               <ul className="divide-y divide-zinc-100">
                 {linhas.map(({ l, valor, saldo }) => {
                   const cat = catById.get(l.categoria_id);
-                  const ref = l.cliente_id
-                    ? cliById.get(l.cliente_id)
+                  const ref = l.client_id
+                    ? cliById.get(l.client_id)
                     : l.colaborador_id ? colabById.get(l.colaborador_id) : null;
                   const principal = (ref ?? l.descricao ?? cat ?? "Lançamento").toString();
                   const tags = [
@@ -737,7 +738,7 @@ function LancDialog({ editing, cats, clis, colabs, onClose }: { editing: Lanc | 
     data_lancamento: editing?.data_lancamento ?? todayISO(),
     valor: editing?.valor ?? 0,
     status_pagamento: editing?.status_pagamento ?? "Pendente" as "Pago" | "Pendente" | "Inadimplente" | "Agendado" | "Conciliado",
-    cliente_id: editing?.cliente_id ?? "",
+    client_id: editing?.client_id ?? "",
     colaborador_id: editing?.colaborador_id ?? "",
   });
   const [novaCat, setNovaCat] = useState("");
@@ -747,7 +748,7 @@ function LancDialog({ editing, cats, clis, colabs, onClose }: { editing: Lanc | 
 
   const save = useMutation({
     mutationFn: async () => {
-      const basePayload = { ...form, cliente_id: form.cliente_id || null, colaborador_id: form.colaborador_id || null, categoria_id: form.categoria_id || null };
+      const basePayload = { ...form, client_id: form.client_id || null, colaborador_id: form.colaborador_id || null, categoria_id: form.categoria_id || null };
       if (editing) {
         const { error } = await supabase.from("lancamentos_financeiros").update(basePayload).eq("id", editing.id);
         if (error) throw error;
@@ -880,7 +881,7 @@ function LancDialog({ editing, cats, clis, colabs, onClose }: { editing: Lanc | 
         {isEntrada && clis.length > 0 && (
           <div className="space-y-1.5">
             <Label>Cliente (opcional)</Label>
-            <Select value={form.cliente_id || "none"} onValueChange={(v) => setForm({ ...form, cliente_id: v === "none" ? "" : v })}>
+            <Select value={form.client_id || "none"} onValueChange={(v) => setForm({ ...form, client_id: v === "none" ? "" : v })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">— nenhum —</SelectItem>

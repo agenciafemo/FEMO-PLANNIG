@@ -13,6 +13,7 @@ import { Plus, Pencil, Trash2, ChevronRight, ChevronLeft, Printer } from "lucide
 import { toast } from "sonner";
 import { formatBRL, monthKey, monthsBetween, parseISODate, todayISO } from "@/lib/format";
 import { printReport } from "@/lib/print-report";
+import { listarClientes } from "@/lib/clientes";
 
 export const Route = createFileRoute("/_authenticated/colaboradores")({
   head: () => ({ meta: [{ title: "Colaboradores — FEMO FINANÇAS" }] }),
@@ -30,7 +31,7 @@ type Funcao = { id: string; nome: string; tipo_base: string };
 type Cliente = { id: string; nome: string; valor_mensalidade: number; status: string; data_entrada: string; data_saida: string | null; pct_social_media: number; pct_trafego: number };
 type Contrato = {
   id: string;
-  cliente_id: string;
+  client_id: string;
   colaborador_id: string;
   valor_base_calculo: number;
   prazo_entrega_planejamentos: number | null;
@@ -180,7 +181,7 @@ function Colaboradores() {
     queryFn: async () => {
       const [colabs, clientes, contratos, lanc, extras, ltv, config, historico, funcoes] = await Promise.all([
         supabase.from("colaboradores").select("*").order("nome"),
-        supabase.from("clientes").select("id,nome,valor_mensalidade,status,data_entrada,data_saida,pct_social_media,pct_trafego"),
+        listarClientes(),
         supabase.from("contratos_fatiamento").select("*"),
         supabase.from("lancamentos_financeiros").select("*").eq("tipo", "Saída").not("colaborador_id", "is", null),
         supabase.from("recebimentos_extras").select("*"),
@@ -264,7 +265,7 @@ function Colaboradores() {
       const meusContratos = data.contratos.filter((k) => k.colaborador_id === c.id);
       const comissaoCheia = c.cargo === "Líder"
         ? data.clientes.reduce((s, cli) => s + comissaoLiderPorCliente(cli, mKey), 0)
-        : meusContratos.reduce((s, k) => s + commissionFor(c, data.clientes.find((x) => x.id === k.cliente_id), k, data.ltv, data.pctPenal, data.funcoes, mKey), 0);
+        : meusContratos.reduce((s, k) => s + commissionFor(c, data.clientes.find((x) => x.id === k.client_id), k, data.ltv, data.pctPenal, data.funcoes, mKey), 0);
       const comissao = (comissaoCheia * pesoDe(c.id, mKey)) / 100;
       const lancsMes = data.lancamentos.filter((l) => l.colaborador_id === c.id && monthKey(l.data_lancamento) === mKey);
       const bonusLancMes = lancsMes.filter((l) => Number(l.valor) > 0).reduce((s, l) => s + Number(l.valor), 0);
@@ -342,7 +343,7 @@ function Colaboradores() {
               .filter((cli) => clienteAtivoNoMes(cli, curKey) && isClienteAntigoLider(cli.data_entrada))
               .map((cli) => ({ nome: cli.nome, regra: "1% travado (Líder)", mensalidade: Number(cli.valor_mensalidade), comissao: comissaoLiderPorCliente(cli, curKey) }))
           : meusContratos.map((k) => {
-              const cli = data.clientes.find((x) => x.id === k.cliente_id);
+              const cli = data.clientes.find((x) => x.id === k.client_id);
               return {
                 nome: cli?.nome ?? "—",
                 regra: `${k.status_entrega_mes_atual}${k.prazo_entrega_planejamentos ? ` · prazo dia ${k.prazo_entrega_planejamentos}` : ""}`,
@@ -492,7 +493,7 @@ function Colaboradores() {
               const meusContratos = data.contratos.filter((k) => k.colaborador_id === c.id);
               const comissaoCheia = c.cargo === "Líder"
                 ? data.clientes.reduce((s, cli) => s + comissaoLiderPorCliente(cli, curKey), 0)
-                : meusContratos.reduce((s, k) => s + commissionFor(c, data.clientes.find((x) => x.id === k.cliente_id), k, data.ltv, data.pctPenal, data.funcoes, curKey), 0);
+                : meusContratos.reduce((s, k) => s + commissionFor(c, data.clientes.find((x) => x.id === k.client_id), k, data.ltv, data.pctPenal, data.funcoes, curKey), 0);
               const peso = pesoDe(c.id, curKey);
               const comissao = (comissaoCheia * peso) / 100;
               const lancsMes = data.lancamentos.filter((l) => l.colaborador_id === c.id && monthKey(l.data_lancamento) === curKey);
@@ -685,23 +686,23 @@ function ColabDialog({ editing, onClose }: { editing: Colab | null; onClose: () 
 function ColabDetails({ colab, clientes, contratos, extras, lancamentos, ltv, pctPenal, historico, funcoes, mesFolha }: { colab: Colab; clientes: Cliente[]; contratos: Contrato[]; extras: any[]; lancamentos: any[]; ltv: LtvRow[]; pctPenal: number; historico: HistoricoFolha[]; funcoes: Funcao[]; mesFolha: string }) {
   const qc = useQueryClient();
   const defaultExtraDate = `${mesFolha}-05`;
-  const [novoContrato, setNovoContrato] = useState({ cliente_id: "", valor_base_calculo: 0, prazo_entrega_planejamentos: 5, status_entrega_mes_atual: "Entregue no Prazo" as StatusEntrega });
+  const [novoContrato, setNovoContrato] = useState({ client_id: "", valor_base_calculo: 0, prazo_entrega_planejamentos: 5, status_entrega_mes_atual: "Entregue no Prazo" as StatusEntrega });
   const [novoExtra, setNovoExtra] = useState({ descricao: "", valor: 0, data_referencia: defaultExtraDate });
 
   const addContrato = useMutation({
     mutationFn: async () => {
-      if (!novoContrato.cliente_id) throw new Error("Selecione um cliente");
-      const cli = clientes.find((c) => c.id === novoContrato.cliente_id);
+      if (!novoContrato.client_id) throw new Error("Selecione um cliente");
+      const cli = clientes.find((c) => c.id === novoContrato.client_id);
       const { error } = await supabase.from("contratos_fatiamento").insert({
         colaborador_id: colab.id,
-        cliente_id: novoContrato.cliente_id,
+        client_id: novoContrato.client_id,
         valor_base_calculo: cli?.valor_mensalidade ?? 0,
         prazo_entrega_planejamentos: novoContrato.prazo_entrega_planejamentos,
         status_entrega_mes_atual: novoContrato.status_entrega_mes_atual,
       });
       if (error) throw error;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["colaboradores-all"] }); setNovoContrato({ cliente_id: "", valor_base_calculo: 0, prazo_entrega_planejamentos: 5, status_entrega_mes_atual: "Entregue no Prazo" }); toast.success("Fatiamento adicionado"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["colaboradores-all"] }); setNovoContrato({ client_id: "", valor_base_calculo: 0, prazo_entrega_planejamentos: 5, status_entrega_mes_atual: "Entregue no Prazo" }); toast.success("Fatiamento adicionado"); },
     onError: (e: Error) => toast.error(e.message),
   });
   const updateContrato = useMutation({
@@ -739,9 +740,9 @@ function ColabDetails({ colab, clientes, contratos, extras, lancamentos, ltv, pc
 
   const byNome = (a?: string, b?: string) => (a ?? "").localeCompare(b ?? "", "pt-BR", { sensitivity: "base" });
   const nomeCliente = (id: string) => clientes.find((c) => c.id === id)?.nome ?? "";
-  const contratosOrdenados = [...contratos].sort((a, b) => byNome(nomeCliente(a.cliente_id), nomeCliente(b.cliente_id)));
+  const contratosOrdenados = [...contratos].sort((a, b) => byNome(nomeCliente(a.client_id), nomeCliente(b.client_id)));
   const clientesDisponiveis = clientes
-    .filter((c) => !contratos.some((k) => k.cliente_id === c.id))
+    .filter((c) => !contratos.some((k) => k.client_id === c.id))
     .sort((a, b) => byNome(a.nome, b.nome));
 
   const mesTitulo = new Date(`${mesFolha}-01T00:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
@@ -755,7 +756,7 @@ function ColabDetails({ colab, clientes, contratos, extras, lancamentos, ltv, pc
             .sort((a, b) => byNome(a.nome, b.nome))
             .map((c) => ({ nome: c.nome, regra: "1% travado (Líder)", mensalidade: Number(c.valor_mensalidade), comissao: comissaoLiderPorCliente(c, mesFolha) }))
         : contratosOrdenados.map((k) => {
-            const cli = clientes.find((c) => c.id === k.cliente_id);
+            const cli = clientes.find((c) => c.id === k.client_id);
             return {
               nome: cli?.nome ?? "—",
               regra: `${k.status_entrega_mes_atual}${k.prazo_entrega_planejamentos ? ` · prazo dia ${k.prazo_entrega_planejamentos}` : ""}`,
@@ -895,7 +896,7 @@ function ColabDetails({ colab, clientes, contratos, extras, lancamentos, ltv, pc
             <TableBody>
               {contratosOrdenados.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-4 text-muted-foreground text-sm">Sem contratos.</TableCell></TableRow>}
               {contratosOrdenados.map((k) => {
-                const cli = clientes.find((c) => c.id === k.cliente_id);
+                const cli = clientes.find((c) => c.id === k.client_id);
                 const com = commissionFor(colab, cli, k, ltv, pctPenal, funcoes, mesFolha);
                 return (
                   <ContratoRow key={k.id} contrato={k} clienteNome={cli?.nome ?? "—"} comissao={com} onSave={(v) => updateContrato.mutate(v)} onDelete={() => delContrato.mutate(k.id)} />
@@ -907,7 +908,7 @@ function ColabDetails({ colab, clientes, contratos, extras, lancamentos, ltv, pc
                   <TableCell className="text-right tabular">
                     {formatBRL(
                       contratosOrdenados.reduce(
-                        (s, k) => s + commissionFor(colab, clientes.find((c) => c.id === k.cliente_id), k, ltv, pctPenal, funcoes, mesFolha),
+                        (s, k) => s + commissionFor(colab, clientes.find((c) => c.id === k.client_id), k, ltv, pctPenal, funcoes, mesFolha),
                         0,
                       ),
                     )}
@@ -921,7 +922,7 @@ function ColabDetails({ colab, clientes, contratos, extras, lancamentos, ltv, pc
         <form onSubmit={(e) => { e.preventDefault(); addContrato.mutate(); }} className="grid grid-cols-2 gap-2 items-end">
           <div className="col-span-2">
             <Label className="text-xs">Cliente</Label>
-            <Select value={novoContrato.cliente_id} onValueChange={(v) => setNovoContrato({ ...novoContrato, cliente_id: v })}>
+            <Select value={novoContrato.client_id} onValueChange={(v) => setNovoContrato({ ...novoContrato, client_id: v })}>
               <SelectTrigger><SelectValue placeholder="Selecionar…" /></SelectTrigger>
               <SelectContent>{clientesDisponiveis.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}</SelectContent>
             </Select>
