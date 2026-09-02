@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Users, LayoutGrid, UserPlus, LogOut, Shield, Bell, KeyRound, ListTodo, MessageSquareHeart, Clock3, CalendarDays, Video, ChevronRight } from "lucide-react";
+import { Users, LayoutGrid, UserPlus, LogOut, Shield, Bell, KeyRound, ListTodo, MessageSquareHeart, Clock3, CalendarDays, Video } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -14,7 +14,6 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { ProfileDialog } from "@/components/layout/ProfileDialog";
 import { Pencil } from "lucide-react";
 import { REUNIOES_ENABLED } from "@/lib/featureFlags";
-import { usePersistedState } from "@/hooks/usePersistedState";
 
 const navItems = [
   { to: "/dashboard", icon: LayoutGrid, label: "Dashboard" },
@@ -324,30 +323,6 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const { role } = useOrganization();
   const canManageTeam = role === "owner" || role === "admin" || role === "manager";
   const [profileOpen, setProfileOpen] = useState(false);
-  const { organizationId, isLegacy: orgLegacy } = useOrganization();
-  const [projetosAbertos, setProjetosAbertos] = usePersistedState<boolean>(
-    "norteia.sidebar.projetos.v1",
-    false,
-  );
-
-  // Clientes viram os projetos da lateral. `staleTime` alto porque a carteira
-  // muda raramente e esta consulta acompanha o app inteiro, em toda tela.
-  const clientesQuery = useQuery({
-    queryKey: ["sidebar-clientes", organizationId],
-    queryFn: async () => {
-      let query = supabase
-        .from("clients")
-        .select("id, name, accent_color")
-        .order("name");
-      if (!orgLegacy && organizationId) query = query.eq("organization_id", organizationId);
-      const { data, error } = await query;
-      if (error) return [];
-      return (data ?? []) as Array<{ id: string; name: string; accent_color: string | null }>;
-    },
-    enabled: orgLegacy || !!organizationId,
-    staleTime: 10 * 60 * 1000,
-  });
-
   // Foto + nome do próprio usuário (para o bloco da conta e a saudação).
   const { data: profile } = useQuery({
     queryKey: ["sidebar-profile", user?.id],
@@ -403,64 +378,6 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
         })}
         </div>
 
-        {/* Projetos: um quadro de tarefas por cliente. Fica recolhido por
-            padrão porque a lista cresce com a carteira — o estado da gaveta é
-            guardado, então quem trabalha por projeto abre uma vez e pronto.
-            "Interno" recolhe o que não pertence a cliente nenhum. */}
-        <div className="mt-5">
-          <button
-            type="button"
-            onClick={() => setProjetosAbertos(!projetosAbertos)}
-            className="flex w-full items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/45 transition-colors hover:text-sidebar-foreground/80"
-            aria-expanded={projetosAbertos}
-          >
-            <ChevronRight className={cn("h-3 w-3 transition-transform", projetosAbertos && "rotate-90")} />
-            Projetos
-            {clientesQuery.data && <span className="ml-auto tabular-nums">{clientesQuery.data.length}</span>}
-          </button>
-
-          {projetosAbertos && (
-            <div className="mt-1 max-h-64 space-y-0.5 overflow-y-auto pr-1">
-              {(clientesQuery.data ?? []).map((cliente) => {
-                const to = `/tasks/cliente/${cliente.id}`;
-                const ativo = location.pathname === to;
-                return (
-                  <Link
-                    key={cliente.id}
-                    to={to}
-                    onClick={onNavigate}
-                    className={cn(
-                      "flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                      ativo
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                        : "text-sidebar-foreground/55 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-                    )}
-                  >
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{ background: cliente.accent_color || "hsl(var(--sidebar-foreground))" }}
-                    />
-                    <span className="truncate">{cliente.name}</span>
-                  </Link>
-                );
-              })}
-
-              <Link
-                to="/tasks/interno"
-                onClick={onNavigate}
-                className={cn(
-                  "flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors",
-                  location.pathname === "/tasks/interno"
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/55 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-                )}
-              >
-                <span className="h-2 w-2 shrink-0 rounded-full border border-sidebar-foreground/40" />
-                <span className="truncate">Interno</span>
-              </Link>
-            </div>
-          )}
-        </div>
       </nav>
 
       <div className="border-t border-sidebar-border/70 p-3">
