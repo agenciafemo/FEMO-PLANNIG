@@ -17,6 +17,7 @@ import {
   type LinhaImportada,
   type ResultadoImportacao,
 } from "@/lib/financeiro/importacao";
+import { formatoDoArquivo, lerArquivoDeLancamentos } from "@/lib/financeiro/importacaoArquivo";
 
 type LtvRow = { id: string; meses_min: number; meses_max: number | null; percentual: number; funcao_id: string | null };
 type Funcao = { id: string; nome: string; tipo_base: string; descricao: string | null };
@@ -41,62 +42,13 @@ export default function ConfiguracoesFinanceiro() {
 // deixaram de existir. A identidade visual é a do Norteia — um segundo lugar
 // para trocar a mesma cor garante que uma hora as duas telas divergem.
 
-type ParsedRow = Record<string, string>;
-type NormalRow = LinhaImportada;
-
-function normalizeHeader(h: string): string {
-  return (h ?? "").replace(/^\uFEFF/, "").trim();
-}
-
-function findHeader(headers: string[], ...needles: string[]): string {
-  return (
-    headers.find((h) =>
-      needles.some((n) =>
-        h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(n),
-      ),
-    ) ?? ""
-  );
-}
-
-function parseDateBR(s: string): string | null {
-  if (!s) return null;
-  const v = String(s).trim().replace(/^\uFEFF/, "").split(/[ T]/)[0];
-  if (!v) return null;
-  let m = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
-  if (m) {
-    const yy = m[3].length === 2 ? `20${m[3]}` : m[3];
-    return `${yy}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
-  }
-  m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m) return v;
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-}
-
-function parseValorBR(s: string | number | null | undefined): number {
-  if (s === null || s === undefined || s === "") return 0;
-  if (typeof s === "number") return s;
-  let str = String(s).trim().replace(/^\uFEFF/, "");
-  const negativo = /^\(.*\)$/.test(str) || /^-/.test(str);
-  str = str.replace(/[R$\s()]/gi, "").replace(/^-/, "");
-  if (str.includes(",")) str = str.replace(/\./g, "").replace(",", ".");
-  const n = Number(str);
-  if (isNaN(n)) return 0;
-  return negativo ? -n : n;
-}
-
-async function readFileWithEncoding(file: File, encoding: string): Promise<string> {
-  const buf = await file.arrayBuffer();
-  return new TextDecoder(encoding, { fatal: false }).decode(buf);
-}
-
 function formatBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 function ImportacaoMeuDinheiro() {
   const qc = useQueryClient();
-  const [normalized, setNormalized] = useState<NormalRow[]>([]);
+  const [normalized, setNormalized] = useState<LinhaImportada[]>([]);
   const [skipped, setSkipped] = useState<number>(0);
   const [fileName, setFileName] = useState("");
   const [encoding, setEncoding] = useState<"utf-8" | "iso-8859-1">("utf-8");
@@ -105,47 +57,15 @@ function ImportacaoMeuDinheiro() {
   const [ultimoLote, setUltimoLote] = useState<ResultadoImportacao | null>(null);
 
   const reparse = async (file: File, enc: string) => {
-    const Papa = (await import("papaparse")).default;
-    const text = await readFileWithEncoding(file, enc);
-    Papa.parse<ParsedRow>(text, {
-      header: true,
-      skipEmptyLines: "greedy",
-      delimitersToGuess: [",", ";", "\t", "|"],
-      transformHeader: normalizeHeader,
-      complete: (res) => {
-        const hs = (res.meta.fields ?? []).map(normalizeHeader).filter(Boolean);
-        const colData = findHeader(hs, "data", "vencimento", "pagamento", "competencia", "dt");
-        const colDesc = findHeader(hs, "descri", "histor", "cliente", "memo", "obs", "titulo", "nome", "estabelec");
-        const colValor = findHeader(hs, "valor", "montante", "amount", "preco", "preço", "total");
-        const colTipo = findHeader(hs, "tipo", "natureza", "operacao", "operação");
-        // Anos de extrato numa categoria só deixam o analítico sem nada para
-        // analisar; quando o arquivo classifica, a classificação é aproveitada.
-        const colCategoria = findHeader(hs, "categoria", "classific", "grupo", "conta");
-
-        const norm: NormalRow[] = [];
-        let sk = 0;
-        (res.data ?? []).forEach((row) => {
-          const r: ParsedRow = {};
-          for (const k of Object.keys(row ?? {})) r[normalizeHeader(k)] = (row as Record<string, string>)[k];
-          const dataRaw = (r[colData] ?? "").toString().trim();
-          const valorRawStr = (r[colValor] ?? "").toString().trim();
-          const descricao = (colDesc ? (r[colDesc] ?? "") : "").toString().trim() || "Lançamento";
-          const data = parseDateBR(dataRaw);
-          if (!data || valorRawStr === "") { sk++; return; }
-          let valor = parseValorBR(valorRawStr);
-          if (!valor) { sk++; return; }
-          const tipoRaw = colTipo ? (r[colTipo] ?? "").toString() : "";
-          const tipo: "Entrada" | "Saída" = tipoRaw
-            ? (/entrada|receita|credito|crédito|recebimento|positiv/i.test(tipoRaw) ? "Entrada" : "Saída")
-            : (valor >= 0 ? "Entrada" : "Saída");
-          const categoria = colCategoria ? (r[colCategoria] ?? "").toString().trim() : "";
-          norm.push({ descricao, valor: Math.abs(valor), data, tipo, categoria: categoria || undefined });
-        });
-        setNormalized(norm);
-        setSkipped(sk);
-      },
-      error: (err: Error) => toast.error(err.message),
-    });
+    try {
+      const { linhas, ignoradas } = await lerArquivoDeLancamentos(file, enc);
+      setNormalized(linhas);
+      setSkipped(ignoradas);
+    } catch (erro) {
+      setNormalized([]);
+      setSkipped(0);
+      toast.error((erro as Error).message);
+    }
   };
 
   const handleFile = async (file: File) => {
@@ -190,6 +110,7 @@ function ImportacaoMeuDinheiro() {
     } finally { setBusy(false); }
   };
 
+  const ehCsv = !rawFile || formatoDoArquivo(rawFile.name) === "csv";
   const preview = normalized.slice(0, 50);
   const totalEntradas = normalized.filter((r) => r.tipo === "Entrada").reduce((s, r) => s + r.valor, 0);
   const totalSaidas = normalized.filter((r) => r.tipo === "Saída").reduce((s, r) => s + r.valor, 0);
@@ -197,20 +118,31 @@ function ImportacaoMeuDinheiro() {
   return (
     <div className="rounded-xl border bg-surface p-6 space-y-5 lg:col-span-2">
       <div>
-        <h3 className="font-semibold">Importar CSV — App Meu Dinheiro</h3>
+        <h3 className="font-semibold">Importar extrato — planilha ou CSV</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Envie o CSV e valide a pré-visualização abaixo. Tudo será lançado na conta única <strong>Sicredi PJ</strong>.
+          Envie um arquivo <strong>.xlsx</strong> ou <strong>.csv</strong> e confira a
+          pré-visualização antes de gravar. Tudo será lançado na conta única <strong>Sicredi PJ</strong>.
+          Reenviar o mesmo arquivo não duplica nada.
         </p>
       </div>
-      <div className="grid sm:grid-cols-[1fr_200px] gap-3">
-        <Input type="file" accept=".csv,text/csv,text/plain" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-        <Select value={encoding} onValueChange={(v: "utf-8" | "iso-8859-1") => onEncodingChange(v)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="utf-8">UTF-8</SelectItem>
-            <SelectItem value="iso-8859-1">ISO-8859-1 (Latin-1)</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
+        <Input
+          type="file"
+          accept=".csv,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+        />
+        {/* Codificação só existe para texto. Numa planilha o texto já vem
+            decodificado, e oferecer a escolha aqui seria um controle que não
+            muda nada. */}
+        {ehCsv && (
+          <Select value={encoding} onValueChange={(v: "utf-8" | "iso-8859-1") => onEncodingChange(v)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="utf-8">UTF-8</SelectItem>
+              <SelectItem value="iso-8859-1">ISO-8859-1 (Latin-1)</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {normalized.length > 0 && (
