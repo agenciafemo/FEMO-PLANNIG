@@ -19,14 +19,14 @@ import { FinanceiroErrorBoundary } from "@/components/financeiro/FinanceiroError
 // app para navegação secundária de uma seção.
 
 const ABAS = [
-  { to: "/financeiro", label: "Visão Geral", icon: LayoutDashboard, exata: true },
-  { to: "/financeiro/anual", label: "Anual", icon: CalendarRange },
-  { to: "/financeiro/analitico", label: "Analítico", icon: LineChart },
-  { to: "/financeiro/clientes", label: "Clientes", icon: Users },
-  { to: "/financeiro/colaboradores", label: "Colaboradores", icon: UserCog },
-  { to: "/financeiro/fluxo", label: "Fluxo de Caixa", icon: ArrowLeftRight },
-  { to: "/financeiro/social-selling", label: "Social Selling", icon: Target },
-  { to: "/financeiro/configuracoes", label: "Configurações", icon: Settings },
+  { to: "/administrativo", label: "Visão Geral", icon: LayoutDashboard, exata: true },
+  { to: "/administrativo/anual", label: "Anual", icon: CalendarRange },
+  { to: "/administrativo/analitico", label: "Analítico", icon: LineChart },
+  { to: "/administrativo/clientes", label: "Clientes", icon: Users },
+  { to: "/administrativo/colaboradores", label: "Colaboradores", icon: UserCog },
+  { to: "/administrativo/fluxo", label: "Fluxo de Caixa", icon: ArrowLeftRight },
+  { to: "/administrativo/social-selling", label: "Social Selling", icon: Target },
+  { to: "/administrativo/configuracoes", label: "Configurações", icon: Settings },
 ] as const;
 
 export function FinanceiroLayout() {
