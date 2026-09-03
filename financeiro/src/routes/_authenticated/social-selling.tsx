@@ -16,6 +16,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Plus, Pencil, Trash2, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { MetaReversa } from "@/components/meta-reversa";
+import { comOrganizacao } from "@/lib/organizacao";
 
 export const Route = createFileRoute("/_authenticated/social-selling")({
   head: () => ({
@@ -132,7 +133,7 @@ function SocialSelling() {
         const { error } = await supabase.from("crm_leads").update(payload).eq("id", l.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("crm_leads").insert(payload);
+        const { error } = await supabase.from("crm_leads").insert(await comOrganizacao(payload));
         if (error) throw error;
       }
     },
@@ -174,13 +175,13 @@ function SocialSelling() {
 
   const addItem = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("checklist_prospeccao").insert({
+      const { error } = await supabase.from("checklist_prospeccao").insert(await comOrganizacao({
         start_time: "09:00",
         end_time: "09:30",
         activity: "Nova atividade",
         meta: "",
         ordem: (checklist.at(-1)?.ordem ?? 0) + 1,
-      });
+      }));
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["checklist_prospeccao"] }),

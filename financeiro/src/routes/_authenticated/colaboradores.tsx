@@ -15,6 +15,7 @@ import { formatBRL, monthKey, monthsBetween, parseISODate, todayISO } from "@/li
 import { printReport } from "@/lib/print-report";
 import { listarClientes } from "@/lib/clientes";
 import { carregarConfig } from "@/lib/configuracoes";
+import { comOrganizacao } from "@/lib/organizacao";
 
 export const Route = createFileRoute("/_authenticated/colaboradores")({
   head: () => ({ meta: [{ title: "Colaboradores — FEMO FINANÇAS" }] }),
@@ -631,7 +632,7 @@ function ColabDialog({ editing, onClose }: { editing: Colab | null; onClose: () 
     mutationFn: async () => {
       const payload = { ...form, funcao_id: form.funcao_id || null };
       if (editing) { const { error } = await supabase.from("colaboradores").update(payload).eq("id", editing.id); if (error) throw error; }
-      else { const { error } = await supabase.from("colaboradores").insert(payload); if (error) throw error; }
+      else { const { error } = await supabase.from("colaboradores").insert(await comOrganizacao(payload)); if (error) throw error; }
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["colaboradores-all"] }); toast.success("Salvo"); onClose(); },
     onError: (e: Error) => toast.error(e.message),
@@ -694,13 +695,13 @@ function ColabDetails({ colab, clientes, contratos, extras, lancamentos, ltv, pc
     mutationFn: async () => {
       if (!novoContrato.client_id) throw new Error("Selecione um cliente");
       const cli = clientes.find((c) => c.id === novoContrato.client_id);
-      const { error } = await supabase.from("contratos_fatiamento").insert({
+      const { error } = await supabase.from("contratos_fatiamento").insert(await comOrganizacao({
         colaborador_id: colab.id,
         client_id: novoContrato.client_id,
         valor_base_calculo: cli?.valor_mensalidade ?? 0,
         prazo_entrega_planejamentos: novoContrato.prazo_entrega_planejamentos,
         status_entrega_mes_atual: novoContrato.status_entrega_mes_atual,
-      });
+      }));
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["colaboradores-all"] }); setNovoContrato({ client_id: "", valor_base_calculo: 0, prazo_entrega_planejamentos: 5, status_entrega_mes_atual: "Entregue no Prazo" }); toast.success("Fatiamento adicionado"); },
@@ -720,7 +721,7 @@ function ColabDetails({ colab, clientes, contratos, extras, lancamentos, ltv, pc
   });
   const addExtra = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("recebimentos_extras").insert({ colaborador_id: colab.id, ...novoExtra });
+      const { error } = await supabase.from("recebimentos_extras").insert(await comOrganizacao({ colaborador_id: colab.id, ...novoExtra }));
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["colaboradores-all"] }); setNovoExtra({ descricao: "", valor: 0, data_referencia: defaultExtraDate }); toast.success("Recebimento extra adicionado"); },
@@ -728,7 +729,7 @@ function ColabDetails({ colab, clientes, contratos, extras, lancamentos, ltv, pc
   });
   const replicarExtra = useMutation({
     mutationFn: async (e: any) => {
-      const { error } = await supabase.from("recebimentos_extras").insert({ colaborador_id: colab.id, descricao: e.descricao, valor: e.valor, data_referencia: defaultExtraDate });
+      const { error } = await supabase.from("recebimentos_extras").insert(await comOrganizacao({ colaborador_id: colab.id, descricao: e.descricao, valor: e.valor, data_referencia: defaultExtraDate }));
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["colaboradores-all"] }); toast.success("Bonificação replicada para a competência selecionada"); },

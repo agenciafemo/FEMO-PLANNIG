@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { formatBRL, formatDateBR, parseISODate, todayISO } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { listarClientes } from "@/lib/clientes";
+import { comOrganizacao } from "@/lib/organizacao";
 
 
 export const Route = createFileRoute("/_authenticated/fluxo")({
@@ -708,7 +709,7 @@ function LancDialog({ editing, cats, clis, colabs, onClose }: { editing: Lanc | 
         return;
       }
       if (!recorrente) {
-        const { error } = await supabase.from("lancamentos_financeiros").insert(basePayload);
+        const { error } = await supabase.from("lancamentos_financeiros").insert(await comOrganizacao(basePayload));
         if (error) throw error;
         return;
       }
@@ -727,7 +728,7 @@ function LancDialog({ editing, cats, clis, colabs, onClose }: { editing: Lanc | 
           recorrencia_indefinida: recTipo === "indefinida",
         };
       });
-      const { error } = await supabase.from("lancamentos_financeiros").insert(rows);
+      const { error } = await supabase.from("lancamentos_financeiros").insert(await comOrganizacao(rows));
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["fluxo"] }); toast.success(recorrente && !editing ? "Recorrência criada" : "Salvo"); onClose(); },
@@ -736,7 +737,7 @@ function LancDialog({ editing, cats, clis, colabs, onClose }: { editing: Lanc | 
 
   const addCat = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.from("categorias").insert({ nome: novaCat, tipo: form.tipo }).select().single();
+      const { data, error } = await supabase.from("categorias").insert(await comOrganizacao({ nome: novaCat, tipo: form.tipo })).select().single();
       if (error) throw error;
       return data;
     },

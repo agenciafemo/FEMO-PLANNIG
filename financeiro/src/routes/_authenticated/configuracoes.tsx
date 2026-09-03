@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { carregarConfig, salvarConfig } from "@/lib/configuracoes";
+import { comOrganizacao } from "@/lib/organizacao";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
   head: () => ({ meta: [{ title: "Configurações — FEMO FINANÇAS" }] }),
@@ -164,7 +165,7 @@ function ImportacaoMeuDinheiro() {
       const { data: existing } = await supabase.from("categorias").select("id,nome");
       let catImportadoId = existing?.find((c) => c.nome.toLowerCase() === "importado")?.id ?? null;
       if (!catImportadoId) {
-        const { data: novo } = await supabase.from("categorias").insert({ nome: "Importado", tipo: "Ambos" }).select("id").single();
+        const { data: novo } = await supabase.from("categorias").insert(await comOrganizacao({ nome: "Importado", tipo: "Ambos" })).select("id").single();
         catImportadoId = novo?.id ?? null;
       }
 
@@ -179,7 +180,7 @@ function ImportacaoMeuDinheiro() {
 
       const chunkSize = 200;
       for (let i = 0; i < payload.length; i += chunkSize) {
-        const { error } = await supabase.from("lancamentos_financeiros").insert(payload.slice(i, i + chunkSize));
+        const { error } = await supabase.from("lancamentos_financeiros").insert(await comOrganizacao(payload.slice(i, i + chunkSize)));
         if (error) throw error;
       }
       qc.invalidateQueries();
@@ -430,7 +431,7 @@ function TabelaLTV() {
         meses_max: novo.meses_max === "" ? null : Number(novo.meses_max),
         percentual: Number(novo.percentual),
       };
-      const { error } = await supabase.from("tabela_progressiva_ltv").insert(payload);
+      const { error } = await supabase.from("tabela_progressiva_ltv").insert(await comOrganizacao(payload));
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["ltv"] }); setNovo({ meses_min: 0, meses_max: "", percentual: 0 }); toast.success("Faixa adicionada"); },
@@ -523,7 +524,7 @@ function FuncoesComissao() {
   const add = useMutation({
     mutationFn: async () => {
       if (!novo.nome.trim()) throw new Error("Informe o nome da função.");
-      const { error } = await supabase.from("funcoes").insert(novo);
+      const { error } = await supabase.from("funcoes").insert(await comOrganizacao(novo));
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["funcoes"] }); setNovo({ nome: "", tipo_base: "mensalidade_total" }); toast.success("Função criada"); },
@@ -575,7 +576,7 @@ function FuncaoBlock({ funcao, rows, onDelete }: { funcao: Funcao; rows: LtvRow[
   const add = useMutation({
     mutationFn: async () => {
       const payload = { meses_min: Number(novo.meses_min), meses_max: novo.meses_max === "" ? null : Number(novo.meses_max), percentual: Number(novo.percentual), funcao_id: funcao.id };
-      const { error } = await supabase.from("tabela_progressiva_ltv").insert(payload);
+      const { error } = await supabase.from("tabela_progressiva_ltv").insert(await comOrganizacao(payload));
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["ltv"] }); setNovo({ meses_min: 0, meses_max: "", percentual: 0 }); toast.success("Faixa adicionada"); },

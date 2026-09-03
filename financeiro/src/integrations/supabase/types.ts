@@ -16,18 +16,21 @@ export type Database = {
     Tables: {
       categorias: {
         Row: {
+          organization_id: string | null
           created_at: string
           id: string
           nome: string
           tipo: string
         }
         Insert: {
+          organization_id?: string | null
           created_at?: string
           id?: string
           nome: string
           tipo?: string
         }
         Update: {
+          organization_id?: string | null
           created_at?: string
           id?: string
           nome?: string
@@ -37,6 +40,7 @@ export type Database = {
       }
       checklist_prospeccao: {
         Row: {
+          organization_id: string | null
           activity: string
           completed: boolean
           created_at: string
@@ -48,6 +52,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          organization_id?: string | null
           activity: string
           completed?: boolean
           created_at?: string
@@ -59,6 +64,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          organization_id?: string | null
           activity?: string
           completed?: boolean
           created_at?: string
@@ -169,6 +175,7 @@ export type Database = {
       }
       colaboradores: {
         Row: {
+          organization_id: string | null
           cargo: Database["public"]["Enums"]["cargo_colaborador"]
           created_at: string
           data_entrada: string
@@ -179,6 +186,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          organization_id?: string | null
           cargo?: Database["public"]["Enums"]["cargo_colaborador"]
           created_at?: string
           data_entrada?: string
@@ -189,6 +197,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          organization_id?: string | null
           cargo?: Database["public"]["Enums"]["cargo_colaborador"]
           created_at?: string
           data_entrada?: string
@@ -258,6 +267,7 @@ export type Database = {
       }
       contratos_fatiamento: {
         Row: {
+          organization_id: string | null
           client_id: string
           colaborador_id: string
           created_at: string
@@ -267,6 +277,7 @@ export type Database = {
           valor_base_calculo: number
         }
         Insert: {
+          organization_id?: string | null
           client_id: string
           colaborador_id: string
           created_at?: string
@@ -276,6 +287,7 @@ export type Database = {
           valor_base_calculo?: number
         }
         Update: {
+          organization_id?: string | null
           client_id?: string
           colaborador_id?: string
           created_at?: string
@@ -303,6 +315,7 @@ export type Database = {
       }
       crm_leads: {
         Row: {
+          organization_id: string | null
           cdp_validated: string
           clinic_name: string | null
           created_at: string
@@ -320,6 +333,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          organization_id?: string | null
           cdp_validated?: string
           clinic_name?: string | null
           created_at?: string
@@ -337,6 +351,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          organization_id?: string | null
           cdp_validated?: string
           clinic_name?: string | null
           created_at?: string
@@ -357,6 +372,7 @@ export type Database = {
       }
       dashboard_anual: {
         Row: {
+          organization_id: string | null
           ano: number
           created_at: string
           despesas: number
@@ -368,6 +384,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          organization_id?: string | null
           ano: number
           created_at?: string
           despesas?: number
@@ -379,6 +396,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          organization_id?: string | null
           ano?: number
           created_at?: string
           despesas?: number
@@ -393,6 +411,7 @@ export type Database = {
       }
       funcoes: {
         Row: {
+          organization_id: string | null
           created_at: string
           descricao: string | null
           id: string
@@ -401,6 +420,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          organization_id?: string | null
           created_at?: string
           descricao?: string | null
           id?: string
@@ -409,6 +429,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          organization_id?: string | null
           created_at?: string
           descricao?: string | null
           id?: string
@@ -420,6 +441,7 @@ export type Database = {
       }
       historico_folha_pagamento: {
         Row: {
+          organization_id: string | null
           colaborador_id: string
           created_at: string
           id: string
@@ -434,6 +456,7 @@ export type Database = {
           valor_liquido: number
         }
         Insert: {
+          organization_id?: string | null
           colaborador_id: string
           created_at?: string
           id?: string
@@ -448,6 +471,7 @@ export type Database = {
           valor_liquido?: number
         }
         Update: {
+          organization_id?: string | null
           colaborador_id?: string
           created_at?: string
           id?: string
@@ -473,6 +497,7 @@ export type Database = {
       }
       lancamentos_financeiros: {
         Row: {
+          organization_id: string | null
           categoria_id: string | null
           client_id: string | null
           codigo_pix: string | null
@@ -496,6 +521,7 @@ export type Database = {
           valor: number
         }
         Insert: {
+          organization_id?: string | null
           categoria_id?: string | null
           client_id?: string | null
           codigo_pix?: string | null
@@ -518,6 +544,7 @@ export type Database = {
           valor: number
         }
         Update: {
+          organization_id?: string | null
           categoria_id?: string | null
           client_id?: string | null
           codigo_pix?: string | null
@@ -571,6 +598,7 @@ export type Database = {
       }
       pesos_comissao_folha: {
         Row: {
+          organization_id: string | null
           colaborador_id: string
           created_at: string
           id: string
@@ -579,6 +607,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          organization_id?: string | null
           colaborador_id: string
           created_at?: string
           id?: string
@@ -587,6 +616,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          organization_id?: string | null
           colaborador_id?: string
           created_at?: string
           id?: string
@@ -606,6 +636,7 @@ export type Database = {
       }
       recebimentos_extras: {
         Row: {
+          organization_id: string | null
           colaborador_id: string
           created_at: string
           data_referencia: string
@@ -614,6 +645,7 @@ export type Database = {
           valor: number
         }
         Insert: {
+          organization_id?: string | null
           colaborador_id: string
           created_at?: string
           data_referencia: string
@@ -622,6 +654,7 @@ export type Database = {
           valor: number
         }
         Update: {
+          organization_id?: string | null
           colaborador_id?: string
           created_at?: string
           data_referencia?: string
@@ -641,6 +674,7 @@ export type Database = {
       }
       tabela_progressiva_ltv: {
         Row: {
+          organization_id: string | null
           created_at: string
           funcao_id: string | null
           id: string
@@ -650,6 +684,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          organization_id?: string | null
           created_at?: string
           funcao_id?: string | null
           id?: string
@@ -659,6 +694,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          organization_id?: string | null
           created_at?: string
           funcao_id?: string | null
           id?: string

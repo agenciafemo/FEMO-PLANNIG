@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { LayoutDashboard, LineChart, Users, UserCog, ArrowLeftRight, Settings, LogOut, CalendarRange, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { SeletorOrganizacao } from "@/components/seletor-organizacao";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -66,6 +67,7 @@ function AppShell() {
             </>
           )}
         </div>
+        <SeletorOrganizacao />
         <nav className="px-3 space-y-0.5 flex-1">
           {NAV.map(({ to, label, icon: Icon }) => {
             const active = pathname === to || (to !== "/dashboard" && pathname.startsWith(to));
