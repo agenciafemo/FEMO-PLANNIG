@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,10 +23,11 @@ import { gerarCobranca } from "@/lib/financeiro/asaas";
 import { gerarMensalidades } from "@/lib/financeiro/cobrancas";
 import {
   clientesSemFicha,
-  listarClientes,
+  listarCarteira,
   removerFichaFinanceira,
   salvarFichaFinanceira,
   type Cliente,
+  type ClienteDaCarteira,
 } from "@/lib/financeiro/clientes";
 
 // Mensagem aprovada (beta) exibida no bloqueio e no erro do banco — a mesma
@@ -40,17 +41,23 @@ export default function ClientesFinanceiro() {
   const qc = useQueryClient();
   const { clientLimit } = useOrganization();
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "Ativo" | "Churn">("all");
+  const [filter, setFilter] = useState<"all" | "Ativo" | "Churn" | "sem_ficha">("all");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Cliente | null>(null);
   // Excluir do Norteia é OUTRA coisa que remover a ficha: apaga o cliente de
   // verdade — planejamentos, conexões, tudo. Confirmação própria, separada do
   // ícone de lixeira que só tira a ficha financeira.
-  const [excluindoDoNorteia, setExcluindoDoNorteia] = useState<Cliente | null>(null);
+  const [excluindoDoNorteia, setExcluindoDoNorteia] = useState<ClienteDaCarteira | null>(null);
+  // Cliente escolhido pelo botão "Lançar no financeiro": abre o diálogo já
+  // apontando para ele, em vez de obrigar a procurar o nome no seletor.
+  const [clienteParaFicha, setClienteParaFicha] = useState<string | null>(null);
 
+  // A carteira INTEIRA do Norteia, com ou sem ficha financeira. Listar só
+  // quem tem ficha (como era) deixava o cliente novo invisível: esta tela é a
+  // lista de clientes do app desde que /clients foi aposentada.
   const { data: clientes } = useSuspenseQuery({
-    queryKey: ["clientes"],
-    queryFn: listarClientes,
+    queryKey: ["carteira"],
+    queryFn: listarCarteira,
   });
 
   const hasClientLimit = clientLimit != null; // null = ilimitado (FEMO/antigas)
@@ -117,10 +124,17 @@ export default function ClientesFinanceiro() {
     },
   });
 
-  const filtered = useMemo(() => clientes.filter((c) =>
-    (filter === "all" || c.status === filter) &&
-    c.nome.toLowerCase().includes(search.toLowerCase())
-  ), [clientes, search, filter]);
+  const filtered = useMemo(() => clientes.filter((c) => {
+    const casaBusca = c.nome.toLowerCase().includes(search.toLowerCase());
+    if (!casaBusca) return false;
+    if (filter === "all") return true;
+    if (filter === "sem_ficha") return c.financeiro === null;
+    // Ativo/Churn são status da ficha: quem não tem ficha não é nenhum dos
+    // dois, e some desses filtros em vez de aparecer como se fosse.
+    return c.financeiro?.status === filter;
+  }), [clientes, search, filter]);
+
+  const semFicha = clientes.filter((c) => c.financeiro === null).length;
 
   return (
     <PageContainer>
@@ -157,13 +171,14 @@ export default function ClientesFinanceiro() {
                 }
               }}
             >{gerandoMensalidades ? "Gerando…" : "Gerar cobranças dos clientes"}</Button>
-            <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditing(null); }}>
+            <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setEditing(null); setClienteParaFicha(null); } }}>
               <DialogTrigger asChild>
-                <Button onClick={() => setEditing(null)}><Plus className="h-4 w-4 mr-2" />Novo cliente</Button>
+                <Button onClick={() => { setEditing(null); setClienteParaFicha(null); }}><Plus className="h-4 w-4 mr-2" />Novo cliente</Button>
               </DialogTrigger>
               <ClienteDialog
-                key={editing?.id ?? "novo"}
+                key={editing?.id ?? clienteParaFicha ?? "novo"}
                 editing={editing}
+                clientePreSelecionado={clienteParaFicha}
                 limitReached={limitReached}
                 onClose={() => setOpen(false)}
               />
@@ -180,6 +195,7 @@ export default function ClientesFinanceiro() {
             <SelectItem value="all">Todos</SelectItem>
             <SelectItem value="Ativo">Ativos</SelectItem>
             <SelectItem value="Churn">Churn</SelectItem>
+            <SelectItem value="sem_ficha">Sem ficha financeira</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -205,53 +221,77 @@ export default function ClientesFinanceiro() {
             {filtered.map((c) => {
               const hasCobranca = cobrancasAtivas.has(c.id);
               const isPending = pending[c.id];
+              const fin = c.financeiro;
               return (
               <TableRow key={c.id}>
                 <TableCell className="font-medium">{c.nome}</TableCell>
                 <TableCell>
-                  <Badge variant={c.status === "Ativo" ? "default" : "secondary"} className={c.status === "Ativo" ? "bg-success/15 text-success hover:bg-success/15" : "bg-muted text-muted-foreground"}>
-                    {c.status}
-                  </Badge>
+                  {/* Sem ficha é um terceiro estado, não um "Churn" disfarçado:
+                      é cliente do Norteia que ainda não foi lançado no
+                      administrativo. Mostrar como Ativo ou Churn inventaria
+                      uma informação que ninguém preencheu. */}
+                  {fin ? (
+                    <Badge variant={fin.status === "Ativo" ? "default" : "secondary"} className={fin.status === "Ativo" ? "bg-success/15 text-success hover:bg-success/15" : "bg-muted text-muted-foreground"}>
+                      {fin.status}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-muted-foreground">sem ficha</Badge>
+                  )}
                 </TableCell>
-                <TableCell className="tabular text-muted-foreground">{formatDateBR(c.data_entrada)}</TableCell>
-                <TableCell className="tabular">{monthsBetween(c.data_entrada)} meses</TableCell>
-                <TableCell className="text-center tabular">dia {c.dia_vencimento ?? 5}</TableCell>
-                <TableCell className="text-right tabular font-medium">{formatBRL(c.valor_mensalidade)}</TableCell>
+                <TableCell className="tabular text-muted-foreground">{fin ? formatDateBR(fin.data_entrada) : "—"}</TableCell>
+                <TableCell className="tabular">{fin?.data_entrada ? `${monthsBetween(fin.data_entrada)} meses` : "—"}</TableCell>
+                <TableCell className="text-center tabular">{fin ? `dia ${fin.dia_vencimento ?? 5}` : "—"}</TableCell>
+                <TableCell className="text-right tabular font-medium">{fin ? formatBRL(fin.valor_mensalidade) : "—"}</TableCell>
                 <TableCell>
-                  <Button
-                    size="sm"
-                    variant={hasCobranca ? "ghost" : "outline"}
-                    className={hasCobranca ? "text-success hover:text-success" : ""}
-                    disabled={isPending}
-                    onClick={() => handleGerar(c.id, c.nome)}
-                    title={hasCobranca ? "Cliente já possui cobrança Asaas — gerar nova" : "Gerar boleto/Pix via Asaas"}
-                  >
-                    {isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                      : hasCobranca ? <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
-                      : <Zap className="h-3.5 w-3.5 mr-1.5" />}
-                    {hasCobranca ? "Cobrança ativa" : "Gerar Cobrança no Asaas"}
-                  </Button>
+                  {fin ? (
+                    <Button
+                      size="sm"
+                      variant={hasCobranca ? "ghost" : "outline"}
+                      className={hasCobranca ? "text-success hover:text-success" : ""}
+                      disabled={isPending}
+                      onClick={() => handleGerar(c.id, c.nome)}
+                      title={hasCobranca ? "Cliente já possui cobrança Asaas — gerar nova" : "Gerar boleto/Pix via Asaas"}
+                    >
+                      {isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        : hasCobranca ? <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+                        : <Zap className="h-3.5 w-3.5 mr-1.5" />}
+                      {hasCobranca ? "Cobrança ativa" : "Gerar Cobrança no Asaas"}
+                    </Button>
+                  ) : (
+                    // Sem mensalidade cadastrada não há o que cobrar — o botão
+                    // levaria a um erro do Asaas em vez de a uma cobrança.
+                    <Button size="sm" variant="outline" onClick={() => { setEditing(null); setClienteParaFicha(c.id); setOpen(true); }}>
+                      Lançar no financeiro
+                    </Button>
+                  )}
                 </TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1">
                     <Button size="icon" variant="ghost" asChild title="Ver perfil (dados, contrato, conexão, documentos)">
                       <Link to={`/plannings/cliente/${c.id}`}><UserRound className="h-4 w-4" /></Link>
                     </Button>
-                    <Button size="icon" variant="ghost" title="Editar dados financeiros" onClick={() => { setEditing(c as Cliente); setOpen(true); }}><Pencil className="h-4 w-4" /></Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      title="Remover só a ficha financeira (o cliente continua no Norteia)"
-                      onClick={() => { if (confirm(`Remover a ficha financeira de ${c.nome}? O cliente continua no Norteia.`)) del.mutate(c.id); }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {/* Editar e remover ficha só existem quando há ficha:
+                        oferecer os dois em quem não tem levaria a um diálogo
+                        vazio e a um delete sem alvo. */}
+                    {fin && (
+                      <>
+                        <Button size="icon" variant="ghost" title="Editar dados financeiros" onClick={() => { setEditing(fin); setOpen(true); }}><Pencil className="h-4 w-4" /></Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Remover só a ficha financeira (o cliente continua no Norteia)"
+                          onClick={() => { if (confirm(`Remover a ficha financeira de ${c.nome}? O cliente continua no Norteia.`)) del.mutate(c.id); }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
                     <Button
                       size="icon"
                       variant="ghost"
                       className="text-destructive hover:text-destructive"
                       title="Excluir o cliente do Norteia — não pode ser desfeito"
-                      onClick={() => setExcluindoDoNorteia(c as Cliente)}
+                      onClick={() => setExcluindoDoNorteia(c)}
                     >
                       <X className="h-4 w-4" />
                     </Button>
@@ -294,10 +334,13 @@ export default function ClientesFinanceiro() {
 
 function ClienteDialog({
   editing,
+  clientePreSelecionado,
   limitReached,
   onClose,
 }: {
   editing: Cliente | null;
+  /** Veio de "Lançar no financeiro": já abre apontando para este cliente. */
+  clientePreSelecionado?: string | null;
   /** Bloqueia só o modo "cliente novo" — anexar ficha a quem já existe no
    *  Norteia não cria linha nova em `clients` e não conta para o limite. */
   limitReached: boolean;
@@ -322,7 +365,7 @@ function ClienteDialog({
   // O cliente escolhido. Ao editar, ja e o dono da ficha; ao criar (modo
   // "existente"), sai do seletor da carteira do Norteia; ao criar (modo
   // "novo"), so existe depois que o cliente for criado — a mutation preenche.
-  const [clientId, setClientId] = useState(editing?.id ?? "");
+  const [clientId, setClientId] = useState(editing?.id ?? clientePreSelecionado ?? "");
   const [form, setForm] = useState({
     data_entrada: editing?.data_entrada ?? "",
     data_saida: editing?.data_saida ?? "",
@@ -348,6 +391,19 @@ function ClienteDialog({
     queryFn: clientesSemFicha,
     enabled: !editing,
   });
+
+  // Pré-selecionado por "Lançar no financeiro": o `onValueChange` do seletor
+  // não dispara, então a data de entrada chegaria vazia — e salvar em branco
+  // GRAVA null em clients.agency_since, apagando o tempo de casa de quem já
+  // era da casa há anos. Como a comissão sai da faixa de LTV, o cliente
+  // voltaria a pagar a faixa de recém-chegado sem ninguém notar.
+  useEffect(() => {
+    if (!clientePreSelecionado || form.data_entrada) return;
+    const escolhido = disponiveis.find((c) => c.id === clientePreSelecionado);
+    if (escolhido?.agency_since) {
+      setForm((f) => (f.data_entrada ? f : { ...f, data_entrada: escolhido.agency_since! }));
+    }
+  }, [clientePreSelecionado, disponiveis, form.data_entrada]);
 
   const addSocio = () => {
     const n = novoSocio.trim();

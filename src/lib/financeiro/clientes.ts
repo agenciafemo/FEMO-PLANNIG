@@ -92,6 +92,72 @@ export async function listarClientes(): Promise<Cliente[]> {
   return ((data ?? []) as unknown as LinhaJoin[]).map(achatar);
 }
 
+/** Um cliente da carteira do Norteia, com a parte financeira quando existir. */
+export interface ClienteDaCarteira {
+  id: string;
+  nome: string;
+  logo_url: string | null;
+  accent_color: string | null;
+  /** `null` = está no Norteia mas ainda não tem ficha financeira. */
+  financeiro: Cliente | null;
+}
+
+/**
+ * TODA a carteira do Norteia, tenha ficha financeira ou não.
+ *
+ * Existe separada de `listarClientes()` de propósito. Aquela lê de
+ * `client_financeiro` e alimenta os CÁLCULOS — MRR, churn, comissão, fluxo de
+ * caixa. Fazer ela devolver cliente sem ficha somaria zeros silenciosamente
+ * nessas contas: o MRR continuaria certo, mas o churn e as médias por cliente
+ * não.
+ *
+ * Esta aqui é para a TELA de clientes, que virou a lista da carteira quando o
+ * /clients foi aposentado. Sem ela, cliente sem ficha ficava invisível no app
+ * inteiro — só alcançável por link direto ou pelo Planejamento.
+ */
+export async function listarCarteira(): Promise<ClienteDaCarteira[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
+    .from("clients")
+    .select(
+      "id, name, logo_url, accent_color, agency_since, " +
+      "client_financeiro(status, data_saida, data_status_alterado, data_aniversario, " +
+      "valor_mensalidade, is_recorrente, dia_vencimento, pct_social_media, pct_trafego, " +
+      "socios, id_cliente_asaas)",
+    )
+    .order("name");
+  if (error) throw new Error(error.message);
+
+  type LinhaCliente = {
+    id: string;
+    name: string;
+    logo_url: string | null;
+    accent_color: string | null;
+    agency_since: string | null;
+    // O embed vem como array quando o PostgREST não sabe que é 1:1.
+    client_financeiro: Omit<LinhaJoin, "client_id" | "clients">[] | Omit<LinhaJoin, "client_id" | "clients"> | null;
+  };
+
+  return ((data ?? []) as LinhaCliente[]).map((linha) => {
+    const ficha = Array.isArray(linha.client_financeiro)
+      ? linha.client_financeiro[0]
+      : linha.client_financeiro;
+    return {
+      id: linha.id,
+      nome: linha.name,
+      logo_url: linha.logo_url,
+      accent_color: linha.accent_color,
+      financeiro: ficha
+        ? achatar({
+            ...ficha,
+            client_id: linha.id,
+            clients: { name: linha.name, agency_since: linha.agency_since },
+          } as LinhaJoin)
+        : null,
+    };
+  });
+}
+
 export async function buscarCliente(clientId: string): Promise<Cliente | null> {
   const { data, error } = await supabase
     .from("client_financeiro")
