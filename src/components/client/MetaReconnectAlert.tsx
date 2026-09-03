@@ -79,7 +79,7 @@ export function MetaReconnectAlert() {
             {needing.map((client) => (
               <Link
                 key={client.id}
-                to={`/clients/${client.id}`}
+                to={`/plannings/cliente/${client.id}`}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-warning/30 bg-card px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-warning/60 hover:bg-warning-soft"
               >
                 <Link2 className="h-3.5 w-3.5 text-warning" />

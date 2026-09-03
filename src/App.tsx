@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate, useParams } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -12,8 +12,6 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
-import Clients from "./pages/Clients";
-import ClientDetail from "./pages/ClientDetail";
 import PlanningClientProfile from "./pages/PlanningClientProfile";
 import Plannings from "./pages/Plannings";
 import PlanningDetail from "./pages/PlanningDetail";
@@ -119,6 +117,17 @@ function RequireFinanceiro({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * /clients/:clientId aposentado — a ficha do cliente mora em
+ * /plannings/cliente/:clientId (ver ClientProfile). Redireciona em vez de
+ * 404: quem tiver a URL antiga salva (favorito, notificação, aba aberta)
+ * continua chegando lá, só que pelo caminho novo.
+ */
+function ClientToPlanningRedirect() {
+  const { clientId } = useParams();
+  return <Navigate to={`/plannings/cliente/${clientId}`} replace />;
+}
+
 const App = () => (
   <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
     <QueryClientProvider client={queryClient}>
@@ -168,8 +177,12 @@ const App = () => (
                 }
               >
                 <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/clients" element={<Clients />} />
-                <Route path="/clients/:clientId" element={<ClientDetail />} />
+                {/* Área de cliente aposentada: a lista/criação virou a aba
+                    Clientes do financeiro (administrativo), e a ficha mora no
+                    Planejamento (aberta a toda a equipe). Redireciona em vez
+                    de remover a rota — preserva links e abas já abertos. */}
+                <Route path="/clients" element={<Navigate to="/financeiro/clientes" replace />} />
+                <Route path="/clients/:clientId" element={<ClientToPlanningRedirect />} />
                 <Route path="/plannings" element={<Plannings />} />
                 <Route path="/clients/:clientId/plannings" element={<Plannings />} />
                 {/* Etapa 1 da migração para a área administrativa: o perfil do

@@ -17,7 +17,7 @@ import { REUNIOES_ENABLED } from "@/lib/featureFlags";
 
 const navItems = [
   { to: "/dashboard", icon: LayoutGrid, label: "Dashboard" },
-  { to: "/clients", icon: Users, label: "Clientes" },
+  { to: "/financeiro/clientes", icon: Users, label: "Clientes" },
   { to: "/tasks", icon: ListTodo, label: "Tarefas" },
   { to: "/ponto", icon: Clock3, label: "Ponto" },
   { to: "/calendario", icon: CalendarDays, label: "Calendário" },
