@@ -5,6 +5,13 @@ export class HttpError extends Error {
     public readonly status: number,
     public readonly reasonCode: string,
     public readonly upstreamStatus?: number,
+    /**
+     * Texto para quem está olhando a tela, quando o `reason_code` sozinho não
+     * diz o que fazer — o erro do gateway de pagamento ("valor abaixo do
+     * mínimo") é o que resolve o problema. Opcional de propósito: só quem
+     * decide que é seguro mostrar preenche.
+     */
+    public readonly detail?: string,
   ) {
     super(reasonCode);
   }
@@ -54,7 +61,11 @@ export function jsonResponse(
 export function errorResponse(error: unknown, headers: HeadersInit): Response {
   if (error instanceof HttpError) {
     return jsonResponse(
-      { ok: false, reason_code: error.reasonCode },
+      {
+        ok: false,
+        reason_code: error.reasonCode,
+        ...(error.detail ? { detail: error.detail } : {}),
+      },
       error.status,
       headers,
     );

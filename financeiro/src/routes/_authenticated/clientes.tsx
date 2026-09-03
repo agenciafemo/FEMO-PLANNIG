@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Pencil, Trash2, Zap, CheckCircle2, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { formatBRL, formatDateBR, monthsBetween, todayISO } from "@/lib/format";
-import { gerarCobrancaCliente } from "@/lib/asaas.functions";
+import { gerarCobranca } from "@/lib/asaas";
 import { gerarMensalidadesClientes } from "@/lib/cobrancas.functions";
 import {
   clientesSemFicha,
@@ -60,14 +60,13 @@ function Clientes() {
     },
   });
 
-  const gerarFn = useServerFn(gerarCobrancaCliente);
   const gerarMensalidadesFn = useServerFn(gerarMensalidadesClientes);
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [gerandoMensalidades, setGerandoMensalidades] = useState(false);
   const handleGerar = async (clienteId: string, nome: string) => {
     setPending((p) => ({ ...p, [clienteId]: true }));
     try {
-      const res = await gerarFn({ data: { clienteId } });
+      const res = await gerarCobranca({ clienteId });
       toast.success(`Cobrança gerada para ${nome}`, { description: res.link_boleto ?? undefined });
       qc.invalidateQueries({ queryKey: ["clientes-cobrancas-asaas"] });
       qc.invalidateQueries({ queryKey: ["fluxo"] });
