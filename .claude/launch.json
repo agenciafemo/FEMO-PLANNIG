@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "financeiro",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "financeiro",
+        "run",
+        "dev"
+      ],
+      "port": 8080
+    }
+  ]
+}
