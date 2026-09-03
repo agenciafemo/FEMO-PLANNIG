@@ -44,6 +44,9 @@ function Configuracoes() {
 // deixaram de existir. A identidade visual é a do Norteia — um segundo lugar
 // para trocar a mesma cor garante que uma hora as duas telas divergem.
 
+type ParsedRow = Record<string, string>;
+type NormalRow = { descricao: string; valor: number; data: string; tipo: "Entrada" | "Saída" };
+
 function normalizeHeader(h: string): string {
   return (h ?? "").replace(/^\uFEFF/, "").trim();
 }

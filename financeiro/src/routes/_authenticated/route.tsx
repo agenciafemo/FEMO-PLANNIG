@@ -35,8 +35,9 @@ function AppShell() {
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? ""));
     const loadLogo = async () => {
-      const { data } = await supabase.from("configuracoes").select("*").eq("id", 1).single();
-      setLogo((data as { logo_url?: string } | null)?.logo_url ?? null);
+      // A logo saiu do financeiro junto com as cores: a identidade visual e a
+      // do Norteia. Fica sem logo ate a ponte com o tema de la existir.
+      setLogo(null);
     };
     loadLogo();
     const onRefresh = () => loadLogo();

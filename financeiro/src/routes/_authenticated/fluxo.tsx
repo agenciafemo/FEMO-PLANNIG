@@ -94,7 +94,7 @@ function Fluxo() {
         listarClientes(),
         supabase.from("colaboradores").select("id,nome").order("nome"),
       ]);
-      return { lanc: (lanc.data ?? []) as any[], cats: (cats.data ?? []) as Cat[], clis: clis.data ?? [], colabs: colabs.data ?? [] };
+      return { lanc: (lanc.data ?? []) as any[], cats: (cats.data ?? []) as Cat[], clis, colabs: colabs.data ?? [] };
     },
   });
 
@@ -106,70 +106,23 @@ function Fluxo() {
     mutationFn: async () => {
       const iso = dateToISO(cursor);
       const [year, month] = iso.split("-").map(Number);
-      const lastDay = new Date(year, month, 0).getDate();
-      const start = `${year}-${String(month).padStart(2, "0")}-01`;
-      const end = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-
-      // pega/cria categoria "Mensalidade"
-      let categoriaId: string | null = null;
-      const { data: cat, error: catErr } = await supabase
-        .from("categorias").select("id").eq("nome", "Mensalidade").limit(1).maybeSingle();
-      if (catErr) throw new Error(catErr.message);
-      categoriaId = cat?.id ?? null;
-      if (!categoriaId) {
-        const { data: nova, error } = await supabase
-          .from("categorias").insert({ nome: "Mensalidade", tipo: "Entrada" }).select("id").single();
-        if (error) throw new Error(error.message);
-        categoriaId = nova.id;
-      }
-
-      const { data: clientes, error: cliErr } = await supabase
-        .from("clientes")
-        .select("id,nome,valor_mensalidade,dia_vencimento")
-        .eq("status", "Ativo")
-        .eq("is_recorrente", true)
-        .order("nome");
-      if (cliErr) throw new Error(cliErr.message);
-
-      const { data: existentes, error: exErr } = await supabase
-        .from("lancamentos_financeiros")
-        .select("client_id")
-        .eq("tipo", "Entrada")
-        .eq("categoria_id", categoriaId)
-        .gte("data_lancamento", start)
-        .lte("data_lancamento", end);
-      if (exErr) throw new Error(exErr.message);
-
-      const jaTem = new Set((existentes ?? []).map((l: any) => l.client_id).filter(Boolean));
-      const novos = (clientes ?? [])
-        .filter((c: any) => !jaTem.has(c.id))
-        .map((c: any) => {
-          const dia = Math.min(Math.max(Number(c.dia_vencimento) || 5, 1), lastDay);
-          return {
-            tipo: "Entrada" as const,
-            categoria_id: categoriaId,
-            descricao: `Mensalidade — ${c.nome}`,
-            data_lancamento: `${year}-${String(month).padStart(2, "0")}-${String(dia).padStart(2, "0")}`,
-            valor: Number(c.valor_mensalidade ?? 0),
-            status_pagamento: "Pendente" as const,
-            client_id: c.id,
-          };
-        });
-
-      if (novos.length > 0) {
-        const { error } = await supabase.from("lancamentos_financeiros").insert(novos);
-        if (error) throw new Error(error.message);
-      }
-      return {
-        criadas: novos.length,
-        ignoradas: (clientes ?? []).length - novos.length,
-      };
+      const competencia = `${year}-${String(month).padStart(2, "0")}-01`;
+      const { data, error } = await supabase.rpc("gerar_mensalidades", {
+        _competencia: competencia,
+      });
+      if (error) throw new Error(error.message);
+      return { criadas: Number(data ?? 0) };
     },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["fluxo"] });
-      toast.success(`${res.criadas} mensalidade(s) lançada(s) em Contas a Receber`, {
-        description: `${res.ignoradas} cliente(s) já tinham mensalidade no mês.`,
-      });
+      if (res.criadas === 0) {
+        toast.info("Nenhuma mensalidade nova — todas já estavam lançadas neste mês.");
+        return;
+      }
+      toast.success(
+        `${res.criadas} mensalidade(s) lançada(s) em Contas a Receber`,
+        { description: "Quem entrou no meio do mês entrou com valor proporcional." },
+      );
     },
     onError: (e: Error) => toast.error(e.message),
   });

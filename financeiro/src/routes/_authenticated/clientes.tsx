@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Suspense, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,6 +16,13 @@ import { toast } from "sonner";
 import { formatBRL, formatDateBR, monthsBetween, todayISO } from "@/lib/format";
 import { gerarCobrancaCliente } from "@/lib/asaas.functions";
 import { gerarMensalidadesClientes } from "@/lib/cobrancas.functions";
+import {
+  clientesSemFicha,
+  listarClientes,
+  removerFichaFinanceira,
+  salvarFichaFinanceira,
+  type Cliente,
+} from "@/lib/clientes";
 
 export const Route = createFileRoute("/_authenticated/clientes")({
   head: () => ({ meta: [{ title: "Clientes — FEMO FINANÇAS" }] }),
@@ -26,7 +33,7 @@ export const Route = createFileRoute("/_authenticated/clientes")({
   ),
 });
 
-type Cliente = { id: string; nome: string; data_entrada: string; data_saida: string | null; data_status_alterado: string | null; status: "Ativo" | "Churn"; valor_mensalidade: number; is_recorrente: boolean; pct_social_media: number; pct_trafego: number; dia_vencimento: number; data_aniversario: string | null; socios: string[] };
+
 
 function Clientes() {
   const qc = useQueryClient();
@@ -37,7 +44,7 @@ function Clientes() {
 
   const { data: clientes } = useSuspenseQuery({
     queryKey: ["clientes"],
-    queryFn: async () => (await supabase.from("clientes").select("*").order("nome")).data ?? [],
+    queryFn: listarClientes,
   });
 
   const { data: cobrancasAtivas } = useSuspenseQuery({
@@ -72,8 +79,8 @@ function Clientes() {
   };
 
   const del = useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from("clientes").delete().eq("id", id); if (error) throw error; },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["clientes"] }); toast.success("Cliente removido"); },
+    mutationFn: removerFichaFinanceira,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["clientes"] }); toast.success("Dados financeiros removidos. O cliente continua no Norteia."); },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -98,9 +105,13 @@ function Clientes() {
                 try {
                   const res = await gerarMensalidadesFn({ data: { mes: todayISO() } });
                   qc.invalidateQueries({ queryKey: ["fluxo"] });
-                  toast.success(`${res.criadas} mensalidade(s) lançada(s) em Contas a Receber`, {
-                    description: `${res.ignoradas} cliente(s) já tinham mensalidade no mês.`,
-                  });
+                  if (res.criadas === 0) {
+                    toast.info("Nenhuma mensalidade nova — todas já estavam lançadas neste mês.");
+                  } else {
+                    toast.success(`${res.criadas} mensalidade(s) lançada(s) em Contas a Receber`, {
+                      description: "Quem entrou no meio do mês entrou com valor proporcional.",
+                    });
+                  }
                 } catch (e) {
                   toast.error((e as Error).message);
                 } finally {
@@ -196,9 +207,10 @@ function Clientes() {
 
 function ClienteDialog({ editing, onClose }: { editing: Cliente | null; onClose: () => void }) {
   const qc = useQueryClient();
+  // O cliente escolhido. Ao editar, ja e o dono da ficha; ao criar, sai do
+  // seletor da carteira do Norteia.
+  const [clientId, setClientId] = useState(editing?.id ?? "");
   const [form, setForm] = useState({
-    nome: editing?.nome ?? "",
-    data_entrada: editing?.data_entrada ?? todayISO(),
     data_saida: editing?.data_saida ?? "",
     data_aniversario: editing?.data_aniversario ?? "",
     status: editing?.status ?? ("Ativo" as "Ativo" | "Churn"),
@@ -210,6 +222,14 @@ function ClienteDialog({ editing, onClose }: { editing: Cliente | null; onClose:
     socios: (editing?.socios ?? []) as string[],
   });
   const [novoSocio, setNovoSocio] = useState("");
+
+  // Só quem ainda não tem ficha: oferecer um cliente já cadastrado deixaria
+  // a pessoa sobrescrever a mensalidade de outro sem perceber.
+  const { data: disponiveis = [] } = useQuery({
+    queryKey: ["clientes-sem-ficha"],
+    queryFn: clientesSemFicha,
+    enabled: !editing,
+  });
 
   const addSocio = () => {
     const n = novoSocio.trim();
@@ -228,23 +248,24 @@ function ClienteDialog({ editing, onClose }: { editing: Cliente | null; onClose:
     mutationFn: async () => {
       if (pctTotal > 100) throw new Error("A soma dos percentuais (SM + Tráfego) não pode passar de 100%.");
       if (form.dia_vencimento < 1 || form.dia_vencimento > 31) throw new Error("O dia do vencimento deve estar entre 1 e 31.");
-      const payload = {
+      if (!clientId) throw new Error("Escolha o cliente.");
+      await salvarFichaFinanceira(clientId, {
         ...form,
         data_saida: form.status === "Ativo" ? null : (form.data_saida || null),
         data_aniversario: form.data_aniversario || null,
-      };
-      if (editing) {
-        const { error } = await supabase.from("clientes").update(payload).eq("id", editing.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("clientes").insert(payload);
-        if (error) throw error;
-      }
+        // Carimba quando a situacao mudou: o calculo de churn do mes depende
+        // disso, e sem carimbo o cliente parece ter saido no dia da consulta.
+        data_status_alterado:
+          editing && editing.status !== form.status
+            ? new Date().toISOString()
+            : (editing?.data_status_alterado ?? null),
+        id_cliente_asaas: editing?.id_cliente_asaas ?? null,
+      });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["clientes"] });
       qc.invalidateQueries({ queryKey: ["fluxo"] });
-      toast.success(editing ? "Cliente atualizado" : "Cliente cadastrado — mensalidade lançada no fluxo");
+      toast.success(editing ? "Dados financeiros atualizados" : "Cliente incluído no financeiro");
       onClose();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -255,14 +276,32 @@ function ClienteDialog({ editing, onClose }: { editing: Cliente | null; onClose:
       <DialogHeader><DialogTitle>{editing ? "Editar cliente" : "Novo cliente"}</DialogTitle></DialogHeader>
       <form onSubmit={(e) => { e.preventDefault(); save.mutate(); }} className="space-y-4">
         <div className="space-y-1.5">
-          <Label>Nome</Label>
-          <Input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} />
+          <Label>Cliente</Label>
+          {editing ? (
+            <Input value={editing.nome} disabled />
+          ) : (
+            <Select value={clientId} onValueChange={setClientId}>
+              <SelectTrigger><SelectValue placeholder="Escolha um cliente da carteira" /></SelectTrigger>
+              <SelectContent>
+                {disponiveis.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    Todos os clientes já estão no financeiro.
+                  </div>
+                ) : (
+                  disponiveis.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          )}
+          <p className="text-xs text-muted-foreground">
+            {editing
+              ? "Nome e data de entrada são do cadastro no Norteia."
+              : "Cliente novo se cadastra no Norteia; aqui se diz quanto ele paga."}
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label>Data de entrada</Label>
-            <Input type="date" required value={form.data_entrada} onChange={(e) => setForm({ ...form, data_entrada: e.target.value })} />
-          </div>
           <div className="space-y-1.5">
             <Label>Status</Label>
             <Select value={form.status} onValueChange={(v: "Ativo" | "Churn") => setForm({ ...form, status: v })}>

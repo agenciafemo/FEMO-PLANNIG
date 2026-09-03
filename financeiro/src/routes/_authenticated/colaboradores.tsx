@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { formatBRL, monthKey, monthsBetween, parseISODate, todayISO } from "@/lib/format";
 import { printReport } from "@/lib/print-report";
 import { listarClientes } from "@/lib/clientes";
+import { carregarConfig } from "@/lib/configuracoes";
 
 export const Route = createFileRoute("/_authenticated/colaboradores")({
   head: () => ({ meta: [{ title: "Colaboradores — FEMO FINANÇAS" }] }),
@@ -186,19 +187,19 @@ function Colaboradores() {
         supabase.from("lancamentos_financeiros").select("*").eq("tipo", "Saída").not("colaborador_id", "is", null),
         supabase.from("recebimentos_extras").select("*"),
         supabase.from("tabela_progressiva_ltv").select("meses_min,meses_max,percentual,funcao_id"),
-        supabase.from("configuracoes").select("pct_penalidade_atraso").eq("id", 1).single(),
+        carregarConfig(),
         supabase.from("historico_folha_pagamento").select("*").order("mes_competencia", { ascending: false }),
         supabase.from("funcoes").select("id,nome,tipo_base"),
       ]);
       const pesos = await supabase.from("pesos_comissao_folha").select("colaborador_id,mes_competencia,peso");
       return {
         colabs: (colabs.data ?? []) as Colab[],
-        clientes: (clientes.data ?? []) as Cliente[],
+        clientes,
         contratos: (contratos.data ?? []) as Contrato[],
         lancamentos: lanc.data ?? [],
         extras: extras.data ?? [],
         ltv: (ltv.data ?? []) as LtvRow[],
-        pctPenal: Number(config.data?.pct_penalidade_atraso ?? 0),
+        pctPenal: config.pct_penalidade_atraso,
         historico: (historico.data ?? []) as HistoricoFolha[],
         funcoes: (funcoes.data ?? []) as Funcao[],
         pesos: (pesos.data ?? []) as { colaborador_id: string; mes_competencia: string; peso: number }[],
