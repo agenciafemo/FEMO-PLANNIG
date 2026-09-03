@@ -40,6 +40,10 @@ export default {
         surface: {
           DEFAULT: "hsl(var(--surface))",
           muted: "hsl(var(--surface-muted))",
+          // As telas do financeiro vieram de um tema com `surface-2`. É a
+          // mesma ideia da `muted` daqui — apontar para o mesmo token evita
+          // uma segunda cor cinza que sai do lugar quando o tema muda.
+          2: "hsl(var(--surface-muted))",
         },
         brand: {
           DEFAULT: "hsl(var(--brand))",

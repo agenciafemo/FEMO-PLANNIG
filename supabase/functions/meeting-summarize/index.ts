@@ -307,8 +307,7 @@ async function carregarFichaDoCliente(supabase: any, clientId: string | null): P
     lista("Palavras proibidas", data.forbidden_words);
     lista("Temas sensiveis", data.sensitive_topics);
 
-    return linhas.length > 0 ? linhas.join("
-") : "";
+    return linhas.length > 0 ? linhas.join("\n") : "";
   } catch {
     return "";
   }

@@ -137,6 +137,13 @@
 }
 
 @layer components {
+  /* Números que precisam alinhar em coluna — tabelas de valores do financeiro.
+     Sem largura fixa por dígito, um "1" ocupa menos que um "8" e as colunas de
+     dinheiro ficam serrilhadas. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
   /* Canvas suave do Dashboard premium: cinza levíssimo + 2 halos discretos. */
   .nrt-surface {
     background:
