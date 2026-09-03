@@ -43,7 +43,11 @@ export default function DashboardFinanceiro() {
   const churnedThisMonth = data.clientes.filter((c) => c.status === "Churn" && c.data_status_alterado && monthKey(c.data_status_alterado) === curKey).length;
   const activeStartOfMonth = data.clientes.filter((c) => {
     // estava ativo no mês anterior se: entrou antes do fim do mês anterior e (ainda ativo OR churn ocorreu no mês atual ou depois)
-    const entrou = parseISODate(c.data_entrada)!;
+    // Cliente sem data de entrada (agency_since vazio no Norteia) não pode ser
+    // posicionado na linha do tempo — conta como "ainda não estava ativo" em
+    // vez de derrubar o dashboard inteiro com data_entrada=""!.getFullYear().
+    const entrou = parseISODate(c.data_entrada);
+    if (!entrou) return false;
     const endPrev = new Date(today.getFullYear(), today.getMonth(), 0);
     if (entrou > endPrev) return false;
     if (c.status === "Ativo") return true;

@@ -35,7 +35,14 @@ export default function Analitico() {
   const anos = useMemo(() => {
     const set = new Set<number>([today.getFullYear()]);
     data.lancamentos.forEach((l) => set.add(parseISODate(l.data_lancamento)!.getFullYear()));
-    data.clientes.forEach((c) => set.add(parseISODate(c.data_entrada)!.getFullYear()));
+    // Cliente sem data de entrada preenchida (comum nos que acabaram de vir do
+    // Norteia) tem data_entrada = "" — parseISODate("") devolve null, e o `!`
+    // que estava aqui virava exatamente este crash. Sem data conhecida, o
+    // cliente simplesmente não contribui um ano à lista.
+    data.clientes.forEach((c) => {
+      const entrada = parseISODate(c.data_entrada);
+      if (entrada) set.add(entrada.getFullYear());
+    });
     return [...set].sort((a, b) => b - a);
   }, [data, today]);
 
@@ -69,16 +76,19 @@ export default function Analitico() {
       const refIni = new Date(ano, idx, 1);
       const refFim = new Date(ano, idx + 1, 0);
       const ativosNoFim = data.clientes.filter((c) => {
-        const ent = parseISODate(c.data_entrada)!;
-        if (ent > refFim) return false;
+        // Sem data de entrada não dá para saber se ele já estava ativo neste
+        // mês — tratar como "ainda não" é o lado conservador do erro (LT
+        // médio um pouco menor), nunca crashar a série inteira.
+        const ent = parseISODate(c.data_entrada);
+        if (!ent || ent > refFim) return false;
         if (c.status === "Ativo") return true;
         if (c.data_status_alterado && parseISODate(c.data_status_alterado)! > refFim) return true;
         return false;
       });
       const ativosNoIni = data.clientes.filter((c) => {
-        const ent = parseISODate(c.data_entrada)!;
+        const ent = parseISODate(c.data_entrada);
         const iniMinus1 = new Date(ano, idx, 0);
-        if (ent > iniMinus1) return false;
+        if (!ent || ent > iniMinus1) return false;
         if (c.status === "Ativo") return true;
         if (c.data_status_alterado && parseISODate(c.data_status_alterado)! >= refIni) return true;
         return false;
