@@ -497,6 +497,8 @@ export type Database = {
       }
       lancamentos_financeiros: {
         Row: {
+          import_hash: string | null
+          import_lote_id: string | null
           organization_id: string | null
           categoria_id: string | null
           client_id: string | null
@@ -521,6 +523,8 @@ export type Database = {
           valor: number
         }
         Insert: {
+          import_hash?: string | null
+          import_lote_id?: string | null
           organization_id?: string | null
           categoria_id?: string | null
           client_id?: string | null
@@ -544,6 +548,8 @@ export type Database = {
           valor: number
         }
         Update: {
+          import_hash?: string | null
+          import_lote_id?: string | null
           organization_id?: string | null
           categoria_id?: string | null
           client_id?: string | null

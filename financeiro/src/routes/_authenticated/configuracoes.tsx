@@ -12,6 +12,12 @@ import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { carregarConfig, salvarConfig } from "@/lib/configuracoes";
 import { comOrganizacao } from "@/lib/organizacao";
+import {
+  desfazerImportacao,
+  importarLancamentos,
+  type LinhaImportada,
+  type ResultadoImportacao,
+} from "@/lib/importacao";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
   head: () => ({ meta: [{ title: "Configurações — FEMO FINANÇAS" }] }),
@@ -46,7 +52,7 @@ function Configuracoes() {
 // para trocar a mesma cor garante que uma hora as duas telas divergem.
 
 type ParsedRow = Record<string, string>;
-type NormalRow = { descricao: string; valor: number; data: string; tipo: "Entrada" | "Saída" };
+type NormalRow = LinhaImportada;
 
 function normalizeHeader(h: string): string {
   return (h ?? "").replace(/^\uFEFF/, "").trim();
@@ -106,6 +112,7 @@ function ImportacaoMeuDinheiro() {
   const [encoding, setEncoding] = useState<"utf-8" | "iso-8859-1">("utf-8");
   const [busy, setBusy] = useState(false);
   const [rawFile, setRawFile] = useState<File | null>(null);
+  const [ultimoLote, setUltimoLote] = useState<ResultadoImportacao | null>(null);
 
   const reparse = async (file: File, enc: string) => {
     const Papa = (await import("papaparse")).default;
@@ -121,6 +128,9 @@ function ImportacaoMeuDinheiro() {
         const colDesc = findHeader(hs, "descri", "histor", "cliente", "memo", "obs", "titulo", "nome", "estabelec");
         const colValor = findHeader(hs, "valor", "montante", "amount", "preco", "preço", "total");
         const colTipo = findHeader(hs, "tipo", "natureza", "operacao", "operação");
+        // Anos de extrato numa categoria só deixam o analítico sem nada para
+        // analisar; quando o arquivo classifica, a classificação é aproveitada.
+        const colCategoria = findHeader(hs, "categoria", "classific", "grupo", "conta");
 
         const norm: NormalRow[] = [];
         let sk = 0;
@@ -138,7 +148,8 @@ function ImportacaoMeuDinheiro() {
           const tipo: "Entrada" | "Saída" = tipoRaw
             ? (/entrada|receita|credito|crédito|recebimento|positiv/i.test(tipoRaw) ? "Entrada" : "Saída")
             : (valor >= 0 ? "Entrada" : "Saída");
-          norm.push({ descricao, valor: Math.abs(valor), data, tipo });
+          const categoria = colCategoria ? (r[colCategoria] ?? "").toString().trim() : "";
+          norm.push({ descricao, valor: Math.abs(valor), data, tipo, categoria: categoria || undefined });
         });
         setNormalized(norm);
         setSkipped(sk);
@@ -162,30 +173,28 @@ function ImportacaoMeuDinheiro() {
     if (normalized.length === 0) return;
     setBusy(true);
     try {
-      const { data: existing } = await supabase.from("categorias").select("id,nome");
-      let catImportadoId = existing?.find((c) => c.nome.toLowerCase() === "importado")?.id ?? null;
-      if (!catImportadoId) {
-        const { data: novo } = await supabase.from("categorias").insert(await comOrganizacao({ nome: "Importado", tipo: "Ambos" })).select("id").single();
-        catImportadoId = novo?.id ?? null;
-      }
-
-      const payload = normalized.map((r) => ({
-        tipo: r.tipo,
-        categoria_id: catImportadoId,
-        descricao: r.descricao,
-        data_lancamento: r.data,
-        valor: r.valor,
-        status_pagamento: "Pago" as const,
-      }));
-
-      const chunkSize = 200;
-      for (let i = 0; i < payload.length; i += chunkSize) {
-        const { error } = await supabase.from("lancamentos_financeiros").insert(await comOrganizacao(payload.slice(i, i + chunkSize)));
-        if (error) throw error;
-      }
+      const resultado = await importarLancamentos(normalized);
       qc.invalidateQueries();
-      toast.success(`${payload.length} lançamento(s) salvos no fluxo (Sicredi PJ)`);
+      setUltimoLote(resultado);
+      toast.success(
+        resultado.repetidos > 0
+          ? `${resultado.gravados} lançamento(s) salvos · ${resultado.repetidos} já existiam e foram ignorados`
+          : `${resultado.gravados} lançamento(s) salvos no fluxo (Sicredi PJ)`,
+      );
       setNormalized([]); setFileName(""); setRawFile(null); setSkipped(0);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally { setBusy(false); }
+  };
+
+  const desfazer = async () => {
+    if (!ultimoLote) return;
+    setBusy(true);
+    try {
+      const apagados = await desfazerImportacao(ultimoLote.loteId);
+      qc.invalidateQueries();
+      setUltimoLote(null);
+      toast.success(`${apagados} lançamento(s) removidos.`);
     } catch (e) {
       toast.error((e as Error).message);
     } finally { setBusy(false); }
@@ -278,6 +287,20 @@ function ImportacaoMeuDinheiro() {
         )}
       </div>
       {fileName && <p className="text-xs text-muted-foreground">{fileName}</p>}
+
+      {/* A janela para perceber que o arquivo estava errado é logo depois de
+          importar. Desfazer aqui evita caçar centenas de linhas no Fluxo. */}
+      {ultimoLote && ultimoLote.gravados > 0 && (
+        <div className="rounded-lg border bg-surface-2 p-3 flex items-center justify-between gap-3">
+          <div className="text-xs text-muted-foreground">
+            Última carga: <strong>{ultimoLote.gravados}</strong> lançamento(s) gravados
+            {ultimoLote.repetidos > 0 && ` · ${ultimoLote.repetidos} já existiam`}.
+          </div>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={desfazer}>
+            Desfazer esta importação
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
