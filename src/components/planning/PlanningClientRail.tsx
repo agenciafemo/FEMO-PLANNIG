@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { LayoutGrid, Search } from "lucide-react";
+import { Link } from "react-router-dom";
+import { LayoutGrid, Search, UserRound } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -86,35 +87,54 @@ export function PlanningClientRail({
     label: string,
     marcador: React.ReactNode,
     pendentes: number,
+    /** Id do cliente para o link de perfil. Ausente em "Todos os clientes",
+     *  que não é um cliente de verdade e não tem ficha para abrir. */
+    perfilId?: string,
   ) => {
     const ativo = selecionado === chave;
     return (
-      <button
-        key={chave}
-        type="button"
-        onClick={() => onSelect(chave)}
-        className={cn(
-          "group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          ativo
-            ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-inset ring-border"
-            : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
-        )}
-      >
-        {marcador}
-        <span className="min-w-0 flex-1 truncate">{label}</span>
+      <div key={chave} className="group flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={() => onSelect(chave)}
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            ativo
+              ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-inset ring-border"
+              : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
+          )}
+        >
+          {marcador}
+          <span className="min-w-0 flex-1 truncate">{label}</span>
 
-        {/* Só pendência vira número. Mostrar o total de planejamentos de cada
-            cliente faria um contador que nunca zera — vira papel de parede e
-            ensina a ignorar o aviso justamente quando ele importa. */}
-        {pendentes > 0 && (
-          <span
-            className="shrink-0 rounded-full bg-warning/15 px-1.5 text-[10px] font-semibold tabular-nums text-warning"
-            title={`${pendentes} ${pendentes === 1 ? "planejamento pendente" : "planejamentos pendentes"}`}
+          {/* Só pendência vira número. Mostrar o total de planejamentos de cada
+              cliente faria um contador que nunca zera — vira papel de parede e
+              ensina a ignorar o aviso justamente quando ele importa. */}
+          {pendentes > 0 && (
+            <span
+              className="shrink-0 rounded-full bg-warning/15 px-1.5 text-[10px] font-semibold tabular-nums text-warning"
+              title={`${pendentes} ${pendentes === 1 ? "planejamento pendente" : "planejamentos pendentes"}`}
+            >
+              {pendentes}
+            </span>
+          )}
+        </button>
+
+        {/* Fora do botão de propósito: filtrar e abrir a ficha são duas ações
+            diferentes, e um <a> dentro de um <button> não é válido. Some até
+            o hover/foco — a lista já é densa, e um ícone sempre visível por
+            item vira ruído antes de virar hábito. */}
+        {perfilId && (
+          <Link
+            to={`/plannings/cliente/${perfilId}`}
+            title="Ver perfil do cliente"
+            aria-label={`Ver perfil de ${label}`}
+            className="shrink-0 rounded-lg p-1.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-background/60 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
           >
-            {pendentes}
-          </span>
+            <UserRound className="h-3.5 w-3.5" />
+          </Link>
         )}
-      </button>
+      </div>
     );
   };
 
@@ -154,7 +174,7 @@ export function PlanningClientRail({
             <p className="px-2.5 py-2 text-xs text-muted-foreground">Carregando…</p>
           )}
           {visiveis.map((cliente) =>
-            item(cliente.id, cliente.name, marca(cliente), pendentesPorCliente.get(cliente.id) ?? 0),
+            item(cliente.id, cliente.name, marca(cliente), pendentesPorCliente.get(cliente.id) ?? 0, cliente.id),
           )}
           {!loading && visiveis.length === 0 && (
             <p className="px-2.5 py-2 text-xs text-muted-foreground">

@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Calendar, Copy, Image, Layers, Trash2, Film, LayoutGrid, FileText, ChevronDown, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { Plus, Calendar, Copy, Image, Layers, Trash2, Film, LayoutGrid, FileText, ChevronDown, ChevronsDownUp, ChevronsUpDown, UserRound } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Link, useParams } from "react-router-dom";
@@ -662,7 +662,11 @@ export default function Plannings() {
 
               {/* Cabeçalho do cliente: resume sem precisar abrir. Cliente sem
                   nenhum planejamento não tem o que expandir — o clique leva
-                  direto para criar o primeiro, já com ele selecionado. */}
+                  direto para criar o primeiro, já com ele selecionado.
+                  "Ver perfil" fica FORA do botão de propósito: abrir/criar e
+                  ver a ficha do cliente são ações diferentes, e um <a> dentro
+                  de um <button> não é HTML válido. */}
+              <div className="flex items-stretch">
               <button
                 type="button"
                 onClick={() => {
@@ -671,7 +675,7 @@ export default function Plannings() {
                   setOpen(true);
                 }}
                 aria-expanded={vazio ? undefined : aberto}
-                className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-muted/40"
+                className="flex min-w-0 flex-1 items-center gap-3 p-4 text-left transition-colors hover:bg-muted/40"
               >
                 <div
                   className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold shadow-sm ${vazio ? "text-muted-foreground" : "text-white"}`}
@@ -694,6 +698,15 @@ export default function Plannings() {
                   ? <span className="flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium"><Plus className="h-3.5 w-3.5" /> Criar</span>
                   : <ChevronDown className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${aberto ? "rotate-180" : ""}`} />}
               </button>
+              <Link
+                to={`/plannings/cliente/${grupo.clientId}`}
+                title="Ver perfil do cliente"
+                aria-label={`Ver perfil de ${grupo.name}`}
+                className="flex shrink-0 items-center justify-center px-3 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+              >
+                <UserRound className="h-4 w-4" />
+              </Link>
+              </div>
 
               {aberto && (
                 <div className="space-y-1 border-t bg-muted/20 p-2">
