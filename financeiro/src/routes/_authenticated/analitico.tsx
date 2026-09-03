@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { PageContainer, PageHeader, StatCard } from "@/components/page";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatBRL, monthKey, monthsBetween, parseISODate, todayISO } from "@/lib/format";
+import { listarClientes } from "@/lib/clientes";
 
 export const Route = createFileRoute("/_authenticated/analitico")({
   head: () => ({ meta: [{ title: "Dashboard Analítico — FEMO FINANÇAS" }] }),
@@ -26,13 +27,13 @@ function Analitico() {
     queryKey: ["analitico"],
     queryFn: async () => {
       const [clientes, lanc, cats, cfg] = await Promise.all([
-        supabase.from("clientes").select("*"),
+        listarClientes(),
         supabase.from("lancamentos_financeiros").select("*"),
         supabase.from("categorias").select("*"),
-        supabase.from("configuracoes").select("*").eq("id", 1).maybeSingle(),
+        supabase.from("configuracoes_financeiro").select("*").maybeSingle(),
       ]);
       return {
-        clientes: clientes.data ?? [],
+        clientes,
         lancamentos: lanc.data ?? [],
         categorias: cats.data ?? [],
         config: cfg.data ?? { pct_rotativa: 60, pct_reserva: 40 },

@@ -26,31 +26,35 @@ export const gerarCobrancaAsaas = createServerFn({ method: "POST" })
     const { supabase } = context;
     const { data: lanc, error } = await supabase
       .from("lancamentos_financeiros")
-      .select("id, descricao, data_lancamento, valor, cliente_id, id_cobranca_asaas")
+      .select("id, descricao, data_lancamento, valor, client_id, id_cobranca_asaas")
       .eq("id", data.lancamentoId)
       .single();
     if (error || !lanc) throw new Error("Lançamento não encontrado");
     if (lanc.id_cobranca_asaas) throw new Error("Este lançamento já possui cobrança Asaas");
-    if (!lanc.cliente_id) throw new Error("Lançamento sem cliente vinculado");
+    if (!lanc.client_id) throw new Error("Lançamento sem cliente vinculado");
 
+    // Nome vem de clients, id do Asaas vem de client_financeiro: uma consulta
+    // com join em vez de duas, e sem inventar uma terceira forma de ler a
+    // carteira.
     const { data: cli, error: cliErr } = await supabase
-      .from("clientes")
-      .select("id, nome, id_cliente_asaas")
-      .eq("id", lanc.cliente_id)
+      .from("client_financeiro")
+      .select("client_id, id_cliente_asaas, clients!inner(name)")
+      .eq("client_id", lanc.client_id)
       .single();
-    if (cliErr || !cli) throw new Error("Cliente não encontrado");
+    if (cliErr || !cli) throw new Error("Cliente não encontrado no financeiro");
+    const nomeCliente = (cli as unknown as { clients: { name: string } }).clients.name;
 
     const headers = { "content-type": "application/json", access_token: apiKey } as const;
 
     let customerId = (cli as { id_cliente_asaas?: string | null }).id_cliente_asaas ?? null;
     if (!customerId) {
       const r = await fetch(`${ASAAS_BASE}/customers`, {
-        method: "POST", headers, body: JSON.stringify({ name: cli.nome }),
+        method: "POST", headers, body: JSON.stringify({ name: nomeCliente }),
       });
       if (!r.ok) throw new Error(`Falha ao criar cliente Asaas (${r.status})`);
       const created = (await r.json()) as AsaasCustomer;
       customerId = created.id;
-      await supabase.from("clientes").update({ id_cliente_asaas: customerId } as never).eq("id", cli.id);
+      await supabase.from("client_financeiro").update({ id_cliente_asaas: customerId }).eq("client_id", cli.client_id);
     }
 
     const payRes = await fetch(`${ASAAS_BASE}/payments`, {
@@ -98,7 +102,7 @@ export const gerarCobrancaCliente = createServerFn({ method: "POST" })
     const { data: pendentes, error } = await supabase
       .from("lancamentos_financeiros")
       .select("id, id_cobranca_asaas, status_pagamento, tipo")
-      .eq("cliente_id", data.clienteId)
+      .eq("client_id", data.clienteId)
       .eq("tipo", "Entrada")
       .eq("status_pagamento", "Pendente")
       .is("id_cobranca_asaas", null)

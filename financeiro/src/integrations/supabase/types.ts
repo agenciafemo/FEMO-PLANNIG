@@ -71,18 +71,17 @@ export type Database = {
         }
         Relationships: []
       }
-      clientes: {
+      client_financeiro: {
         Row: {
+          client_id: string
           created_at: string
           data_aniversario: string | null
-          data_entrada: string
           data_saida: string | null
           data_status_alterado: string | null
           dia_vencimento: number
-          id: string
           id_cliente_asaas: string | null
           is_recorrente: boolean
-          nome: string
+          organization_id: string | null
           pct_social_media: number
           pct_trafego: number
           socios: string[]
@@ -91,16 +90,15 @@ export type Database = {
           valor_mensalidade: number
         }
         Insert: {
+          client_id: string
           created_at?: string
           data_aniversario?: string | null
-          data_entrada: string
           data_saida?: string | null
           data_status_alterado?: string | null
           dia_vencimento?: number
-          id?: string
           id_cliente_asaas?: string | null
           is_recorrente?: boolean
-          nome: string
+          organization_id?: string | null
           pct_social_media?: number
           pct_trafego?: number
           socios?: string[]
@@ -109,22 +107,63 @@ export type Database = {
           valor_mensalidade?: number
         }
         Update: {
+          client_id?: string
           created_at?: string
           data_aniversario?: string | null
-          data_entrada?: string
           data_saida?: string | null
           data_status_alterado?: string | null
           dia_vencimento?: number
-          id?: string
           id_cliente_asaas?: string | null
           is_recorrente?: boolean
-          nome?: string
+          organization_id?: string | null
           pct_social_media?: number
           pct_trafego?: number
           socios?: string[]
           status?: Database["public"]["Enums"]["client_status"]
           updated_at?: string
           valor_mensalidade?: number
+        }
+        Relationships: []
+      }
+      clients: {
+        Row: {
+          accent_color: string | null
+          agency_since: string | null
+          created_at: string | null
+          id: string
+          logo_url: string | null
+          name: string
+          notes: string | null
+          organization_id: string
+          segment: string | null
+          traffic_only: boolean
+          updated_at: string | null
+        }
+        Insert: {
+          accent_color?: string | null
+          agency_since?: string | null
+          created_at?: string | null
+          id?: string
+          logo_url?: string | null
+          name: string
+          notes?: string | null
+          organization_id: string
+          segment?: string | null
+          traffic_only?: boolean
+          updated_at?: string | null
+        }
+        Update: {
+          accent_color?: string | null
+          agency_since?: string | null
+          created_at?: string | null
+          id?: string
+          logo_url?: string | null
+          name?: string
+          notes?: string | null
+          organization_id?: string
+          segment?: string | null
+          traffic_only?: boolean
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -169,13 +208,30 @@ export type Database = {
           },
         ]
       }
-      configuracoes: {
+      organization_members: {
         Row: {
-          cor_fundo: string
-          cor_primaria: string
-          cor_secundaria: string
-          id: number
-          logo_url: string | null
+          organization_id: string
+          role: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          organization_id: string
+          role?: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          organization_id?: string
+          role?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      configuracoes_financeiro: {
+        Row: {
+          organization_id: string
           pct_penalidade_atraso: number
           pct_penalidade_churn: number
           pct_reserva: number
@@ -183,11 +239,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          cor_fundo?: string
-          cor_primaria?: string
-          cor_secundaria?: string
-          id?: number
-          logo_url?: string | null
+          organization_id: string
           pct_penalidade_atraso?: number
           pct_penalidade_churn?: number
           pct_reserva?: number
@@ -195,11 +247,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          cor_fundo?: string
-          cor_primaria?: string
-          cor_secundaria?: string
-          id?: number
-          logo_url?: string | null
+          organization_id?: string
           pct_penalidade_atraso?: number
           pct_penalidade_churn?: number
           pct_reserva?: number
@@ -210,7 +258,7 @@ export type Database = {
       }
       contratos_fatiamento: {
         Row: {
-          cliente_id: string
+          client_id: string
           colaborador_id: string
           created_at: string
           id: string
@@ -219,7 +267,7 @@ export type Database = {
           valor_base_calculo: number
         }
         Insert: {
-          cliente_id: string
+          client_id: string
           colaborador_id: string
           created_at?: string
           id?: string
@@ -228,7 +276,7 @@ export type Database = {
           valor_base_calculo?: number
         }
         Update: {
-          cliente_id?: string
+          client_id?: string
           colaborador_id?: string
           created_at?: string
           id?: string
@@ -426,7 +474,7 @@ export type Database = {
       lancamentos_financeiros: {
         Row: {
           categoria_id: string | null
-          cliente_id: string | null
+          client_id: string | null
           codigo_pix: string | null
           colaborador_id: string | null
           created_at: string
@@ -434,7 +482,9 @@ export type Database = {
           descricao: string | null
           id: string
           id_cobranca_asaas: string | null
+          competencia: string | null
           is_clawback: boolean
+          is_mensalidade: boolean
           link_boleto: string | null
           origem_lancamento_id: string | null
           recorrencia_ativa: boolean
@@ -447,7 +497,7 @@ export type Database = {
         }
         Insert: {
           categoria_id?: string | null
-          cliente_id?: string | null
+          client_id?: string | null
           codigo_pix?: string | null
           colaborador_id?: string | null
           created_at?: string
@@ -456,6 +506,7 @@ export type Database = {
           id?: string
           id_cobranca_asaas?: string | null
           is_clawback?: boolean
+          is_mensalidade?: boolean
           link_boleto?: string | null
           origem_lancamento_id?: string | null
           recorrencia_ativa?: boolean
@@ -468,7 +519,7 @@ export type Database = {
         }
         Update: {
           categoria_id?: string | null
-          cliente_id?: string | null
+          client_id?: string | null
           codigo_pix?: string | null
           colaborador_id?: string | null
           created_at?: string
@@ -652,7 +703,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      gerar_cobrancas_recorrentes: { Args: { _mes: string }; Returns: number }
+      gerar_mensalidades: { Args: { _competencia: string }; Returns: number }
     }
     Enums: {
       app_role: "admin"

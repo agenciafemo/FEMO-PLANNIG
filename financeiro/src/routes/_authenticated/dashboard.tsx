@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { PageContainer, PageHeader, StatCard } from "@/components/page";
 import { formatBRL, monthKey, parseISODate, todayISO } from "@/lib/format";
+import { listarClientes } from "@/lib/clientes";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Visão Geral — FEMO FINANÇAS" }] }),
@@ -19,12 +20,12 @@ function Dashboard() {
     queryKey: ["dashboard"],
     queryFn: async () => {
       const [clientes, lanc, cfg] = await Promise.all([
-        supabase.from("clientes").select("*"),
+        listarClientes(),
         supabase.from("lancamentos_financeiros").select("*"),
-        supabase.from("configuracoes").select("*").eq("id", 1).maybeSingle(),
+        supabase.from("configuracoes_financeiro").select("*").maybeSingle(),
       ]);
       return {
-        clientes: clientes.data ?? [],
+        clientes,
         lancamentos: lanc.data ?? [],
         config: cfg.data ?? { pct_rotativa: 60, pct_reserva: 40 },
       };
@@ -45,7 +46,7 @@ function Dashboard() {
   // Recebimentos do mês oriundos de clientes pontuais (não recorrentes)
   const pontuaisIds = new Set(pontuais.map((c) => c.id));
   const entradasPontuaisMes = data.lancamentos
-    .filter((l) => l.tipo === "Entrada" && monthKey(l.data_lancamento) === curKey && l.cliente_id && pontuaisIds.has(l.cliente_id))
+    .filter((l) => l.tipo === "Entrada" && monthKey(l.data_lancamento) === curKey && l.client_id && pontuaisIds.has(l.client_id))
     .reduce((s, l) => s + Number(l.valor), 0);
 
   // Churn rate: clientes que mudaram p/ Churn no mês atual / ativos no mês anterior
