@@ -17,19 +17,32 @@ export interface Organizacao {
   name: string;
 }
 
-/** Organizações em que a pessoa é membro ativo. A RLS já filtra o resto. */
+/**
+ * Organizações em que a pessoa é membro ativo.
+ *
+ * O filtro por user_id é obrigatório: a RLS de organization_members deixa ver
+ * os colegas de equipe, então sem ele a consulta devolve uma linha por membro
+ * e a mesma agência aparece sete vezes na lista.
+ */
 export async function listarOrganizacoes(): Promise<Organizacao[]> {
+  const { data: sessao } = await supabase.auth.getUser();
+  const userId = sessao.user?.id;
+  if (!userId) return [];
+
   const { data, error } = await supabase
     .from("organization_members")
-    .select("organization_id, organizations!inner(id, name)")
+    .select("organizations!inner(id, name)")
+    .eq("user_id", userId)
     .eq("status", "active");
   if (error) throw new Error(error.message);
 
   const linhas = (data ?? []) as unknown as Array<{ organizations: Organizacao }>;
-  return linhas
-    .map((linha) => linha.organizations)
-    .filter(Boolean)
-    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const porId = new Map<string, Organizacao>();
+  for (const linha of linhas) {
+    if (linha.organizations) porId.set(linha.organizations.id, linha.organizations);
+  }
+
+  return [...porId.values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
 }
 
 export function organizacaoSalva(): string | null {
