@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Navigate, useParams, useLocation } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate, Outlet, useParams, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -117,6 +117,14 @@ function RequireFinanceiro({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function AdministrativoIndex() {
+  const podeVerFinanceiro = usePermission("financeiro.ver");
+  if (podeVerFinanceiro === undefined) return null;
+  return podeVerFinanceiro
+    ? <DashboardFinanceiro />
+    : <Navigate to="/administrativo/equipe" replace />;
+}
+
 /**
  * /clients/:clientId aposentado — a ficha do cliente mora em
  * /plannings/cliente/:clientId (ver ClientProfile). Redireciona em vez de
@@ -204,7 +212,7 @@ const App = () => (
                 <Route path="/plannings/cliente/:clientId" element={<PlanningClientProfile />} />
                 <Route path="/plannings/:clientSlug/:monthYear" element={<PlanningDetail />} />
                 <Route path="/collaborators" element={<Collaborators />} />
-                <Route path="/vault" element={<Vault />} />
+                <Route path="/vault" element={<Navigate to="/administrativo/cofre" replace />} />
                 <Route path="/reviews" element={<Reviews />} />
                 <Route path="/programacao" element={<Programacao />} />
                 <Route path="/relatorios" element={<Relatorios />} />
@@ -230,31 +238,29 @@ const App = () => (
                     </RequireTeamManager>
                   }
                 />
-                {/* Equipe: todos os membros podem ver. A edição de cargos/funções
-                    é gated dentro da própria página (só owner/admin). */}
-                <Route path="/team/collaborators" element={<TeamCollaborators />} />
-                {/* Área administrativa. Nasceu como "/financeiro" e passou a
-                    receber também o que não é dinheiro (carteira de clientes,
-                    equipe na folha) — por isso o nome e a URL acompanharam.
-                    A guarda fica no layout, então nenhuma tela nova pode
-                    nascer desprotegida por esquecimento. */}
+                {/* URLs antigas continuam funcionando; Equipe e Cofre agora
+                    fazem parte da navegação secundária do Administrativo. */}
+                <Route path="/team/collaborators" element={<Navigate to="/administrativo/equipe" replace />} />
+                {/* Área administrativa reúne gestão e financeiro. As telas
+                    financeiras mantêm a própria guarda; Equipe e Cofre seguem
+                    as permissões que já aplicavam antes desta reorganização. */}
                 <Route path="/financeiro/*" element={<FinanceiroParaAdministrativo />} />
                 <Route
                   path="/administrativo"
-                  element={
-                    <RequireFinanceiro>
-                      <FinanceiroLayout />
-                    </RequireFinanceiro>
-                  }
+                  element={<FinanceiroLayout />}
                 >
-                  <Route index element={<DashboardFinanceiro />} />
-                  <Route path="anual" element={<DashboardAnual />} />
-                  <Route path="analitico" element={<Analitico />} />
-                  <Route path="clientes" element={<ClientesFinanceiro />} />
-                  <Route path="colaboradores" element={<ColaboradoresFinanceiro />} />
-                  <Route path="fluxo" element={<Fluxo />} />
-                  <Route path="social-selling" element={<SocialSelling />} />
-                  <Route path="configuracoes" element={<ConfiguracoesFinanceiro />} />
+                  <Route index element={<AdministrativoIndex />} />
+                  <Route element={<RequireFinanceiro><Outlet /></RequireFinanceiro>}>
+                    <Route path="anual" element={<DashboardAnual />} />
+                    <Route path="analitico" element={<Analitico />} />
+                    <Route path="clientes" element={<ClientesFinanceiro />} />
+                    <Route path="colaboradores" element={<ColaboradoresFinanceiro />} />
+                    <Route path="fluxo" element={<Fluxo />} />
+                    <Route path="social-selling" element={<SocialSelling />} />
+                    <Route path="configuracoes" element={<ConfiguracoesFinanceiro />} />
+                  </Route>
+                  <Route path="equipe" element={<TeamCollaborators />} />
+                  <Route path="cofre" element={<Vault />} />
                 </Route>
               </Route>
               <Route path="*" element={<NotFound />} />
