@@ -14,6 +14,7 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Clients from "./pages/Clients";
 import ClientDetail from "./pages/ClientDetail";
+import PlanningClientProfile from "./pages/PlanningClientProfile";
 import Plannings from "./pages/Plannings";
 import PlanningDetail from "./pages/PlanningDetail";
 import Collaborators from "./pages/Collaborators";
@@ -171,6 +172,10 @@ const App = () => (
                 <Route path="/clients/:clientId" element={<ClientDetail />} />
                 <Route path="/plannings" element={<Plannings />} />
                 <Route path="/clients/:clientId/plannings" element={<Plannings />} />
+                {/* Etapa 1 da migração para a área administrativa: o perfil do
+                    cliente acessível a partir do Planejamento, sem passar por
+                    /clients. Ver src/components/client/ClientProfile.tsx. */}
+                <Route path="/plannings/cliente/:clientId" element={<PlanningClientProfile />} />
                 <Route path="/plannings/:clientSlug/:monthYear" element={<PlanningDetail />} />
                 <Route path="/collaborators" element={<Collaborators />} />
                 <Route path="/vault" element={<Vault />} />

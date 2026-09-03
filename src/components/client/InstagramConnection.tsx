@@ -23,9 +23,12 @@ import { requiresFacebookPageSelection } from "@/lib/metaConnectionFlow";
 
 // Onde o Facebook devolve o navegador após o OAuth. O callback anexa
 // ?meta_status=pending&connection_id=...&client_id=... a esta rota.
-// Retornar do OAuth PARA A PÁGINA DO CLIENTE (onde este componente vive) — na
-// lista /clients o componente não é montado e a seleção de página se perderia.
-const returnPathFor = (clientId: string) => `/clients/${clientId}`;
+// Retornar do OAuth PARA A PÁGINA ONDE ESTE COMPONENTE ESTÁ MONTADO — hoje
+// /clients/:clientId ou /plannings/cliente/:clientId; numa lista sem a ficha
+// aberta ele não é montado e a seleção de página se perderia. `clientId` não
+// entra mais no cálculo: a página atual já é a fonte de verdade, e isso
+// mantém o retorno certo em qualquer lugar novo que venha a montar a ficha.
+const returnPathFor = () => window.location.pathname;
 
 // Erros de sessão comuns a todas as ações Meta → mensagem clara de re-login.
 function sessionErrorMessage(error: unknown): string | null {
@@ -138,7 +141,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   // silêncio — você acha que migrou e não migrou.
   const connect = useMutation<void, Error, { forceAccount: boolean; provider: MetaProvider }>({
     mutationFn: async ({ forceAccount, provider: porta }) => {
-      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount, porta);
+      const url = await startMetaOAuth(clientId, returnPathFor(), forceAccount, porta);
       window.location.href = url; // navega para o Facebook
     },
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao iniciar conexão: " + (e as Error).message),
@@ -151,7 +154,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
   const reconnect = useMutation<void, Error, boolean>({
     mutationFn: async (forceAccount: boolean) => {
       if (connectionId) await disconnectMeta(connectionId);
-      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount, provider);
+      const url = await startMetaOAuth(clientId, returnPathFor(), forceAccount, provider);
       window.location.href = url;
     },
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao reconectar: " + (e as Error).message),
@@ -164,7 +167,7 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
     mutationFn: async (forceAccount: boolean) => {
       const idToDiscard = pendingConnectionId ?? (status === "pending" ? connectionId : null);
       if (idToDiscard) await disconnectMeta(idToDiscard);
-      const url = await startMetaOAuth(clientId, returnPathFor(clientId), forceAccount, provider);
+      const url = await startMetaOAuth(clientId, returnPathFor(), forceAccount, provider);
       window.location.href = url;
     },
     onError: (e: unknown) => toast.error(sessionErrorMessage(e) ?? "Erro ao reconectar: " + (e as Error).message),
