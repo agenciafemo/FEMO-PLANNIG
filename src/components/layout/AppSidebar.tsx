@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Users, LayoutGrid, UserPlus, LogOut, Shield, Bell, KeyRound, ListTodo, MessageSquareHeart, Clock3, CalendarDays, Video } from "lucide-react";
+import { Users, LayoutGrid, UserPlus, LogOut, Shield, Bell, KeyRound, ListTodo, MessageSquareHeart, Clock3, CalendarDays, Video, Wallet } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
+import { usePermission } from "@/hooks/usePermission";
 import { useOrganization } from "@/hooks/useOrganization";
 import { cn } from "@/lib/utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -25,6 +26,9 @@ const navItems = [
   { to: "/reviews", icon: MessageSquareHeart, label: "NPS" },
   { to: "/team/collaborators", icon: UserPlus, label: "Equipe / Colaboradores", managerOnly: true },
   { to: "/vault", icon: KeyRound, label: "Cofre" },
+  // Financeiro não usa managerOnly: quem vê é quem tem a permissão
+  // `financeiro.ver`, que é configurável por pessoa.
+  { to: "/financeiro", icon: Wallet, label: "Financeiro", permissao: "financeiro.ver" },
 ];
 
 // A tabela `notifications` ainda não está no types.ts gerado, então o cast é
@@ -322,6 +326,9 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const isAdmin = useIsAdmin();
   const { role } = useOrganization();
   const canManageTeam = role === "owner" || role === "admin" || role === "manager";
+  // Esconder o menu é conforto, não segurança: a RLS e a guarda da rota
+  // é que barram de verdade quem não pode ver o financeiro.
+  const podeVerFinanceiro = usePermission("financeiro.ver");
   const [profileOpen, setProfileOpen] = useState(false);
   // Foto + nome do próprio usuário (para o bloco da conta e a saudação).
   const { data: profile } = useQuery({
@@ -356,7 +363,10 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
           Navegação
         </p>
         <div className="space-y-1">
-        {navItems.filter((item) => !("managerOnly" in item) || !item.managerOnly || canManageTeam).map((item) => {
+        {navItems
+          .filter((item) => !("managerOnly" in item) || !item.managerOnly || canManageTeam)
+          .filter((item) => !("permissao" in item) || podeVerFinanceiro === true)
+          .map((item) => {
           const isActive = location.pathname.startsWith(item.to);
           return (
             <Link

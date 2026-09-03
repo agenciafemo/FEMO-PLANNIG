@@ -25,6 +25,16 @@ import Producao from "./pages/Producao";
 import Tasks from "./pages/Tasks";
 import TimeClock from "./pages/TimeClock";
 import TeamCollaborators from "./pages/TeamCollaborators";
+import DashboardFinanceiro from "./pages/financeiro/Dashboard";
+import Fluxo from "./pages/financeiro/Fluxo";
+import ClientesFinanceiro from "./pages/financeiro/Clientes";
+import ColaboradoresFinanceiro from "./pages/financeiro/Colaboradores";
+import SocialSelling from "./pages/financeiro/SocialSelling";
+import Analitico from "./pages/financeiro/Analitico";
+import DashboardAnual from "./pages/financeiro/DashboardAnual";
+import ConfiguracoesFinanceiro from "./pages/financeiro/Configuracoes";
+import { usePermission } from "@/hooks/usePermission";
+import { FinanceiroLayout } from "@/components/financeiro/FinanceiroLayout";
 import Calendario from "./pages/Calendario";
 import AgendaEquipe from "./pages/AgendaEquipe";
 import Reunioes from "./pages/Reunioes";
@@ -90,6 +100,21 @@ function RequireTeamManager({ children }: { children: React.ReactNode }) {
   if (role !== "owner" && role !== "admin" && role !== "manager") {
     return <Navigate to="/dashboard" replace />;
   }
+  return <>{children}</>;
+}
+
+/**
+ * O financeiro é só do administrativo da agência: folha de pagamento, comissão
+ * e fluxo de caixa não são da equipe. A RLS já barra os dados; esta guarda
+ * evita a tela vazia com erro no lugar de um "você não tem acesso".
+ *
+ * `undefined` é "ainda carregando" — tratá-lo como negativa mandaria quem tem
+ * acesso para o dashboard antes da resposta chegar.
+ */
+function RequireFinanceiro({ children }: { children: React.ReactNode }) {
+  const podeVer = usePermission("financeiro.ver");
+  if (podeVer === undefined) return null;
+  if (!podeVer) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -177,6 +202,26 @@ const App = () => (
                 {/* Equipe: todos os membros podem ver. A edição de cargos/funções
                     é gated dentro da própria página (só owner/admin). */}
                 <Route path="/team/collaborators" element={<TeamCollaborators />} />
+                {/* Financeiro — só administrativo. A guarda fica no layout,
+                    então nenhuma tela nova pode nascer desprotegida por
+                    esquecimento. */}
+                <Route
+                  path="/financeiro"
+                  element={
+                    <RequireFinanceiro>
+                      <FinanceiroLayout />
+                    </RequireFinanceiro>
+                  }
+                >
+                  <Route index element={<DashboardFinanceiro />} />
+                  <Route path="anual" element={<DashboardAnual />} />
+                  <Route path="analitico" element={<Analitico />} />
+                  <Route path="clientes" element={<ClientesFinanceiro />} />
+                  <Route path="colaboradores" element={<ColaboradoresFinanceiro />} />
+                  <Route path="fluxo" element={<Fluxo />} />
+                  <Route path="social-selling" element={<SocialSelling />} />
+                  <Route path="configuracoes" element={<ConfiguracoesFinanceiro />} />
+                </Route>
               </Route>
               <Route path="*" element={<NotFound />} />
                 </Routes>

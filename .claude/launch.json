@@ -2,14 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "financeiro",
+      "name": "norteia",
       "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "--prefix",
-        "financeiro",
-        "run",
-        "dev"
-      ],
+      "runtimeArgs": ["run", "dev"],
       "port": 8080
     }
   ]
