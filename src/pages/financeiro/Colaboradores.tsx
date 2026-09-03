@@ -15,10 +15,20 @@ import { printReport } from "@/lib/financeiro/print-report";
 import { listarClientes } from "@/lib/financeiro/clientes";
 import { carregarConfig } from "@/lib/financeiro/configuracoes";
 import { comOrganizacao } from "@/lib/financeiro/organizacao";
+import { equipeSemFolha, listarEquipe } from "@/lib/financeiro/equipe";
 
 type Cargo = "Líder" | "Social Media" | "Gestor de Tráfego" | "Outros";
 type StatusEntrega = "Entregue no Prazo" | "Entregue com Atraso";
-type Colab = { id: string; nome: string; cargo: Cargo; salario_base: number; data_entrada: string; funcao_id: string | null };
+type Colab = {
+  id: string;
+  nome: string;
+  cargo: Cargo;
+  salario_base: number;
+  data_entrada: string;
+  funcao_id: string | null;
+  /** Pessoa da equipe no Norteia. Nulo = prestador ou quem saiu antes de ter conta. */
+  user_id: string | null;
+};
 type Funcao = { id: string; nome: string; tipo_base: string };
 type Cliente = { id: string; nome: string; valor_mensalidade: number; status: string; data_entrada: string; data_saida: string | null; pct_social_media: number; pct_trafego: number };
 type Contrato = {
@@ -495,7 +505,22 @@ export default function ColaboradoresFinanceiro() {
                 <Fragment key={c.id}>
                   <TableRow className="cursor-pointer" onClick={() => setExpanded(isOpen ? null : c.id)}>
                     <TableCell><ChevronRight className={`h-4 w-4 transition-transform ${isOpen ? "rotate-90" : ""}`} /></TableCell>
-                    <TableCell className="font-medium">{c.nome}</TableCell>
+                    <TableCell className="font-medium">
+                      <span className="flex items-center gap-1.5">
+                        {c.nome}
+                        {/* Só o não-vinculado ganha marca. Marcar os ligados
+                            seria um selo em quase toda linha; o que precisa
+                            saltar é quem ainda falta ligar a uma pessoa. */}
+                        {!c.user_id && (
+                          <span
+                            className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                            title="Não está ligado a ninguém da equipe do Norteia. Prestador, ou falta vincular."
+                          >
+                            sem vínculo
+                          </span>
+                        )}
+                      </span>
+                    </TableCell>
                     <TableCell><span className="text-xs px-2 py-1 rounded bg-muted text-muted-foreground">{c.cargo}</span></TableCell>
                     <TableCell className="text-right tabular">{formatBRL(c.salario_base)}</TableCell>
                     <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
@@ -598,6 +623,8 @@ export default function ColaboradoresFinanceiro() {
   );
 }
 
+const SEM_VINCULO = "__sem_vinculo__";
+
 function ColabDialog({ editing, onClose }: { editing: Colab | null; onClose: () => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
@@ -606,24 +633,97 @@ function ColabDialog({ editing, onClose }: { editing: Colab | null; onClose: () 
     salario_base: editing?.salario_base ?? 0,
     data_entrada: editing?.data_entrada ?? todayISO(),
     funcao_id: editing?.funcao_id ?? "",
+    user_id: editing?.user_id ?? "",
   });
   const { data: funcoes } = useSuspenseQuery({
     queryKey: ["funcoes"],
     queryFn: async () => ((await supabase.from("funcoes").select("id,nome,tipo_base").order("nome")).data ?? []) as Funcao[],
   });
+
+  // Quem ainda não está na folha, mais a pessoa já vinculada a este registro —
+  // sem ela, editar um colaborador vinculado mostraria o seletor vazio e o
+  // vínculo pareceria perdido.
+  const { data: equipe } = useSuspenseQuery({
+    queryKey: ["equipe-sem-folha", editing?.id ?? "novo"],
+    queryFn: async () => {
+      const [disponiveis, todos] = await Promise.all([equipeSemFolha(), listarEquipe()]);
+      const atual = editing?.user_id
+        ? todos.find((pessoa) => pessoa.user_id === editing.user_id)
+        : undefined;
+      return atual && !disponiveis.some((p) => p.user_id === atual.user_id)
+        ? [atual, ...disponiveis]
+        : disponiveis;
+    },
+  });
+
   const save = useMutation({
     mutationFn: async () => {
-      const payload = { ...form, funcao_id: form.funcao_id || null };
+      const payload = {
+        ...form,
+        funcao_id: form.funcao_id || null,
+        user_id: form.user_id || null,
+      };
       if (editing) { const { error } = await supabase.from("colaboradores").update(payload).eq("id", editing.id); if (error) throw error; }
       else { const { error } = await supabase.from("colaboradores").insert(await comOrganizacao(payload)); if (error) throw error; }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["colaboradores-all"] }); toast.success("Salvo"); onClose(); },
-    onError: (e: Error) => toast.error(e.message),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["colaboradores-all"] });
+      qc.invalidateQueries({ queryKey: ["equipe-sem-folha"] });
+      toast.success("Salvo");
+      onClose();
+    },
+    onError: (e: Error) => {
+      // 23505 = o índice colaboradores_pessoa_unica. Acontece quando duas abas
+      // cadastram a mesma pessoa; o texto cru do Postgres não diria isso.
+      const msg = /23505|pessoa_unica/.test(e.message)
+        ? "Esta pessoa já está na folha. Edite o cadastro existente em vez de criar outro."
+        : e.message;
+      toast.error(msg);
+    },
   });
   return (
     <DialogContent>
       <DialogHeader><DialogTitle>{editing ? "Editar colaborador" : "Novo colaborador"}</DialogTitle></DialogHeader>
       <form onSubmit={(e) => { e.preventDefault(); save.mutate(); }} className="space-y-4">
+        {/* O vínculo vem antes do nome de propósito: escolher a pessoa é o
+            caminho normal, e digitar um nome solto é a exceção (prestador, ou
+            quem saiu antes de ter conta). Sem isto, a mesma pessoa entrava na
+            folha duas vezes com grafias diferentes e cada cópia acumulava a sua
+            própria comissão. */}
+        <div className="space-y-1.5">
+          <Label>Pessoa da equipe</Label>
+          <Select
+            value={form.user_id || SEM_VINCULO}
+            onValueChange={(v) => {
+              const userId = v === SEM_VINCULO ? "" : v;
+              const pessoa = equipe.find((p) => p.user_id === userId);
+              setForm((f) => ({
+                ...f,
+                user_id: userId,
+                // Só preenche o nome vazio: numa edição, o nome da folha pode
+                // ser o do contrato, mais completo que o nome de exibição.
+                nome: f.nome.trim() ? f.nome : (pessoa?.display_name ?? ""),
+              }));
+            }}
+          >
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={SEM_VINCULO}>— fora da equipe (prestador) —</SelectItem>
+              {equipe.map((pessoa) => (
+                <SelectItem key={pessoa.user_id} value={pessoa.user_id}>
+                  {pessoa.display_name}{pessoa.job_title ? ` · ${pessoa.job_title}` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {form.user_id
+              ? "Ligado ao cadastro do Norteia — a folha e a equipe passam a falar da mesma pessoa."
+              : equipe.length === 0
+                ? "Todo mundo da equipe já está na folha. Sem vínculo, este é um prestador."
+                : "Sem vínculo, este colaborador existe só na folha."}
+          </p>
+        </div>
         <div className="space-y-1.5"><Label>Nome</Label><Input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} /></div>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
