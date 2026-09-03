@@ -225,7 +225,11 @@ function ClienteDialog({ editing, onClose }: { editing: Cliente | null; onClose:
 
   // Só quem ainda não tem ficha: oferecer um cliente já cadastrado deixaria
   // a pessoa sobrescrever a mensalidade de outro sem perceber.
-  const { data: disponiveis = [] } = useQuery({
+  const {
+    data: disponiveis = [],
+    error: erroDisponiveis,
+    isLoading: carregandoDisponiveis,
+  } = useQuery({
     queryKey: ["clientes-sem-ficha"],
     queryFn: clientesSemFicha,
     enabled: !editing,
@@ -283,9 +287,18 @@ function ClienteDialog({ editing, onClose }: { editing: Cliente | null; onClose:
             <Select value={clientId} onValueChange={setClientId}>
               <SelectTrigger><SelectValue placeholder="Escolha um cliente da carteira" /></SelectTrigger>
               <SelectContent>
-                {disponiveis.length === 0 ? (
+                {/* Lista vazia tem três causas diferentes, e tratá-las igual
+                    manda a pessoa procurar o problema no lugar errado. */}
+                {carregandoDisponiveis ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">Carregando…</div>
+                ) : erroDisponiveis ? (
+                  <div className="px-2 py-1.5 text-xs text-destructive">
+                    {(erroDisponiveis as Error).message}
+                  </div>
+                ) : disponiveis.length === 0 ? (
                   <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                    Todos os clientes já estão no financeiro.
+                    Nenhum cliente disponível. Ou todos já estão no financeiro, ou a
+                    carteira do Norteia está vazia.
                   </div>
                 ) : (
                   disponiveis.map((c) => (
