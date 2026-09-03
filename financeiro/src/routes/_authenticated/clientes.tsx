@@ -211,6 +211,7 @@ function ClienteDialog({ editing, onClose }: { editing: Cliente | null; onClose:
   // seletor da carteira do Norteia.
   const [clientId, setClientId] = useState(editing?.id ?? "");
   const [form, setForm] = useState({
+    data_entrada: editing?.data_entrada ?? "",
     data_saida: editing?.data_saida ?? "",
     data_aniversario: editing?.data_aniversario ?? "",
     status: editing?.status ?? ("Ativo" as "Ativo" | "Churn"),
@@ -284,7 +285,16 @@ function ClienteDialog({ editing, onClose }: { editing: Cliente | null; onClose:
           {editing ? (
             <Input value={editing.nome} disabled />
           ) : (
-            <Select value={clientId} onValueChange={setClientId}>
+            <Select
+              value={clientId}
+              onValueChange={(id) => {
+                setClientId(id);
+                // Abre com a data que o Norteia já tem: salvar em branco por
+                // cima apagaria o tempo de casa do cliente lá também.
+                const escolhido = disponiveis.find((c) => c.id === id);
+                setForm((f) => ({ ...f, data_entrada: escolhido?.agency_since ?? "" }));
+              }}
+            >
               <SelectTrigger><SelectValue placeholder="Escolha um cliente da carteira" /></SelectTrigger>
               <SelectContent>
                 {/* Lista vazia tem três causas diferentes, e tratá-las igual
@@ -310,11 +320,25 @@ function ClienteDialog({ editing, onClose }: { editing: Cliente | null; onClose:
           )}
           <p className="text-xs text-muted-foreground">
             {editing
-              ? "Nome e data de entrada são do cadastro no Norteia."
+              ? "O nome é do cadastro no Norteia."
               : "Cliente novo se cadastra no Norteia; aqui se diz quanto ele paga."}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label>Cliente desde</Label>
+            <Input
+              type="date"
+              max={todayISO()}
+              value={form.data_entrada}
+              onChange={(e) => setForm({ ...form, data_entrada: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">
+              {form.data_entrada
+                ? `Tempo de casa: ${monthsBetween(form.data_entrada)} meses.`
+                : "Quando o cliente entrou na agência. É daqui que sai o tempo de casa."}
+            </p>
+          </div>
           <div className="space-y-1.5">
             <Label>Status</Label>
             <Select value={form.status} onValueChange={(v: "Ativo" | "Churn") => setForm({ ...form, status: v })}>

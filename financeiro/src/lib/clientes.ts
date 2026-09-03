@@ -30,9 +30,15 @@ export interface Cliente {
   id_cliente_asaas: string | null;
 }
 
-/** Campos que a tela edita. Nome e entrada não estão aqui: são do cadastro do
- *  cliente no Norteia, e mudá-los ali muda para todo mundo. */
-export type ClienteFinanceiroInput = Omit<Cliente, "id" | "nome" | "data_entrada">;
+/**
+ * Campos que a tela edita.
+ *
+ * `data_entrada` entra aqui porque a carteira vai ser cadastrada com clientes
+ * que já são de casa há anos — sem poder informar desde quando, todo mundo
+ * nasceria com zero meses e a tabela progressiva de LTV pagaria a faixa
+ * errada. O nome continua de fora: esse é o cadastro do Norteia.
+ */
+export type ClienteFinanceiroInput = Omit<Cliente, "id" | "nome">;
 
 const SELECT =
   "client_id, status, data_saida, data_status_alterado, data_aniversario, valor_mensalidade, is_recorrente, " +
@@ -110,13 +116,42 @@ export async function salvarFichaFinanceira(
   clientId: string,
   dados: ClienteFinanceiroInput,
 ): Promise<void> {
+  const { data_entrada, ...financeiro } = dados;
+
   const { data, error } = await supabase
     .from("client_financeiro")
-    .upsert({ client_id: clientId, ...dados }, { onConflict: "client_id" })
+    .upsert({ client_id: clientId, ...financeiro }, { onConflict: "client_id" })
     .select("client_id");
   if (error) throw new Error(error.message);
   if (!data?.length) {
     throw new Error("Sem permissão para salvar os dados financeiros deste cliente.");
+  }
+
+  await salvarDataEntrada(clientId, data_entrada);
+}
+
+/**
+ * Grava desde quando o cliente é da agência.
+ *
+ * Mora em `clients.agency_since`, a mesma coluna que o Norteia usa — o tempo
+ * de casa é um só, editável de dois lugares. Guardar uma cópia aqui daria duas
+ * respostas para a mesma pergunta, e a comissão sairia da que estivesse mais
+ * desatualizada.
+ */
+export async function salvarDataEntrada(
+  clientId: string,
+  dataEntrada: string,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("clients")
+    .update({ agency_since: dataEntrada || null })
+    .eq("id", clientId)
+    .select("id");
+  if (error) throw new Error(error.message);
+  if (!data?.length) {
+    throw new Error(
+      "Os dados financeiros foram salvos, mas você não tem permissão para alterar a data de entrada no cadastro do cliente.",
+    );
   }
 }
 
@@ -134,10 +169,13 @@ export async function removerFichaFinanceira(clientId: string): Promise<void> {
 }
 
 /** Clientes do Norteia que ainda não têm ficha financeira — o que o seletor
- *  do formulário oferece. */
-export async function clientesSemFicha(): Promise<Array<{ id: string; name: string }>> {
+ *  do formulário oferece. Traz `agency_since` para o formulário já abrir com a
+ *  data que o Norteia conhece, em vez de apagá-la ao salvar em branco. */
+export async function clientesSemFicha(): Promise<
+  Array<{ id: string; name: string; agency_since: string | null }>
+> {
   const [todos, comFicha] = await Promise.all([
-    supabase.from("clients").select("id, name").order("name"),
+    supabase.from("clients").select("id, name, agency_since").order("name"),
     supabase.from("client_financeiro").select("client_id"),
   ]);
   if (todos.error) throw new Error(todos.error.message);
