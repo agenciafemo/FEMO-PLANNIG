@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { Link, useParams } from "react-router-dom";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { Slider } from "@/components/ui/slider";
+import { PlanningClientRail } from "@/components/planning/PlanningClientRail";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
@@ -49,6 +50,7 @@ type ClientRow = {
   id: string;
   name: string;
   accent_color?: string | null;
+  logo_url?: string | null;
   traffic_only?: boolean | null;
 };
 
@@ -394,6 +396,19 @@ export default function Plannings() {
     return [...porCliente.values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   }, [plannings, clients, statusFilter, filterClient, filterMonth]);
 
+  // Contadores da barra lateral. Saem de TODOS os planejamentos, não dos
+  // filtrados: a barra tem que dizer o estado de cada cliente, inclusive o que
+  // não está aparecendo por causa de um filtro ativo. Pendente = qualquer um
+  // que ainda não foi aprovado (rascunho ou em revisão).
+  const pendentesPorCliente = useMemo(() => {
+    const mapa = new Map<string, number>();
+    for (const p of (plannings ?? []) as PlanningRow[]) {
+      if (p.status === "approved") continue;
+      mapa.set(p.client_id, (mapa.get(p.client_id) ?? 0) + 1);
+    }
+    return mapa;
+  }, [plannings]);
+
   const comPlanejamento = grupos.filter((g) => g.plannings.length > 0);
   const todosAbertos = comPlanejamento.length > 0
     && comPlanejamento.every((g) => gruposAbertos.includes(g.clientId));
@@ -456,7 +471,15 @@ export default function Plannings() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="flex gap-5">
+      <PlanningClientRail
+        clients={(clients ?? []) as ClientRow[]}
+        selecionado={filterClient}
+        onSelect={setFilterClient}
+        pendentesPorCliente={pendentesPorCliente}
+        loading={isLoading}
+      />
+      <div className="min-w-0 flex-1 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Planejamentos</h1>
@@ -759,6 +782,7 @@ export default function Plannings() {
           </CardContent>
         </Card>
       )}
+      </div>
     </div>
   );
 }
