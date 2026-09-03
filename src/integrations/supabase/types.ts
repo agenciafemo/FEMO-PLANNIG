@@ -14,6 +14,31 @@ export type Database = {
   }
   graphql_public: {
     Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
+  public: {
+    Tables: {
       categorias: {
         Row: {
           organization_id: string | null
@@ -133,6 +158,7 @@ export type Database = {
       }
       colaboradores: {
         Row: {
+          user_id: string | null
           organization_id: string | null
           cargo: Database["public"]["Enums"]["cargo_colaborador"]
           created_at: string
@@ -144,6 +170,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          user_id?: string | null
           organization_id?: string | null
           cargo?: Database["public"]["Enums"]["cargo_colaborador"]
           created_at?: string
@@ -155,6 +182,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          user_id?: string | null
           organization_id?: string | null
           cargo?: Database["public"]["Enums"]["cargo_colaborador"]
           created_at?: string
@@ -656,36 +684,6 @@ export type Database = {
           },
         ]
       }
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      cargo_colaborador: "Social Media" | "Gestor de Tráfego" | "Outros" | "Líder"
-      client_status: "Ativo" | "Churn"
-      lancamento_tipo: "Entrada" | "Saída"
-      payment_status: "Pago" | "Pendente" | "Inadimplente"
-      status_entrega: "Entregue no Prazo" | "Entregue com Atraso"
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
-  public: {
-    Tables: {
       calendar_events: {
         Row: {
           all_day: boolean
@@ -3990,6 +3988,14 @@ export type Database = {
       }
     }
     Functions: {
+      gerar_mensalidades: {
+        Args: { _competencia: string }
+        Returns: number
+      }
+      has_permission: {
+        Args: { _organization_id: string; _key: string; _user_id?: string }
+        Returns: boolean
+      }
       accept_organization_invitation: {
         Args: { _token: string }
         Returns: {
@@ -5073,6 +5079,11 @@ export type Database = {
       }
     }
     Enums: {
+      cargo_colaborador: "Social Media" | "Gestor de Tráfego" | "Outros" | "Líder"
+      client_status: "Ativo" | "Churn"
+      lancamento_tipo: "Entrada" | "Saída"
+      payment_status: "Pago" | "Pendente" | "Inadimplente"
+      status_entrega: "Entregue no Prazo" | "Entregue com Atraso"
       app_role: "admin" | "collaborator" | "client"
       organization_invitation_status:
         | "pending"

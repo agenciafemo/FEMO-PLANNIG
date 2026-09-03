@@ -322,9 +322,6 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const isAdmin = useIsAdmin();
   const { role } = useOrganization();
   const canManageTeam = role === "owner" || role === "admin" || role === "manager";
-  // Esconder o menu é conforto, não segurança: a RLS e a guarda da rota
-  // é que barram de verdade quem não pode ver o financeiro.
-  const podeVerFinanceiro = usePermission("financeiro.ver");
   const [profileOpen, setProfileOpen] = useState(false);
   // Foto + nome do próprio usuário (para o bloco da conta e a saudação).
   const { data: profile } = useQuery({
