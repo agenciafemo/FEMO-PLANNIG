@@ -49,7 +49,7 @@ type ModuleCard = {
 // Só aponta para rotas que existem. Programação e Relatórios ainda não têm
 // página — ficam como "Em breve" (não clicáveis) para não gerar link quebrado.
 // "Clientes" não é mais um card próprio: a lista/criação virou a aba
-// Clientes do card "Financeiro" (administrativo), e a ficha do cliente
+// Clientes do card "Administrativo", e a ficha do cliente
 // abre a partir do Planejamento — não existe mais um destino único
 // "clientes" para apontar aqui.
 const MODULES: ModuleCard[] = [
@@ -67,11 +67,14 @@ const MODULES: ModuleCard[] = [
   { title: "Relatórios", subtitle: "Análise com IA", icon: BarChart3, isNew: true, ...(RELATORIOS_ENABLED ? { to: "/relatorios" } : { soon: true }) },
   { title: "NPS", subtitle: "Satisfação dos clientes", icon: Star, to: "/reviews" },
   {
-    title: "Financeiro",
-    subtitle: "Fluxo de caixa e folha",
+    title: "Administrativo",
+    subtitle: "Carteira, folha e fluxo de caixa",
     icon: Wallet,
-    to: "/financeiro",
+    to: "/administrativo",
     isNew: true,
+    // A chave da permissão continua "financeiro.*": é identificador interno,
+    // usado por 14 policies de RLS. Renomear exigiria reescrever todas elas
+    // para trocar um texto que ninguém vê. O rótulo, esse sim, acompanhou.
     requiresPermission: "financeiro.ver",
   },
   { title: "Cofre", subtitle: "Acessos e senhas", icon: Lock, to: "/vault" },

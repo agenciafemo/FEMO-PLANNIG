@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate, useParams, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -128,6 +128,19 @@ function ClientToPlanningRedirect() {
   return <Navigate to={`/plannings/cliente/${clientId}`} replace />;
 }
 
+/**
+ * /financeiro/* → /administrativo/*, preservando o resto do caminho.
+ *
+ * Troca só o primeiro trecho: /financeiro/fluxo cai em /administrativo/fluxo,
+ * não na raiz. Quem tiver a aba de Fluxo de Caixa favoritada continua caindo
+ * onde esperava, e não num lugar genérico que obriga a navegar de novo.
+ */
+function FinanceiroParaAdministrativo() {
+  const { pathname, search, hash } = useLocation();
+  const destino = pathname.replace(/^\/financeiro/, "/administrativo");
+  return <Navigate to={`${destino}${search}${hash}`} replace />;
+}
+
 const App = () => (
   <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
     <QueryClientProvider client={queryClient}>
@@ -178,10 +191,10 @@ const App = () => (
               >
                 <Route path="/dashboard" element={<Dashboard />} />
                 {/* Área de cliente aposentada: a lista/criação virou a aba
-                    Clientes do financeiro (administrativo), e a ficha mora no
+                    Clientes da área administrativa, e a ficha mora no
                     Planejamento (aberta a toda a equipe). Redireciona em vez
                     de remover a rota — preserva links e abas já abertos. */}
-                <Route path="/clients" element={<Navigate to="/financeiro/clientes" replace />} />
+                <Route path="/clients" element={<Navigate to="/administrativo/clientes" replace />} />
                 <Route path="/clients/:clientId" element={<ClientToPlanningRedirect />} />
                 <Route path="/plannings" element={<Plannings />} />
                 <Route path="/clients/:clientId/plannings" element={<Plannings />} />
@@ -220,11 +233,14 @@ const App = () => (
                 {/* Equipe: todos os membros podem ver. A edição de cargos/funções
                     é gated dentro da própria página (só owner/admin). */}
                 <Route path="/team/collaborators" element={<TeamCollaborators />} />
-                {/* Financeiro — só administrativo. A guarda fica no layout,
-                    então nenhuma tela nova pode nascer desprotegida por
-                    esquecimento. */}
+                {/* Área administrativa. Nasceu como "/financeiro" e passou a
+                    receber também o que não é dinheiro (carteira de clientes,
+                    equipe na folha) — por isso o nome e a URL acompanharam.
+                    A guarda fica no layout, então nenhuma tela nova pode
+                    nascer desprotegida por esquecimento. */}
+                <Route path="/financeiro/*" element={<FinanceiroParaAdministrativo />} />
                 <Route
-                  path="/financeiro"
+                  path="/administrativo"
                   element={
                     <RequireFinanceiro>
                       <FinanceiroLayout />
