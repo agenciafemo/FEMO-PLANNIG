@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
   ArrowLeftRight,
@@ -10,6 +11,7 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FinanceiroErrorBoundary } from "@/components/financeiro/FinanceiroErrorBoundary";
 
 // O financeiro tem oito telas e uma linha só na barra lateral do Norteia.
 // Estas abas são o que restou da barra própria que ele tinha quando era um app
@@ -58,7 +60,21 @@ export function FinanceiroLayout() {
           })}
         </nav>
       </div>
-      <Outlet />
+      {/* As 8 telas usam useSuspenseQuery. Sem este boundary, a primeira query
+          que suspende lança o React #426 e derruba a árvore inteira — tela
+          branca em todo o app até recarregar. No app antigo, o wrapper de rota
+          do TanStack Router cumpria este papel. */}
+      <FinanceiroErrorBoundary>
+        <Suspense
+          fallback={
+            <div className="mx-auto max-w-[1400px] px-8 py-16 text-sm text-muted-foreground">
+              Carregando…
+            </div>
+          }
+        >
+          <Outlet />
+        </Suspense>
+      </FinanceiroErrorBoundary>
     </div>
   );
 }
