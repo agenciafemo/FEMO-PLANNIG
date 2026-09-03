@@ -48,8 +48,11 @@ type ModuleCard = {
 
 // Só aponta para rotas que existem. Programação e Relatórios ainda não têm
 // página — ficam como "Em breve" (não clicáveis) para não gerar link quebrado.
+// "Clientes" não é mais um card próprio: a lista/criação virou a aba
+// Clientes do card "Financeiro" (administrativo), e a ficha do cliente
+// abre a partir do Planejamento — não existe mais um destino único
+// "clientes" para apontar aqui.
 const MODULES: ModuleCard[] = [
-  { title: "Clientes", subtitle: "Contas e marcas", icon: Users, to: "/clients" },
   { title: "Tarefas", subtitle: "Quadro da equipe", icon: ListTodo, to: "/tasks", isNew: true },
   { title: "Produção", subtitle: "Peças por etapa", icon: Workflow, to: "/producao", isNew: true },
   { title: "Ponto", subtitle: "Registro de horário", icon: Clock3, to: "/ponto", isNew: true },

@@ -14,7 +14,6 @@ import {
   Compass,
   LayoutGrid,
   ListTodo,
-  Users,
   Workflow,
   X,
 } from "lucide-react";
@@ -50,12 +49,15 @@ const PASSO_PX = 60;
  * por isso que o Dashboard vem primeiro — é o "voltar para o centro", o destino
  * mais pedido quando alguém se perde.
  */
+// "Clientes" saiu daqui: não é mais um destino único (virou aba do
+// financeiro, gated por permissão, mais o perfil dentro do Planejamento) —
+// um atalho global sem essa checagem levaria a maioria das pessoas a um
+// clique morto.
 const ATALHOS = [
   { label: "Dashboard", to: "/dashboard", Icon: Compass },
   { label: "Planejamentos", to: "/plannings", Icon: LayoutGrid },
   { label: "Produção", to: "/producao", Icon: Workflow },
   { label: "Tarefas", to: "/tasks", Icon: ListTodo },
-  { label: "Clientes", to: "/clients", Icon: Users },
   { label: "Programação", to: "/programacao", Icon: CalendarClock },
 ] as const;
 

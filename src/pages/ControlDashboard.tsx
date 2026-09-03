@@ -606,7 +606,7 @@ export default function ControlDashboard() {
           </div>
         </section>
         <section className="space-y-4">
-          <SectionHeader title="Clientes" icon={Users} action={actionLink("/clients", "Ver clientes")} />
+          <SectionHeader title="Clientes" icon={Users} action={actionLink("/financeiro/clientes", "Ver clientes")} />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
             <MetricCard label="Clientes cadastrados" value={clients.data?.length ?? <LoadingValue />} icon={Users} tone="info" />
             <MetricCard label="Com Instagram conectado" value={instagram.data ?? <LoadingValue />} icon={Instagram} tone="brand" hint="Conexão Meta ativa" />
