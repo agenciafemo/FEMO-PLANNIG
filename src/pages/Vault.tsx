@@ -17,6 +17,7 @@ import { unlockDurationLabel, type SanitizedCredential } from "@/lib/vaultRpc";
 // listagem SANITIZADA agrupada por cliente e revelar/copiar com auditoria.
 
 const MIN_MASTER_PASSWORD = 12;
+const VAULT_BREADCRUMB = [{ label: "Administrativo" }, { label: "Cofre" }];
 
 export default function Vault() {
   const {
@@ -107,7 +108,7 @@ export default function Vault() {
   if (isLegacy || !available) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Cofre" subtitle="Acessos e senhas dos clientes" />
+        <PageHeader title="Cofre" subtitle="Acessos e senhas dos clientes" breadcrumb={VAULT_BREADCRUMB} />
         <EmptyState
           icon={ShieldAlert}
           title="Cofre indisponível"
@@ -120,7 +121,7 @@ export default function Vault() {
   if (statusQuery.isLoading) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Cofre" subtitle="Acessos e senhas dos clientes" />
+        <PageHeader title="Cofre" subtitle="Acessos e senhas dos clientes" breadcrumb={VAULT_BREADCRUMB} />
         <Card className="animate-pulse"><CardContent className="h-32" /></Card>
       </div>
     );
@@ -129,7 +130,7 @@ export default function Vault() {
   if (statusQuery.isError) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Cofre" subtitle="Acessos e senhas dos clientes" />
+        <PageHeader title="Cofre" subtitle="Acessos e senhas dos clientes" breadcrumb={VAULT_BREADCRUMB} />
         <EmptyState
           icon={ShieldAlert}
           title="Não foi possível carregar o cofre"
@@ -145,7 +146,7 @@ export default function Vault() {
   if (!vault) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Cofre" subtitle="Acessos e senhas dos clientes" />
+        <PageHeader title="Cofre" subtitle="Acessos e senhas dos clientes" breadcrumb={VAULT_BREADCRUMB} />
         {canManageVault ? (
           <Card>
             <CardContent className="space-y-4 p-6">
@@ -226,6 +227,7 @@ export default function Vault() {
       <PageHeader
         title="Cofre"
         subtitle="Acessos e senhas dos clientes"
+        breadcrumb={VAULT_BREADCRUMB}
         actions={
           unlocked ? (
             <>

@@ -412,7 +412,7 @@ export default function TeamCollaborators() {
           <PageHeader
             title="Equipe / Colaboradores"
             subtitle="Organize as funções de trabalho da equipe."
-            breadcrumb={[{ label: "Gestão da equipe" }, { label: "Colaboradores" }]}
+            breadcrumb={[{ label: "Administrativo" }, { label: "Equipe" }]}
           />
           <EmptyState
             icon={UsersRound}
@@ -432,7 +432,7 @@ export default function TeamCollaborators() {
         <PageHeader
           title="Equipe"
           subtitle="Veja a equipe, os cargos e as funções de trabalho de cada pessoa."
-          breadcrumb={[{ label: "Equipe" }]}
+          breadcrumb={[{ label: "Administrativo" }, { label: "Equipe" }]}
           actions={canManage ? (
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => { setInviteLink(null); setInviteEmail(""); setInviteOpen(true); }}>

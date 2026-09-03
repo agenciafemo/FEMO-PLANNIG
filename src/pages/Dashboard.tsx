@@ -15,16 +15,13 @@ import {
   ListTodo,
   Video,
   Workflow,
-  Lock,
   Star,
   Users,
-  Users2,
   Wallet,
 } from "lucide-react";
 import { PROGRAMACAO_ENABLED, RELATORIOS_ENABLED, REUNIOES_ENABLED } from "@/lib/featureFlags";
 import { MetaReconnectAlert } from "@/components/client/MetaReconnectAlert";
 import { ClientAttentionAlert } from "@/components/client/ClientAttentionAlert";
-import { usePermission } from "@/hooks/usePermission";
 
 // Saudação pelo horário — sem depender de nenhum dado do usuário.
 function greeting(): string {
@@ -42,8 +39,6 @@ type ModuleCard = {
   soon?: boolean;
   isNew?: boolean;
   managerOnly?: boolean;
-  /** Permissão configurável que precisa estar concedida para o card aparecer. */
-  requiresPermission?: string;
 };
 
 // Só aponta para rotas que existem. Programação e Relatórios ainda não têm
@@ -68,31 +63,19 @@ const MODULES: ModuleCard[] = [
   { title: "NPS", subtitle: "Satisfação dos clientes", icon: Star, to: "/reviews" },
   {
     title: "Administrativo",
-    subtitle: "Carteira, folha e fluxo de caixa",
+    subtitle: "Clientes, equipe, cofre e financeiro",
     icon: Wallet,
     to: "/administrativo",
     isNew: true,
-    // A chave da permissão continua "financeiro.*": é identificador interno,
-    // usado por 14 policies de RLS. Renomear exigiria reescrever todas elas
-    // para trocar um texto que ninguém vê. O rótulo, esse sim, acompanhou.
-    requiresPermission: "financeiro.ver",
   },
-  { title: "Cofre", subtitle: "Acessos e senhas", icon: Lock, to: "/vault" },
-  { title: "Equipe", subtitle: "Pessoas, cargos e funções", icon: Users2, to: "/team/collaborators" },
 ];
 
 export default function Dashboard() {
   const { user } = useAuth();
   const { organizationId, isLegacy, role } = useOrganization();
   const canManageTeam = role === "owner" || role === "admin" || role === "manager";
-  // Esconder é conforto, não segurança: a RLS é quem realmente barra o
-  // financeiro. Enquanto a resposta não chega (undefined), o card fica
-  // escondido — aparecer e sumir de novo é pior do que demorar um instante.
-  const podeVerFinanceiro = usePermission("financeiro.ver");
   const visibleModules = MODULES.filter(
-    (module) =>
-      (!module.managerOnly || canManageTeam) &&
-      (!module.requiresPermission || podeVerFinanceiro === true),
+    (module) => !module.managerOnly || canManageTeam,
   );
 
   // Contagem leve só para a linha de subtítulo. Não guarda nem altera nada.

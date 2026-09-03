@@ -5,20 +5,23 @@ import {
   CalendarRange,
   LayoutDashboard,
   LineChart,
+  KeyRound,
   Settings,
   Target,
   UserCog,
   Users,
+  UsersRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FinanceiroErrorBoundary } from "@/components/financeiro/FinanceiroErrorBoundary";
+import { usePermission } from "@/hooks/usePermission";
 
 // O financeiro tem oito telas. Antes ficavam numa faixa horizontal no topo;
 // agora usam o mesmo desenho de barra lateral que Tarefas (ProjectRail) e
 // Planejamentos (PlanningClientRail) já usam — é a convenção estabelecida do
 // app para navegação secundária de uma seção.
 
-const ABAS = [
+const ABAS_FINANCEIRAS = [
   { to: "/administrativo", label: "Visão Geral", icon: LayoutDashboard, exata: true },
   { to: "/administrativo/anual", label: "Anual", icon: CalendarRange },
   { to: "/administrativo/analitico", label: "Analítico", icon: LineChart },
@@ -29,10 +32,21 @@ const ABAS = [
   { to: "/administrativo/configuracoes", label: "Configurações", icon: Settings },
 ] as const;
 
+const ABAS_GERAIS = [
+  { to: "/administrativo/equipe", label: "Equipe e acessos", icon: UsersRound },
+  { to: "/administrativo/cofre", label: "Cofre", icon: KeyRound },
+] as const;
+
+type AbaAdministrativa = (typeof ABAS_FINANCEIRAS)[number] | (typeof ABAS_GERAIS)[number];
+
 export function FinanceiroLayout() {
   const { pathname } = useLocation();
+  const podeVerFinanceiro = usePermission("financeiro.ver");
+  const abas: readonly AbaAdministrativa[] = podeVerFinanceiro
+    ? [...ABAS_GERAIS, ...ABAS_FINANCEIRAS]
+    : ABAS_GERAIS;
 
-  const ativa = (aba: (typeof ABAS)[number]) =>
+  const ativa = (aba: AbaAdministrativa) =>
     "exata" in aba && aba.exata ? pathname === aba.to : pathname.startsWith(aba.to);
 
   return (
@@ -42,7 +56,7 @@ export function FinanceiroLayout() {
           (rail + conteúdo) lado a lado numa tela estreita. */}
       <aside className="sticky top-20 hidden w-[220px] shrink-0 flex-col self-start rounded-2xl border border-border/60 bg-muted/25 p-2 lg:flex">
         <div className="space-y-0.5">
-          {ABAS.map((aba) => (
+          {abas.map((aba) => (
             <Link
               key={aba.to}
               to={aba.to}
@@ -63,7 +77,7 @@ export function FinanceiroLayout() {
       {/* Mesmas abas, em faixa rolável: o que a barra lateral fazia sozinha
           numa tela larga, isto substitui numa estreita. Nunca as duas juntas. */}
       <nav className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-3 lg:hidden">
-        {ABAS.map((aba) => (
+        {abas.map((aba) => (
           <Link
             key={aba.to}
             to={aba.to}
