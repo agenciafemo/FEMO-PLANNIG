@@ -72,6 +72,98 @@ export class GoogleBusinessFunctionError extends Error {
   }
 }
 
+/**
+ * Por que a consulta de status falhou.
+ *
+ * A tela mostrava "a integração precisa da migration e das Edge Functions"
+ * para QUALQUER falha aqui. Quando a migration estava aplicada e o problema
+ * era outro, essa frase mandava quem investigava para o lugar errado — foi o
+ * que aconteceu no primeiro teste real da integração.
+ */
+export type GoogleBusinessStatusFalha =
+  /** A função não existe neste banco: migration não aplicada AQUI. */
+  | "migration_ausente"
+  /** A função existe, mas o papel atual não pode executá-la (GRANT). */
+  | "sem_permissao"
+  /** Sem sessão válida — nada a ver com a integração. */
+  | "sessao_invalida"
+  /** A função respondeu, mas sem nenhuma linha. */
+  | "sem_resposta"
+  | "desconhecida";
+
+export class GoogleBusinessStatusError extends Error {
+  constructor(
+    public readonly falha: GoogleBusinessStatusFalha,
+    /** Código cru do Postgres/PostgREST, para quem for diagnosticar. */
+    public readonly codigoTecnico: string | null,
+    mensagemOriginal: string,
+  ) {
+    super(mensagemOriginal);
+    this.name = "GoogleBusinessStatusError";
+  }
+}
+
+/**
+ * Traduz o erro do PostgREST em causa.
+ *
+ * PGRST202 é "função não encontrada" — o sintoma de apontar para um banco sem
+ * a migration, que é diferente de tê-la aplicada e esbarrar em permissão
+ * (42501). Distinguir os dois é o que evita procurar migration que já existe.
+ */
+function classificarFalhaDeStatus(erro: unknown): GoogleBusinessStatusError {
+  const e = (erro ?? {}) as { code?: string; message?: string; status?: number };
+  const codigo = e.code ?? null;
+  const mensagem = e.message ?? "Falha ao consultar o status do Google.";
+
+  if (codigo === "PGRST202") {
+    return new GoogleBusinessStatusError("migration_ausente", codigo, mensagem);
+  }
+  if (codigo === "42501") {
+    return new GoogleBusinessStatusError("sem_permissao", codigo, mensagem);
+  }
+  if (e.status === 401 || codigo === "PGRST301") {
+    return new GoogleBusinessStatusError("sessao_invalida", codigo, mensagem);
+  }
+  return new GoogleBusinessStatusError("desconhecida", codigo, mensagem);
+}
+
+/** Texto para a tela, por causa. */
+export function googleBusinessStatusMessage(
+  erro: unknown,
+): { titulo: string; detalhe: string; codigo: string | null } {
+  const e = erro instanceof GoogleBusinessStatusError
+    ? erro
+    : classificarFalhaDeStatus(erro);
+
+  const porFalha: Record<GoogleBusinessStatusFalha, { titulo: string; detalhe: string }> = {
+    migration_ausente: {
+      titulo: "Integração não instalada neste ambiente",
+      detalhe:
+        "A migration do Perfil da Empresa não foi aplicada no banco que este site está usando. Em produção ela já existe — se você está em localhost, o .env aponta para o ambiente de teste.",
+    },
+    sem_permissao: {
+      titulo: "Sem permissão para ler o status",
+      detalhe:
+        "A função existe, mas seu usuário não pode executá-la. Normalmente é o GRANT da função, que se perde quando ela é recriada.",
+    },
+    sessao_invalida: {
+      titulo: "Sessão expirada",
+      detalhe: "Entre novamente para ver a conexão do Google.",
+    },
+    sem_resposta: {
+      titulo: "Status indisponível",
+      detalhe:
+        "A consulta respondeu sem dados para este cliente. Recarregue a página; se persistir, avise o suporte.",
+    },
+    desconhecida: {
+      titulo: "Não foi possível ler o status do Google",
+      detalhe: e.message,
+    },
+  };
+
+  return { ...porFalha[e.falha], codigo: e.codigoTecnico };
+}
+
 async function invokeGoogleBusiness<T>(
   functionName: string,
   body: Record<string, unknown>,
@@ -97,9 +189,15 @@ export async function getGoogleBusinessStatus(
     "get_google_business_connection_status",
     { _organization_id: organizationId, _client_id: clientId },
   );
-  if (error) throw error;
+  if (error) throw classificarFalhaDeStatus(error);
   const status = data?.[0];
-  if (!status) throw new Error("google_business_status_unavailable");
+  if (!status) {
+    throw new GoogleBusinessStatusError(
+      "sem_resposta",
+      null,
+      "google_business_status_unavailable",
+    );
+  }
   return status;
 }
 

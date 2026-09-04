@@ -22,6 +22,7 @@ import { useOrganization } from "@/hooks/useOrganization";
 import {
   getGoogleBusinessStatus,
   googleBusinessErrorMessage,
+  googleBusinessStatusMessage,
   GoogleBusinessFunctionError,
   listGoogleBusinessLocations,
   selectGoogleBusinessLocation,
@@ -115,12 +116,31 @@ export function GoogleBusinessConnection({ clientId }: { clientId: string }) {
   }
 
   if (statusQuery.isError) {
+    // Antes, qualquer falha aqui dizia "precisa da migration e das Edge
+    // Functions" — inclusive quando as duas existiam. A causa vem classificada
+    // da lib, e o código técnico fica visível para quem for diagnosticar.
+    const { titulo, detalhe, codigo } = googleBusinessStatusMessage(
+      statusQuery.error,
+    );
     return (
       <div className="rounded-2xl border border-warning/30 bg-warning-soft/30 p-4 text-sm">
-        <p className="font-medium">Perfil da Empresa ainda não configurado</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          A integração precisa da migration e das Edge Functions no Supabase.
-        </p>
+        <p className="font-medium">{titulo}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{detalhe}</p>
+        <div className="mt-2 flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => statusQuery.refetch()}
+            disabled={statusQuery.isFetching}
+          >
+            {statusQuery.isFetching ? "Tentando…" : "Tentar de novo"}
+          </Button>
+          {codigo && (
+            <span className="font-mono text-[10px] text-muted-foreground/70">
+              {codigo}
+            </span>
+          )}
+        </div>
       </div>
     );
   }
