@@ -334,13 +334,25 @@ export function normalizeGoogleBusinessInsights(
   payload: Record<string, unknown>,
 ): GoogleBusinessNormalizedInsights {
   const daily = new Map<string, GoogleBusinessDailyInsights>();
-  const series = Array.isArray(payload.multiDailyMetricTimeSeries)
+  const grupos = Array.isArray(payload.multiDailyMetricTimeSeries)
     ? payload.multiDailyMetricTimeSeries
     : [];
 
-  for (const rawSeries of series) {
-    if (!rawSeries || typeof rawSeries !== "object") continue;
-    const metricSeries = rawSeries as Record<string, unknown>;
+  // A resposta aninha em DOIS níveis: cada item de multiDailyMetricTimeSeries
+  // carrega um array dailyMetricTimeSeries, e é nele que vivem dailyMetric e
+  // timeSeries. Ler o par um nível acima não dá erro nenhum — só não encontra
+  // nada, e o relatório inteiro sai zerado com a chamada tendo "funcionado".
+  const series: Record<string, unknown>[] = [];
+  for (const grupo of grupos) {
+    if (!grupo || typeof grupo !== "object") continue;
+    const pares = (grupo as Record<string, unknown>).dailyMetricTimeSeries;
+    if (!Array.isArray(pares)) continue;
+    for (const par of pares) {
+      if (par && typeof par === "object") series.push(par as Record<string, unknown>);
+    }
+  }
+
+  for (const metricSeries of series) {
     const metric = metricSeries.dailyMetric;
     if (typeof metric !== "string" || !(metric in METRIC_FIELD)) continue;
     const field = METRIC_FIELD[metric as keyof typeof METRIC_FIELD];
