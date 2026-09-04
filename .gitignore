@@ -38,3 +38,6 @@ dist-ssr
 
 # Credenciais locais de integrações — nunca versionar
 IDS/
+
+.vercel/
+.env.local

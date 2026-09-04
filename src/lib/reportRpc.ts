@@ -3,6 +3,7 @@
 // RLS). Nenhuma chave ou lógica de IA vive no frontend.
 
 import { invokeEdge } from "@/lib/edgeInvoke";
+import type { GoogleBusinessInsights } from "@/lib/googleBusiness";
 
 export interface ReportResult {
   analysis: string;
@@ -22,6 +23,7 @@ export interface ReportResult {
     engajamento_total_dos_posts_recentes: number;
     posts_recentes_analisados: number;
   } | null;
+  metricas_google?: GoogleBusinessInsights["insights"]["totals"] | null;
 }
 
 export async function generateReport(input: {
@@ -29,6 +31,7 @@ export async function generateReport(input: {
   from?: string; // ISO; default: últimos 30 dias (no servidor)
   to?: string; // ISO
   insights?: MetaInsights | null; // métricas já buscadas, para a IA analisar
+  googleBusiness?: GoogleBusinessInsights | null;
 }): Promise<ReportResult> {
   const { data, error } = await invokeEdge("generate-report", {
     body: {
@@ -36,6 +39,7 @@ export async function generateReport(input: {
       from: input.from,
       to: input.to,
       insights: input.insights ?? undefined,
+      google_business: input.googleBusiness ?? undefined,
     },
   });
   if (error) throw error;
