@@ -39,20 +39,20 @@ function fullDateBR(iso: string) {
 }
 
 const STATUS_FILTROS = [
-  { key: "Pendente", label: "Pendentes", dot: "bg-rose-500", chip: "bg-rose-50 text-rose-700 ring-rose-200" },
-  { key: "Agendado", label: "Agendados", dot: "bg-amber-400", chip: "bg-amber-50 text-amber-700 ring-amber-200" },
-  { key: "Pago", label: "Confirmados", dot: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  { key: "Pendente", label: "Pendentes", dot: "bg-destructive", chip: "bg-destructive/10 text-destructive ring-destructive/30" },
+  { key: "Agendado", label: "Agendados", dot: "bg-warning", chip: "bg-warning-soft text-warning ring-warning/30" },
+  { key: "Pago", label: "Confirmados", dot: "bg-success", chip: "bg-success-soft text-success ring-success/30" },
   { key: "Conciliado", label: "Conciliados", dot: "bg-sky-500", chip: "bg-sky-50 text-sky-700 ring-sky-200" },
 ] as const;
 
 function statusColor(s: string) {
   switch (s) {
-    case "Pago": return "bg-emerald-500";
-    case "Pendente": return "bg-rose-500";
-    case "Agendado": return "bg-amber-400";
+    case "Pago": return "bg-success";
+    case "Pendente": return "bg-destructive";
+    case "Agendado": return "bg-warning";
     case "Conciliado": return "bg-sky-500";
-    case "Inadimplente": return "bg-rose-600";
-    default: return "bg-zinc-300";
+    case "Inadimplente": return "bg-destructive";
+    default: return "bg-border";
   }
 }
 
@@ -245,21 +245,21 @@ export default function Fluxo() {
     setContasSel((curr) => (curr.includes(id) ? curr.filter((x) => x !== id) : [...curr, id]));
 
   return (
-    <div className="relative min-h-[calc(100vh-4rem)] bg-zinc-50/60">
+    <div className="relative min-h-[calc(100vh-4rem)] bg-surface-muted">
       {/* HEADER */}
-      <header className="sticky top-0 z-30 border-b bg-white/80 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b bg-card/80 backdrop-blur">
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-6 py-3 sm:flex sm:justify-between">
           <div className="flex min-w-0 items-center gap-4">
-            <h1 className="truncate text-lg font-semibold tracking-tight text-zinc-900">Lançamentos de caixa</h1>
-            <div className="hidden sm:flex items-center rounded-lg border bg-white p-0.5">
+            <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">Lançamentos de caixa</h1>
+            <div className="hidden sm:flex items-center rounded-lg border bg-card p-0.5">
               {([
                 ["grid", LayoutGrid, "Grade"],
                 ["list", List, "Lista"],
                 ["cal", CalIcon, "Calendário"],
               ] as const).map(([k, Icon, label]) => (
                 <button key={k} title={label} onClick={() => setView(k)}
-                  className={cn("inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition",
-                    view === k && "bg-zinc-900 text-white")}>
+                  className={cn("inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition",
+                    view === k && "bg-foreground text-background")}>
                   <Icon className="h-3.5 w-3.5" />
                 </button>
               ))}
@@ -270,26 +270,26 @@ export default function Fluxo() {
               variant="outline"
               disabled={gerarMensalidades.isPending}
               onClick={() => gerarMensalidades.mutate()}
-              className="h-9 gap-1.5 bg-white px-3.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+              className="h-9 gap-1.5 bg-card px-3.5 text-sm font-semibold text-foreground hover:bg-surface-muted"
             >
               <RotateCw className={cn("h-4 w-4", gerarMensalidades.isPending && "animate-spin")} />
               Gerar cobranças dos clientes
             </Button>
             <Button
               onClick={() => { setEditing(null); setOpen(true); }}
-              className="h-9 gap-1.5 bg-emerald-500 px-3.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600"
+              className="h-9 gap-1.5 bg-brand px-3.5 text-sm font-semibold text-brand-foreground shadow-sm hover:bg-brand/90"
             >
               <Plus className="h-4 w-4" /> Novo Lançamento
             </Button>
-            <Button size="icon" variant="ghost" className="h-8 w-8 text-zinc-500"><Search className="h-4 w-4" /></Button>
-            <Button size="icon" variant="ghost" className="h-8 w-8 text-zinc-500"><HelpCircle className="h-4 w-4" /></Button>
-            <Button size="icon" variant="ghost" className="h-8 w-8 text-zinc-500 relative">
+            <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground"><Search className="h-4 w-4" /></Button>
+            <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground"><HelpCircle className="h-4 w-4" /></Button>
+            <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground relative">
               <Bell className="h-4 w-4" />
-              <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-rose-500" />
+              <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-destructive" />
             </Button>
-            <div className="ml-1 flex items-center gap-2 rounded-full border bg-white pl-3 pr-1.5 py-1">
-              <span className="text-xs font-medium text-zinc-700">FEMO Agência</span>
-              <div className="grid h-6 w-6 place-items-center rounded-full bg-zinc-900 text-[10px] font-semibold text-white">FM</div>
+            <div className="ml-1 flex items-center gap-2 rounded-full border bg-card pl-3 pr-1.5 py-1">
+              <span className="text-xs font-medium text-foreground">FEMO Agência</span>
+              <div className="grid h-6 w-6 place-items-center rounded-full bg-foreground text-[10px] font-semibold text-background">FM</div>
             </div>
           </div>
 
@@ -300,7 +300,7 @@ export default function Fluxo() {
       <div className="grid gap-6 px-6 py-6 lg:grid-cols-[360px_minmax(0,1fr)]">
         {/* COLUNA ESQUERDA */}
         <aside className="space-y-6">
-          <section className="rounded-2xl border bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.08)]">
+          <section className="rounded-2xl border bg-card p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.08)]">
             {/* Seletor de período */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1">
@@ -314,7 +314,7 @@ export default function Fluxo() {
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
-              <div className="flex items-center gap-1 text-zinc-400">
+              <div className="flex items-center gap-1 text-muted-foreground/70">
                 <CalendarDays className="h-4 w-4" />
                 <Settings2 className="h-4 w-4" />
               </div>
@@ -322,7 +322,7 @@ export default function Fluxo() {
 
             {/* Tabela contas */}
             <div className="mt-5">
-              <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-1 pb-2 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+              <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-1 pb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
                 <span>Conta</span>
                 <span className="text-right">Confirmado</span>
                 <span className="text-right">Projetado</span>
@@ -336,42 +336,42 @@ export default function Fluxo() {
                       <label className="flex items-center gap-2.5 cursor-pointer">
                         <Checkbox checked={checked} onCheckedChange={() => toggleConta(c.id)} />
                         <span className="h-2 w-2 rounded-full" style={{ background: c.cor }} />
-                        <span className="text-sm text-zinc-700">{c.nome}</span>
+                        <span className="text-sm text-foreground">{c.nome}</span>
                       </label>
-                      <span className="text-right text-sm tabular-nums text-emerald-600">{formatBRL(t.conf)}</span>
-                      <span className="text-right text-sm tabular-nums text-emerald-400/80">{formatBRL(t.proj)}</span>
+                      <span className="text-right text-sm tabular-nums text-success">{formatBRL(t.conf)}</span>
+                      <span className="text-right text-sm tabular-nums text-success/70">{formatBRL(t.proj)}</span>
                     </li>
                   );
                 })}
                 <li className="grid grid-cols-[1fr_auto_auto] items-center gap-3 pt-3 text-sm font-medium">
-                  <span className="text-zinc-900">Total</span>
-                  <span className="text-right tabular-nums text-emerald-700">{formatBRL(totalConf)}</span>
-                  <span className="text-right tabular-nums text-emerald-500/80">{formatBRL(totalProj)}</span>
+                  <span className="text-foreground">Total</span>
+                  <span className="text-right tabular-nums text-success">{formatBRL(totalConf)}</span>
+                  <span className="text-right tabular-nums text-success/80">{formatBRL(totalProj)}</span>
                 </li>
               </ul>
             </div>
           </section>
 
           {/* Resultados */}
-          <section className="rounded-2xl border bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.08)]">
+          <section className="rounded-2xl border bg-card p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.08)]">
             <div className="flex items-baseline justify-between">
-              <h3 className="text-sm font-semibold text-zinc-900">Resultados</h3>
-              <span className="text-[10px] uppercase tracking-wider text-zinc-400">R$</span>
+              <h3 className="text-sm font-semibold text-foreground">Resultados</h3>
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">R$</span>
             </div>
             <dl className="mt-4 space-y-3 text-sm">
               <div className="flex items-center justify-between">
-                <dt className="text-zinc-600">Entradas <span className="text-zinc-400">(receitas + transferências)</span></dt>
-                <dd className="tabular-nums font-medium text-emerald-600">+ {formatBRL(entradas)}</dd>
+                <dt className="text-muted-foreground">Entradas <span className="text-muted-foreground/70">(receitas + transferências)</span></dt>
+                <dd className="tabular-nums font-medium text-success">+ {formatBRL(entradas)}</dd>
               </div>
               <div className="flex items-center justify-between">
-                <dt className="text-zinc-600">Saídas <span className="text-zinc-400">(despesas + transferências)</span></dt>
-                <dd className="tabular-nums font-medium text-rose-600">− {formatBRL(saidas)}</dd>
+                <dt className="text-muted-foreground">Saídas <span className="text-muted-foreground/70">(despesas + transferências)</span></dt>
+                <dd className="tabular-nums font-medium text-destructive">− {formatBRL(saidas)}</dd>
               </div>
-              <div className="my-2 h-px bg-zinc-100" />
+              <div className="my-2 h-px bg-muted" />
               <div className="flex items-center justify-between">
-                <dt className="text-sm font-semibold text-zinc-900">Resultado líquido</dt>
+                <dt className="text-sm font-semibold text-foreground">Resultado líquido</dt>
                 <dd className={cn("tabular-nums text-base font-semibold",
-                  resultado >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                  resultado >= 0 ? "text-success" : "text-destructive")}>
                   {resultado >= 0 ? "+ " : "− "}{formatBRL(Math.abs(resultado))}
                 </dd>
               </div>
@@ -382,10 +382,10 @@ export default function Fluxo() {
         {/* COLUNA DIREITA */}
         <main className="space-y-4">
           {/* Filtros */}
-          <div className="space-y-3 rounded-2xl border bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.08)]">
+          <div className="space-y-3 rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.08)]">
             <div className="grid gap-3 xl:grid-cols-[minmax(180px,1.4fr)_minmax(160px,1fr)_minmax(160px,1fr)_minmax(160px,1fr)]">
               <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
                 <Input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar lançamento, cliente, categoria…" className="pl-9" />
               </div>
               <Select value={categoriaFiltro} onValueChange={setCategoriaFiltro}>
@@ -420,7 +420,7 @@ export default function Fluxo() {
                 <button key={key} onClick={() => setTipoFiltro(key)}
                   className={cn(
                     "inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ring-1 transition",
-                    tipoFiltro === key ? "bg-zinc-900 text-white ring-zinc-900" : "bg-white text-zinc-600 ring-zinc-200 hover:bg-zinc-50",
+                    tipoFiltro === key ? "bg-foreground text-background ring-foreground" : "bg-card text-muted-foreground ring-border hover:bg-surface-muted",
                   )}>
                   {label}
                 </button>
@@ -448,14 +448,14 @@ export default function Fluxo() {
                 setColaboradorFiltro("all");
                 setBusca("");
                 setContasSel(CONTAS.map((c) => c.id));
-              }} className="text-xs font-medium text-zinc-500 hover:text-zinc-900">limpar filtros</button>
+              }} className="text-xs font-medium text-muted-foreground hover:text-foreground">limpar filtros</button>
             )}
             </div>
           </div>
 
           {/* Lista de lançamentos */}
-          <section className="overflow-hidden rounded-2xl border bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.08)]">
-            <div className="flex items-center justify-between gap-3 border-b bg-zinc-50/60 px-5 py-2.5">
+          <section className="overflow-hidden rounded-2xl border bg-card shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.08)]">
+            <div className="flex items-center justify-between gap-3 border-b bg-surface-muted px-5 py-2.5">
               <div className="flex items-center gap-3">
                 <Checkbox
                   checked={linhas.length > 0 && linhas.every(({ l }) => selected.has(l.id))}
@@ -466,9 +466,9 @@ export default function Fluxo() {
                   aria-label="Selecionar todos"
                 />
                 {selected.size > 0 ? (
-                  <span className="text-xs font-medium text-zinc-700">{selected.size} selecionado(s)</span>
+                  <span className="text-xs font-medium text-foreground">{selected.size} selecionado(s)</span>
                 ) : (
-                  <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">Saldo anterior</span>
+                  <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Saldo anterior</span>
                 )}
               </div>
               {selected.size > 0 ? (
@@ -491,14 +491,14 @@ export default function Fluxo() {
                   </Button>
                 </div>
               ) : (
-                <span className={cn("text-sm tabular-nums font-medium", saldoAnterior >= 0 ? "text-zinc-700" : "text-rose-600")}>
+                <span className={cn("text-sm tabular-nums font-medium", saldoAnterior >= 0 ? "text-foreground" : "text-destructive")}>
                   {formatBRL(saldoAnterior)}
                 </span>
               )}
             </div>
 
             {linhas.length === 0 ? (
-              <div className="px-5 py-16 text-center text-sm text-zinc-400">Nenhum lançamento no período.</div>
+              <div className="px-5 py-16 text-center text-sm text-muted-foreground/70">Nenhum lançamento no período.</div>
             ) : (
               <ul className="divide-y divide-zinc-100">
                 {linhas.map(({ l, valor, saldo }) => {
@@ -517,8 +517,8 @@ export default function Fluxo() {
                   const isSel = selected.has(l.id);
                   return (
                     <li key={l.id} className={cn(
-                      "group grid grid-cols-[auto_auto_86px_minmax(0,1fr)_auto_auto_auto] items-center gap-3 px-5 py-3 hover:bg-zinc-50/70",
-                      isSel && "bg-emerald-50/40",
+                      "group grid grid-cols-[auto_auto_86px_minmax(0,1fr)_auto_auto_auto] items-center gap-3 px-5 py-3 hover:bg-surface-muted/70",
+                      isSel && "bg-brand-soft/40",
                     )}>
                       <Checkbox
                         checked={isSel}
@@ -535,7 +535,7 @@ export default function Fluxo() {
                         <PopoverTrigger asChild>
                           <button
                             type="button"
-                            className={cn("h-3 w-3 rounded-full ring-2 ring-white shadow cursor-pointer hover:scale-125 transition", statusColor(l.status_pagamento))}
+                            className={cn("h-3 w-3 rounded-full ring-2 ring-background shadow cursor-pointer hover:scale-125 transition", statusColor(l.status_pagamento))}
                             title={`${l.status_pagamento} — clique para alterar`}
                             aria-label="Alterar status"
                           />
@@ -548,8 +548,8 @@ export default function Fluxo() {
                                 type="button"
                                 onClick={() => updateStatus.mutate({ id: l.id, status: st })}
                                 className={cn(
-                                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-zinc-100",
-                                  l.status_pagamento === st && "bg-zinc-50 font-medium",
+                                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted",
+                                  l.status_pagamento === st && "bg-surface-muted font-medium",
                                 )}
                               >
                                 <span className={cn("h-2.5 w-2.5 rounded-full", statusColor(st))} />
@@ -559,40 +559,40 @@ export default function Fluxo() {
                           </div>
                         </PopoverContent>
                       </Popover>
-                      <span className="text-xs tabular-nums text-zinc-500">{dateStr}</span>
+                      <span className="text-xs tabular-nums text-muted-foreground">{dateStr}</span>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="truncate text-[13px] font-semibold uppercase tracking-wide text-zinc-800">{principal}</span>
-                          {confirmado && <CheckCheck className="h-3.5 w-3.5 shrink-0 text-emerald-500" />}
-                          {l.is_recorrente && <RotateCw className="h-3 w-3 shrink-0 text-zinc-400" />}
+                          <span className="truncate text-[13px] font-semibold uppercase tracking-wide text-foreground">{principal}</span>
+                          {confirmado && <CheckCheck className="h-3.5 w-3.5 shrink-0 text-success" />}
+                          {l.is_recorrente && <RotateCw className="h-3 w-3 shrink-0 text-muted-foreground/70" />}
                         </div>
                         <div className="mt-0.5 flex flex-wrap gap-1.5">
                           {tags.map((t, i) => (
-                            <span key={i} className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">{t}</span>
+                            <span key={i} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{t}</span>
                           ))}
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
                         {l.link_boleto && (
                           <a href={l.link_boleto} target="_blank" rel="noreferrer"
-                            className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700" title="Boleto">
+                            className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground/70 hover:bg-muted hover:text-foreground" title="Boleto">
                             <FileText className="h-3.5 w-3.5" />
                           </a>
                         )}
                         {l.codigo_pix && (
                           <button onClick={async () => { await navigator.clipboard.writeText(l.codigo_pix ?? ""); toast.success("Pix copiado"); }}
-                            className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700" title="Pix">
+                            className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground/70 hover:bg-muted hover:text-foreground" title="Pix">
                             <Copy className="h-3.5 w-3.5" />
                           </button>
                         )}
                       </div>
                       <span className={cn("min-w-[110px] text-right text-sm tabular-nums font-semibold",
-                        valor >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                        valor >= 0 ? "text-success" : "text-destructive")}>
                         {valor >= 0 ? "+ " : "− "}{formatBRL(Math.abs(valor))}
                       </span>
                       <div className="flex items-center gap-2">
                         <span className={cn("min-w-[100px] text-right text-xs tabular-nums",
-                          saldo >= 0 ? "text-zinc-500" : "text-rose-500")}>
+                          saldo >= 0 ? "text-muted-foreground" : "text-destructive")}>
                           {formatBRL(saldo)}
                         </span>
                         <RowMenu onEdit={() => { setEditing(l); setOpen(true); }}
@@ -610,28 +610,21 @@ export default function Fluxo() {
 
       {/* Alerta flutuante */}
       {alertOpen && (
-        <div className="fixed right-6 top-20 z-40 flex w-[320px] items-start gap-3 rounded-xl border border-rose-200 bg-rose-50/95 p-3 pr-2 shadow-lg backdrop-blur">
-          <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-rose-500 text-white">
+        <div className="fixed right-6 top-20 z-40 flex w-[320px] items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 pr-2 shadow-lg backdrop-blur">
+          <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-destructive text-destructive-foreground">
             <Bell className="h-3.5 w-3.5" />
           </span>
-          <button className="flex-1 text-left text-sm text-rose-800 hover:text-rose-900">
+          <button className="flex-1 text-left text-sm text-destructive hover:text-destructive">
             <strong className="block text-[13px] font-semibold">Alerta de vencimento de contas</strong>
-            <span className="text-xs text-rose-700/80">Clique para detalhar</span>
+            <span className="text-xs text-destructive/80">Clique para detalhar</span>
           </button>
-          <button onClick={() => setAlertOpen(false)} className="grid h-6 w-6 place-items-center rounded-md text-rose-500 hover:bg-rose-100">
+          <button onClick={() => setAlertOpen(false)} className="grid h-6 w-6 place-items-center rounded-md text-destructive hover:bg-destructive/20">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
 
-      {/* FAB */}
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditing(null); }}>
-        <DialogTrigger asChild>
-          <button onClick={() => setEditing(null)}
-            className="fixed bottom-8 right-8 z-40 grid h-14 w-14 place-items-center rounded-full bg-emerald-500 text-white shadow-[0_10px_30px_-8px_rgba(16,185,129,0.6)] transition hover:bg-emerald-600 hover:scale-105">
-            <Plus className="h-6 w-6" />
-          </button>
-        </DialogTrigger>
         <LancDialog key={editing?.id ?? "novo"} editing={editing} cats={data.cats} clis={data.clis} colabs={data.colabs} onClose={() => setOpen(false)} />
       </Dialog>
     </div>
@@ -643,25 +636,25 @@ function RowMenu({ onEdit, onDelete, onCancelRec }: { onEdit: () => void; onDele
   return (
     <div className="relative">
       <button onClick={() => setOpen((v) => !v)}
-        className="grid h-7 w-7 place-items-center rounded-md text-zinc-400 opacity-0 hover:bg-zinc-100 hover:text-zinc-700 group-hover:opacity-100">
+        className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100">
         <MoreHorizontal className="h-4 w-4" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-8 z-50 w-44 overflow-hidden rounded-lg border bg-white py-1 shadow-lg">
+          <div className="absolute right-0 top-8 z-50 w-44 overflow-hidden rounded-lg border bg-card py-1 shadow-lg">
             <button onClick={() => { setOpen(false); onEdit(); }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50">
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-surface-muted">
               <Pencil className="h-3 w-3" /> Editar
             </button>
             {onCancelRec && (
               <button onClick={() => { setOpen(false); onCancelRec(); }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-50">
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-warning hover:bg-warning-soft">
                 <RotateCw className="h-3 w-3" /> Cancelar recorrência
               </button>
             )}
             <button onClick={() => { setOpen(false); onDelete(); }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50">
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10">
               <Trash2 className="h-3 w-3" /> Excluir
             </button>
           </div>
@@ -742,15 +735,15 @@ function LancDialog({ editing, cats, clis, colabs, onClose }: { editing: Lanc | 
       </DialogHeader>
       <form onSubmit={(e) => { e.preventDefault(); save.mutate(); }} className="space-y-5">
         {/* Tipo — Tabs */}
-        <div className="grid grid-cols-2 gap-1 rounded-lg bg-zinc-100 p-1">
+        <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
           <button type="button" onClick={() => setForm({ ...form, tipo: "Entrada", categoria_id: "" })}
             className={cn("rounded-md py-2 text-sm font-medium transition",
-              isEntrada ? "bg-white text-emerald-700 shadow-sm" : "text-zinc-500 hover:text-zinc-800")}>
+              isEntrada ? "bg-card text-success shadow-sm" : "text-muted-foreground hover:text-foreground")}>
             Contas a Receber
           </button>
           <button type="button" onClick={() => setForm({ ...form, tipo: "Saída", categoria_id: "" })}
             className={cn("rounded-md py-2 text-sm font-medium transition",
-              !isEntrada ? "bg-white text-rose-700 shadow-sm" : "text-zinc-500 hover:text-zinc-800")}>
+              !isEntrada ? "bg-card text-destructive shadow-sm" : "text-muted-foreground hover:text-foreground")}>
             Contas a Pagar
           </button>
         </div>
@@ -813,7 +806,7 @@ function LancDialog({ editing, cats, clis, colabs, onClose }: { editing: Lanc | 
           </div>
           <div className="space-y-1.5">
             <Label>Conta Destino</Label>
-            <div className="flex h-10 items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700">
+            <div className="flex h-10 items-center gap-2 rounded-md border border-border bg-surface-muted px-3 text-sm text-foreground">
               <span className="h-2 w-2 rounded-full" style={{ background: "#3FA535" }} />
               Sicredi PJ
             </div>
@@ -846,22 +839,22 @@ function LancDialog({ editing, cats, clis, colabs, onClose }: { editing: Lanc | 
         )}
 
         {!editing && (
-          <div className="rounded-lg border bg-zinc-50 p-3 space-y-3">
+          <div className="rounded-lg border bg-surface-muted p-3 space-y-3">
             <label className="flex items-center gap-2 cursor-pointer">
               <Checkbox checked={recorrente} onCheckedChange={(v) => setRecorrente(!!v)} />
               <span className="text-sm font-medium">Lançamento recorrente</span>
             </label>
             {recorrente && (
               <>
-                <div className="grid grid-cols-2 gap-1 rounded-md bg-white p-1 border">
+                <div className="grid grid-cols-2 gap-1 rounded-md bg-card p-1 border">
                   <button type="button" onClick={() => setRecTipo("n_meses")}
                     className={cn("rounded py-1.5 text-xs font-medium transition",
-                      recTipo === "n_meses" ? "bg-zinc-900 text-white" : "text-zinc-500 hover:text-zinc-800")}>
+                      recTipo === "n_meses" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>
                     Por N meses
                   </button>
                   <button type="button" onClick={() => setRecTipo("indefinida")}
                     className={cn("rounded py-1.5 text-xs font-medium transition",
-                      recTipo === "indefinida" ? "bg-zinc-900 text-white" : "text-zinc-500 hover:text-zinc-800")}>
+                      recTipo === "indefinida" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>
                     Indefinida (até cancelar)
                   </button>
                 </div>
@@ -883,7 +876,7 @@ function LancDialog({ editing, cats, clis, colabs, onClose }: { editing: Lanc | 
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
           <Button type="submit" disabled={save.isPending}
-            className={cn(isEntrada ? "bg-emerald-500 hover:bg-emerald-600" : "bg-rose-500 hover:bg-rose-600")}>
+            className={cn(isEntrada ? "bg-success hover:bg-success/90" : "bg-destructive hover:bg-destructive")}>
             Salvar Lançamento
           </Button>
         </DialogFooter>
