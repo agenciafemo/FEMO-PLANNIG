@@ -10,6 +10,7 @@ import {
 
 import type { MediaItem, MetaInsights } from "@/lib/reportRpc";
 import type { AdsInsights } from "@/lib/adsRpc";
+import type { GoogleBusinessInsights } from "@/lib/googleBusiness";
 
 // Nomes amigáveis dos resultados de Ads (subconjunto do usado na tela).
 const AD_ACTION_LABELS: Record<string, string> = {
@@ -72,6 +73,7 @@ export type ReportPdfDocumentProps = {
   period: ReportPdfPeriod;
   insights: MetaInsights;
   ads?: AdsInsights | null;
+  googleBusiness?: GoogleBusinessInsights | null;
   deltas?: ReportPdfDeltas;
   generatedAt?: Date;
   norteiaLogoUrl?: string;
@@ -573,6 +575,7 @@ export function ReportPdfDocument({
   period,
   insights,
   ads,
+  googleBusiness,
   deltas,
   generatedAt = new Date(),
   norteiaLogoUrl = "/brand/norteia/logo/NORTEIA.png",
@@ -648,6 +651,12 @@ export function ReportPdfDocument({
         .filter((x): x is NonNullable<typeof x> => Boolean(x))
     : [];
   const adCampaigns = ads ? ads.campanhas.slice(0, 10) : [];
+  const googleTotals = googleBusiness?.insights.totals;
+  const googleSeries: ReportPdfChartPoint[] =
+    googleBusiness?.insights.daily.map((day) => ({
+      label: day.date.slice(5).replace("-", "/"),
+      value: day.search_impressions + day.maps_impressions,
+    })) ?? [];
 
   return (
     <Document
@@ -671,7 +680,7 @@ export function ReportPdfDocument({
             <Text style={styles.clientName}>{client.name}</Text>
           </View>
           <Text style={styles.coverTitle}>Relatório de desempenho</Text>
-          <Text style={styles.coverSubtitle}>Uma leitura objetiva dos principais resultados de Instagram e Facebook, preparada para apoiar as próximas decisões.</Text>
+          <Text style={styles.coverSubtitle}>Uma leitura objetiva dos principais resultados de redes sociais, mídia e presença local no Google, preparada para apoiar as próximas decisões.</Text>
           <View style={styles.periodBox}>
             <View style={styles.periodColumn}>
               <Text style={styles.periodLabel}>Período analisado</Text>
@@ -852,11 +861,39 @@ export function ReportPdfDocument({
         </Page>
       )}
 
+      {googleBusiness && googleTotals && (
+        <Page size="A4" style={styles.page}>
+          <PageHeader client={client} period={period} />
+          <View style={styles.section}>
+            <Text style={styles.sectionEyebrow}>Presença local</Text>
+            <Text style={styles.sectionTitle}>Perfil da Empresa no Google</Text>
+            <Text style={styles.sectionDescription}>
+              {googleBusiness.location.location_title} · resultados orgânicos na Busca Google e no Maps, sem investimento em mídia.
+            </Text>
+            <View style={styles.metricsGrid}>
+              <MetricCard metric={{ label: "Visualizações na Busca", value: googleTotals.search_impressions }} />
+              <MetricCard metric={{ label: "Visualizações no Maps", value: googleTotals.maps_impressions }} />
+              <MetricCard metric={{ label: "Ligações", value: googleTotals.calls }} />
+              <MetricCard metric={{ label: "Rotas solicitadas", value: googleTotals.directions }} />
+              <MetricCard metric={{ label: "Cliques no site", value: googleTotals.website_clicks }} />
+              <MetricCard metric={{ label: "Ações totais", value: googleTotals.total_actions }} />
+            </View>
+          </View>
+          {googleSeries.length > 1 && (
+            <View style={styles.section} wrap={false}>
+              <Text style={styles.chartTitle}>Visualizações por dia</Text>
+              <ReportPdfLineChart data={googleSeries} />
+            </View>
+          )}
+          <PageFooter />
+        </Page>
+      )}
+
       <Page size="A4" style={styles.finalPage}>
         <Image src={logo} style={styles.finalLogo} />
         <View style={styles.finalDivider} />
         <Text style={styles.finalTitle}>Relatório gerado com Norteia</Text>
-        <Text style={styles.finalText}>Métricas dependem da disponibilidade, permissões e políticas vigentes das plataformas Meta.</Text>
+        <Text style={styles.finalText}>Métricas dependem da disponibilidade, permissões e políticas vigentes da Meta e do Google.</Text>
       </Page>
     </Document>
   );

@@ -14,6 +14,7 @@ import {
   activeGoogleBusinessCredentials,
   fetchGoogleBusinessInsights,
   GoogleBusinessApiError,
+  normalizeGoogleBusinessInsights,
 } from "../_shared/google-business.ts";
 import {
   requireGoogleBusinessActor,
@@ -70,7 +71,7 @@ Deno.serve(async (request) => {
     );
     const { data: location, error: locationError } = await admin
       .from("google_business_client_locations")
-      .select("google_location_name")
+      .select("google_location_name, location_title, store_code, place_id")
       .eq("organization_id", organizationId)
       .eq("client_id", clientId)
       .maybeSingle();
@@ -106,7 +107,16 @@ Deno.serve(async (request) => {
       _status: "active",
       _reason_code: null,
     });
-    return jsonResponse({ ok: true, location, insights }, 200, headers);
+    return jsonResponse(
+      {
+        ok: true,
+        period: { from: startDate, to: endDate },
+        location,
+        insights: normalizeGoogleBusinessInsights(insights),
+      },
+      200,
+      headers,
+    );
   } catch (error) {
     if (error instanceof GoogleBusinessApiError) {
       return errorResponse(

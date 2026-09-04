@@ -24,6 +24,9 @@ interface ReportBody {
   // Métricas reais do Instagram já buscadas no frontend (meta-insights).
   // Opcional: se vier, a IA analisa os números reais em vez de só a atividade.
   insights?: unknown;
+  // Métricas normalizadas do Perfil da Empresa no Google, já obtidas pela
+  // Edge Function autenticada google-business-insights.
+  google_business?: unknown;
 }
 
 // Chama o Gemini com o prompt e devolve o texto. A chave vem SÓ do env
@@ -158,6 +161,34 @@ Deno.serve(async (request) => {
       }
       : null;
 
+    const googleInput = body.google_business as {
+      location?: { location_title?: string };
+      insights?: {
+        totals?: {
+          search_impressions?: number;
+          maps_impressions?: number;
+          total_impressions?: number;
+          calls?: number;
+          directions?: number;
+          website_clicks?: number;
+          total_actions?: number;
+        };
+      };
+    } | undefined;
+    const googleTotals = googleInput?.insights?.totals;
+    const metricasGoogle = googleTotals
+      ? {
+        unidade: googleInput?.location?.location_title ?? "Unidade vinculada",
+        visualizacoes_na_busca: Number(googleTotals.search_impressions ?? 0),
+        visualizacoes_no_maps: Number(googleTotals.maps_impressions ?? 0),
+        visualizacoes_totais: Number(googleTotals.total_impressions ?? 0),
+        ligacoes: Number(googleTotals.calls ?? 0),
+        rotas_solicitadas: Number(googleTotals.directions ?? 0),
+        cliques_no_site: Number(googleTotals.website_clicks ?? 0),
+        acoes_totais: Number(googleTotals.total_actions ?? 0),
+      }
+      : null;
+
     const prompt = [
       "Você é um analista de social media da agência Norteia.",
       "Escreva uma análise de relatório mensal, em português do Brasil, clara, objetiva e",
@@ -166,10 +197,15 @@ Deno.serve(async (request) => {
       metricas
         ? "Foque nas MÉTRICAS reais do Instagram (seguidores, alcance no período, engajamento e os posts que mais engajaram). Comente destaques, o que funcionou e dê 2 a 3 recomendações práticas."
         : "Foque na atividade de produção (volume, formatos, status do fluxo) e dê 2 a 3 recomendações. NÃO invente engajamento — não está disponível.",
+      metricasGoogle
+        ? "Inclua uma seção curta sobre presença local no Google. Diferencie visualizações na Busca e no Maps de ações de intenção (ligações, rotas e cliques no site). Não trate esses dados orgânicos como tráfego pago e não invente conversões."
+        : "Não mencione métricas do Perfil da Empresa no Google, pois elas não foram fornecidas.",
       "Estruture com títulos curtos. Não use tabelas. Tom encorajador, mas honesto.",
       "",
       metricas ? "Métricas reais do Instagram (JSON):" : "",
       metricas ? JSON.stringify(metricas, null, 2) : "",
+      metricasGoogle ? "Métricas reais do Perfil da Empresa no Google (JSON):" : "",
+      metricasGoogle ? JSON.stringify(metricasGoogle, null, 2) : "",
       "Atividade de produção no Norteia (JSON):",
       JSON.stringify(dados, null, 2),
     ].filter(Boolean).join("\n");
@@ -182,6 +218,7 @@ Deno.serve(async (request) => {
     if (clientOrg) {
       try {
         // deno-lint-ignore no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: histError } = await (supabase as any)
           .from("client_report_history")
           .insert({
@@ -191,7 +228,11 @@ Deno.serve(async (request) => {
             period_to: dados.periodo.ate,
             analysis,
             dados,
-            metricas,
+            // Mantém as chaves históricas do Instagram no nível raiz para não
+            // quebrar relatórios antigos e acrescenta o Google como seção.
+            metricas: metricas || metricasGoogle
+              ? { ...(metricas ?? {}), google_business: metricasGoogle }
+              : null,
             created_by: userData.user.id,
           });
         // Nao derruba a geracao: se a tabela nao existir ou o RLS barrar, o
@@ -202,7 +243,11 @@ Deno.serve(async (request) => {
       }
     }
 
-    return jsonResponse({ analysis, dados, metricas }, 200, headers);
+    return jsonResponse(
+      { analysis, dados, metricas, metricas_google: googleTotals ?? null },
+      200,
+      headers,
+    );
   } catch (error) {
     return errorResponse(error, headers);
   }

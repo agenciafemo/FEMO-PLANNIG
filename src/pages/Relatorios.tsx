@@ -25,6 +25,9 @@ import { generateReport, getMetaInsights, type ReportResult, type MetaInsights }
 import { ReportHistory } from "@/components/reports/ReportHistory";
 import { AdsReport } from "@/components/reports/AdsReport";
 import { loadClientAdAccounts, type AdsInsights } from "@/lib/adsRpc";
+import { GoogleBusinessReport } from "@/components/reports/GoogleBusinessReport";
+import type { GoogleBusinessInsights } from "@/lib/googleBusiness";
+import { GOOGLE_BUSINESS_ENABLED } from "@/lib/featureFlags";
 
 // Logo da Meta (o lucide-react não tem). Usa currentColor para herdar a cor.
 function MetaIcon({ className }: { className?: string }) {
@@ -135,7 +138,12 @@ export default function Relatorios() {
   // Dados do Tráfego Pago (vindos do AdsReport) para incluir no PDF. Zera ao
   // trocar de cliente, para não misturar dados de outro cliente no download.
   const [adsData, setAdsData] = useState<AdsInsights | null>(null);
-  useEffect(() => { setAdsData(null); }, [clientId]);
+  const [googleBusinessData, setGoogleBusinessData] =
+    useState<GoogleBusinessInsights | null>(null);
+  useEffect(() => {
+    setAdsData(null);
+    setGoogleBusinessData(null);
+  }, [clientId]);
 
   // Quais clientes têm conta de anúncios (Meta Ads) vinculada — para o ícone
   // da Meta no card. Mesma key do AdsReport, então compartilha cache.
@@ -168,7 +176,13 @@ export default function Relatorios() {
         });
         queryClient.setQueryData(insightsKey, ins);
       }
-      return generateReport({ clientId, insights: ins, from: range.from, to: range.to });
+      return generateReport({
+        clientId,
+        insights: ins,
+        googleBusiness: googleBusinessData,
+        from: range.from,
+        to: range.to,
+      });
     },
     enabled: false,
   });
@@ -221,6 +235,7 @@ export default function Relatorios() {
           }}
           insights={prepared.insights}
           ads={adsData}
+          googleBusiness={googleBusinessData}
         />,
       ).toBlob();
       const href = URL.createObjectURL(blob);
@@ -416,6 +431,15 @@ export default function Relatorios() {
           </Button>
         </div>
       </div>
+
+      {GOOGLE_BUSINESS_ENABLED && (
+        <GoogleBusinessReport
+          clientId={clientId}
+          from={range.from}
+          to={range.to}
+          onReport={setGoogleBusinessData}
+        />
+      )}
 
       {insights && (
         <div className="flex flex-wrap gap-2">

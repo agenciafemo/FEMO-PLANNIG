@@ -37,6 +37,28 @@ export type GoogleBusinessLocation = {
   storefrontAddress: Record<string, unknown> | null;
 };
 
+export type GoogleBusinessDailyInsights = {
+  date: string;
+  search_impressions: number;
+  maps_impressions: number;
+  calls: number;
+  directions: number;
+  website_clicks: number;
+};
+
+export type GoogleBusinessNormalizedInsights = {
+  totals: {
+    search_impressions: number;
+    maps_impressions: number;
+    total_impressions: number;
+    calls: number;
+    directions: number;
+    website_clicks: number;
+    total_actions: number;
+  };
+  daily: GoogleBusinessDailyInsights[];
+};
+
 export class GoogleBusinessApiError extends Error {
   constructor(
     public readonly status: number,
@@ -277,6 +299,101 @@ export const GOOGLE_BUSINESS_DAILY_METRICS = [
   "CALL_CLICKS",
   "WEBSITE_CLICKS",
 ] as const;
+
+const METRIC_FIELD = {
+  BUSINESS_IMPRESSIONS_DESKTOP_MAPS: "maps_impressions",
+  BUSINESS_IMPRESSIONS_DESKTOP_SEARCH: "search_impressions",
+  BUSINESS_IMPRESSIONS_MOBILE_MAPS: "maps_impressions",
+  BUSINESS_IMPRESSIONS_MOBILE_SEARCH: "search_impressions",
+  BUSINESS_DIRECTION_REQUESTS: "directions",
+  CALL_CLICKS: "calls",
+  WEBSITE_CLICKS: "website_clicks",
+} as const satisfies Record<
+  typeof GOOGLE_BUSINESS_DAILY_METRICS[number],
+  Exclude<keyof GoogleBusinessDailyInsights, "date">
+>;
+
+function googleDate(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const year = Number(raw.year);
+  const month = Number(raw.month);
+  const day = Number(raw.day);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+  const result = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const parsed = new Date(`${result}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) &&
+      parsed.toISOString().slice(0, 10) === result
+    ? result
+    : null;
+}
+
+export function normalizeGoogleBusinessInsights(
+  payload: Record<string, unknown>,
+): GoogleBusinessNormalizedInsights {
+  const daily = new Map<string, GoogleBusinessDailyInsights>();
+  const series = Array.isArray(payload.multiDailyMetricTimeSeries)
+    ? payload.multiDailyMetricTimeSeries
+    : [];
+
+  for (const rawSeries of series) {
+    if (!rawSeries || typeof rawSeries !== "object") continue;
+    const metricSeries = rawSeries as Record<string, unknown>;
+    const metric = metricSeries.dailyMetric;
+    if (typeof metric !== "string" || !(metric in METRIC_FIELD)) continue;
+    const field = METRIC_FIELD[metric as keyof typeof METRIC_FIELD];
+    const timeSeries = metricSeries.timeSeries;
+    if (!timeSeries || typeof timeSeries !== "object") continue;
+    const datedValues = (timeSeries as Record<string, unknown>).datedValues;
+    if (!Array.isArray(datedValues)) continue;
+
+    for (const rawValue of datedValues) {
+      if (!rawValue || typeof rawValue !== "object") continue;
+      const datedValue = rawValue as Record<string, unknown>;
+      const date = googleDate(datedValue.date);
+      const value = Number(datedValue.value ?? 0);
+      if (!date || !Number.isFinite(value)) continue;
+      const current = daily.get(date) ?? {
+        date,
+        search_impressions: 0,
+        maps_impressions: 0,
+        calls: 0,
+        directions: 0,
+        website_clicks: 0,
+      };
+      current[field] += value;
+      daily.set(date, current);
+    }
+  }
+
+  const ordered = [...daily.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const totals = ordered.reduce(
+    (sum, day) => ({
+      search_impressions: sum.search_impressions + day.search_impressions,
+      maps_impressions: sum.maps_impressions + day.maps_impressions,
+      calls: sum.calls + day.calls,
+      directions: sum.directions + day.directions,
+      website_clicks: sum.website_clicks + day.website_clicks,
+    }),
+    {
+      search_impressions: 0,
+      maps_impressions: 0,
+      calls: 0,
+      directions: 0,
+      website_clicks: 0,
+    },
+  );
+  return {
+    totals: {
+      ...totals,
+      total_impressions: totals.search_impressions + totals.maps_impressions,
+      total_actions: totals.calls + totals.directions + totals.website_clicks,
+    },
+    daily: ordered,
+  };
+}
 
 function dateParams(prefix: string, value: string, url: URL): void {
   const [year, month, day] = value.split("-").map(Number);

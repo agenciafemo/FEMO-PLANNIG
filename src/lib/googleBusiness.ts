@@ -34,6 +34,37 @@ export type GoogleBusinessLocation = {
   } | null;
 };
 
+export type GoogleBusinessDailyInsights = {
+  date: string;
+  search_impressions: number;
+  maps_impressions: number;
+  calls: number;
+  directions: number;
+  website_clicks: number;
+};
+
+export type GoogleBusinessInsights = {
+  period: { from: string; to: string };
+  location: {
+    google_location_name: string;
+    location_title: string;
+    store_code: string | null;
+    place_id: string | null;
+  };
+  insights: {
+    totals: {
+      search_impressions: number;
+      maps_impressions: number;
+      total_impressions: number;
+      calls: number;
+      directions: number;
+      website_clicks: number;
+      total_actions: number;
+    };
+    daily: GoogleBusinessDailyInsights[];
+  };
+};
+
 export class GoogleBusinessFunctionError extends Error {
   constructor(public readonly reasonCode: string) {
     super(reasonCode);
@@ -111,6 +142,23 @@ export async function selectGoogleBusinessLocation(
   });
 }
 
+export async function getGoogleBusinessInsights(input: {
+  organizationId: string;
+  clientId: string;
+  from: string;
+  to: string;
+}): Promise<GoogleBusinessInsights> {
+  return invokeGoogleBusiness<GoogleBusinessInsights>(
+    "google-business-insights",
+    {
+      organization_id: input.organizationId,
+      client_id: input.clientId,
+      start_date: input.from,
+      end_date: input.to,
+    },
+  );
+}
+
 export function googleBusinessErrorMessage(reasonCode: string): string {
   const messages: Record<string, string> = {
     session_expired: "Sua sessão expirou. Entre novamente para continuar.",
@@ -128,6 +176,8 @@ export function googleBusinessErrorMessage(reasonCode: string): string {
       "Esta unidade Google já está vinculada a outro cliente do Norteia.",
     google_business_location_not_selected:
       "Escolha a unidade Google deste cliente antes de buscar métricas.",
+    google_business_location_not_found:
+      "A unidade vinculada não foi encontrada na conta Google.",
     google_business_rate_limited:
       "O Google limitou as consultas por alguns instantes. Tente novamente em breve.",
   };
