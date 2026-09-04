@@ -10,10 +10,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { FileText, Sparkles, Loader2, Copy, Instagram, Heart, MessageCircle, Facebook, ArrowLeft, Download, Send } from "lucide-react";
+import { FileText, Sparkles, Loader2, Copy, Instagram, Heart, MessageCircle, Facebook, ArrowLeft, Download, Send, UserRound } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import {
   ChartContainer,
@@ -295,30 +296,47 @@ export default function Relatorios() {
           {(clients ?? []).map((c) => {
             const chans = connMap?.[c.id] ?? [];
             return (
-              <button
+              // Abrir o relatório e abrir a ficha são duas ações diferentes, e
+              // um <a> dentro de um <button> não é HTML válido: o link fica
+              // irmão do botão, e não dentro dele.
+              <div
                 key={c.id}
-                onClick={() => setSelected(c.id)}
-                className="flex items-center gap-3 rounded-xl border bg-card p-4 text-left transition-colors hover:bg-muted/40"
+                className="group relative flex items-center gap-3 rounded-xl border bg-card transition-colors hover:bg-muted/40"
               >
-                {c.logo_url ? (
-                  <img src={c.logo_url} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover" />
-                ) : (
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground">
-                    {c.name.slice(0, 2).toUpperCase()}
+                <button
+                  onClick={() => setSelected(c.id)}
+                  className="flex min-w-0 flex-1 items-center gap-3 p-4 text-left"
+                >
+                  {c.logo_url ? (
+                    <img src={c.logo_url} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover" />
+                  ) : (
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground">
+                      {c.name.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{c.name}</p>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <Instagram className={`h-4 w-4 ${chans.includes("instagram") ? "text-brand" : "text-muted-foreground/30"}`} />
+                      <Facebook className={`h-4 w-4 ${chans.includes("facebook_page") ? "text-brand" : "text-muted-foreground/30"}`} />
+                      <MetaIcon className={`h-4 w-4 ${adMap?.[c.id] ? "text-brand" : "text-muted-foreground/30"}`} />
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        {chans.length > 0 ? "Conectado" : "Sem conexão"}
+                      </span>
+                    </div>
                   </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{c.name}</p>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <Instagram className={`h-4 w-4 ${chans.includes("instagram") ? "text-brand" : "text-muted-foreground/30"}`} />
-                    <Facebook className={`h-4 w-4 ${chans.includes("facebook_page") ? "text-brand" : "text-muted-foreground/30"}`} />
-                    <MetaIcon className={`h-4 w-4 ${adMap?.[c.id] ? "text-brand" : "text-muted-foreground/30"}`} />
-                    <span className="ml-1 text-xs text-muted-foreground">
-                      {chans.length > 0 ? "Conectado" : "Sem conexão"}
-                    </span>
-                  </div>
-                </div>
-              </button>
+                </button>
+                {/* Aparece no hover/foco: um ícone fixo por card, numa grade
+                    inteira deles, vira ruído antes de virar hábito. */}
+                <Link
+                  to={`/plannings/cliente/${c.id}`}
+                  title="Ver perfil do cliente"
+                  aria-label={`Ver perfil de ${c.name}`}
+                  className="mr-3 shrink-0 rounded-lg p-2 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-background hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                >
+                  <UserRound className="h-4 w-4" />
+                </Link>
+              </div>
             );
           })}
         </div>
@@ -340,10 +358,22 @@ export default function Relatorios() {
                 {(currentClient?.name ?? "?").slice(0, 2).toUpperCase()}
               </div>
             )}
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-xs text-muted-foreground">Relatório do cliente</p>
               <h2 className="truncate text-lg font-bold">{currentClient?.name ?? "—"}</h2>
             </div>
+            {/* Ler um relatório levanta perguntas que só a ficha responde
+                (contrato, contatos, briefing). Sem isto, a saída era voltar,
+                trocar de módulo e procurar o cliente de novo — e perder o
+                período já escolhido aqui. */}
+            {clientId && (
+              <Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
+                <Link to={`/plannings/cliente/${clientId}`}>
+                  <UserRound className="h-4 w-4" />
+                  Ver perfil
+                </Link>
+              </Button>
+            )}
           </div>
 
           <ReportHistory organizationId={organizationId!} clientId={clientId} />
