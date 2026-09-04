@@ -839,16 +839,20 @@ export default function Tasks() {
     || (membersById.has(storedFilters.assigneeId) && (!membersForFunction || membersForFunction.has(storedFilters.assigneeId)))
     ? storedFilters.assigneeId
     : "all";
-  // Quadro de projeto: o cliente vem da ROTA e vence o filtro guardado.
+  // O cliente vem SÓ da rota, escolhida no leme da esquerda.
+  //
+  // Havia também um seletor "Cliente" na barra de filtros, fazendo a mesma
+  // coisa por outro caminho — dois controles para o mesmo recorte, e nenhum
+  // sabendo do outro. O leme ganhou: mostra a lista inteira, com busca e
+  // contagem por cliente, e o endereço passa a dizer o que está na tela.
+  //
+  // O filtro guardado NÃO é mais herdado aqui de propósito. Sem o seletor,
+  // um clientId persistido de antes viraria um recorte invisível: a pessoa
+  // abriria /tasks vendo um cliente só, sem nada na tela explicando por quê.
   // /tasks/interno reusa o valor "none" que o filtro já entende como "sem cliente".
   const clienteDaRota = boardClientId ?? (rotaInterna ? "none" : null);
   const quadroFixo = clienteDaRota !== null;
-  const filtroGuardadoValido = storedFilters.clientId === "all"
-    || storedFilters.clientId === "none"
-    || clientsById.has(storedFilters.clientId)
-    ? storedFilters.clientId
-    : "all";
-  const clientFilter = clienteDaRota ?? filtroGuardadoValido;
+  const clientFilter = clienteDaRota ?? "all";
   const tituloDoQuadro = !quadroFixo
     ? "Tarefas"
     : rotaInterna
@@ -860,8 +864,12 @@ export default function Tasks() {
   const dueFromFilter = typeof storedFilters.dueFrom === "string" ? storedFilters.dueFrom : "";
   const dueToFilter = typeof storedFilters.dueTo === "string" ? storedFilters.dueTo : "";
 
+  // O cliente NÃO entra aqui: ele vem da rota (leme), não da barra de filtros.
+  // Contá-lo fazia o "Limpar" aparecer em todo quadro de cliente prometendo
+  // limpar algo que ele não limpa — o recorte continuaria, porque está no
+  // endereço. Sai também do "Nenhuma tarefa com estes filtros": num quadro de
+  // cliente vazio, a coluna está vazia mesmo, sem filtro nenhum aplicado.
   const hasActiveFilters = assigneeFilter !== "all"
-    || clientFilter !== "all"
     || priorityFilter !== "all"
     || functionFilter !== "all"
     || Boolean(dueFromFilter || dueToFilter);
@@ -1756,23 +1764,6 @@ export default function Tasks() {
                       <SelectItem key={member.userId} value={member.userId}>
                         {memberLabel(member)}
                       </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Num quadro de projeto o cliente já está decidido pela rota;
-                  deixar o seletor aqui permitiria sair do projeto sem sair da
-                  página, e o título passaria a mentir. */}
-              <div className={cn("min-w-[190px] flex-1 space-y-1 sm:max-w-[240px]", quadroFixo && "hidden")}>
-                <Label className="text-[11px] text-muted-foreground">Cliente</Label>
-                <Select value={clientFilter} onValueChange={(value) => updateFilters({ clientId: value })}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os clientes</SelectItem>
-                    <SelectItem value="none">Sem cliente</SelectItem>
-                    {(boardQuery.data?.clients ?? []).map((client) => (
-                      <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
