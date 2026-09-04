@@ -278,7 +278,13 @@ export default function Plannings() {
             ]);
             const items = buildProductionItems(
               { static: postCount, reels: reelsCount, carousel: carouselCount, story: storiesCount, blog: blogCount },
-              { organization_id: organizationId, planning_id: planning.id, client_id: selectedClient, created_by: user!.id },
+              {
+                organization_id: organizationId,
+                planning_id: planning.id,
+                client_id: selectedClient,
+                created_by: user!.id,
+                mes_referencia: `${year}-${mm}-01`,
+              },
               roleMap,
               resolve,
               writingNotes,

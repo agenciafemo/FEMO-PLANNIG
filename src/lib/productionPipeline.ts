@@ -324,7 +324,15 @@ export type PieceCounts = { static: number; reels: number; carousel: number; sto
 // Uma linha por peça. As etapas vêm depois (precisam do id da peça).
 export function buildProductionItems(
   counts: PieceCounts,
-  base: { organization_id: string; planning_id: string; client_id: string; created_by: string },
+  // `mes_referencia` entra pelo base e flui pelo spread abaixo: a peça de um
+  // planejamento nasce com o mês dele, sem precisar deduzir depois.
+  base: {
+    organization_id: string;
+    planning_id: string;
+    client_id: string;
+    created_by: string;
+    mes_referencia?: string;
+  },
   _roleMap: RoleMap,
   _resolve: AssigneeResolver | null,
   writingNotes: string | null,

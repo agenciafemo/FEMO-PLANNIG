@@ -66,6 +66,8 @@ type Item = {
   position: number;
   /** Tarefa do Kanban gerada a partir desta peça. null = ainda não enviada. */
   task_id: string | null;
+  /** Mês a que a peça se refere (dia 1). null = peça antiga, sem mês. */
+  mes_referencia: string | null;
   production_item_steps: Step[];
 };
 
@@ -88,6 +90,16 @@ const MONTH_SLUGS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho",
   "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 const slugify = (str: string) => str.normalize("NFD").replace(/[̀-ͯ]/g, "")
   .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+/** "2026-10-01" -> "out/2026". Curto de propósito: vive ao lado do título da
+ *  peça, e "outubro de 2026" empurraria o nome para a linha de baixo. */
+function rotuloDoMes(valor: string | null): string | null {
+  if (!valor) return null;
+  const [ano, mes] = valor.split("-");
+  const nome = MONTH_SLUGS[Number(mes) - 1];
+  if (!nome || !ano) return null;
+  return `${nome.slice(0, 3)}/${ano}`;
+}
 
 function localDay(value: string | null) {
   if (!value) return null;
@@ -179,7 +191,7 @@ export default function Producao() {
     queryKey: ["production-items", organizationId],
     queryFn: async () => {
       const { data, error } = await (supabase as AnyClient).from("production_items")
-        .select("id, content_type, piece_number, title, client_id, planning_id, notes, position, task_id, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, reason_codes, reason_note, assignee_id, capture_event_id, schedule_source)")
+        .select("id, content_type, piece_number, title, client_id, planning_id, notes, position, task_id, mes_referencia, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, reason_codes, reason_note, assignee_id, capture_event_id, schedule_source)")
         .eq("organization_id", organizationId!)
         .order("position");
       if (error) throw new Error(error.message);
@@ -385,7 +397,10 @@ export default function Producao() {
 
   // ---- Nova produção (peça avulsa ou tarefa extra, para qualquer cliente) ----
   const [novaOpen, setNovaOpen] = useState(false);
-  const [nova, setNova] = useState({ clientId: "", tipo: "extra", titulo: "", qtd: "1" });
+  // `mes` no formato YYYY-MM: é o que o <input type="month"> fala, e vira
+  // DATE no dia 1 na hora de gravar.
+  const mesCorrente = () => new Date().toISOString().slice(0, 7);
+  const [nova, setNova] = useState({ clientId: "", tipo: "extra", titulo: "", qtd: "1", mes: mesCorrente() });
 
   const criarProducao = useMutation({
     mutationFn: async () => {
@@ -414,6 +429,9 @@ export default function Producao() {
         title: isExtra ? nova.titulo.trim() : null,
         stage: stepsFor(nova.tipo, pipelines)[0]?.key ?? "concluir",
         position: 9000 + base + k,
+        // Dia 1: o campo é de MÊS, não de dia. Gravar o dia de hoje faria uma
+        // peça criada em 31/10 para novembro parecer de outubro.
+        mes_referencia: nova.mes ? `${nova.mes}-01` : null,
       }));
 
       const { data: created, error } = await db.from("production_items")
@@ -440,7 +458,7 @@ export default function Producao() {
     onSuccess: (clientId) => {
       toast.success("Adicionado à produção.");
       setNovaOpen(false);
-      setNova({ clientId: "", tipo: "extra", titulo: "", qtd: "1" });
+      setNova({ clientId: "", tipo: "extra", titulo: "", qtd: "1", mes: mesCorrente() });
       setSelectedClient(clientId);
       queryClient.invalidateQueries({ queryKey: ["production-items", organizationId] });
     },
@@ -699,6 +717,14 @@ export default function Producao() {
                               <span className="text-sm font-medium">
                                 {tituloDaPeca(piece)}
                               </span>
+                              {/* Peça antiga pode não ter mês: some em vez de
+                                  mostrar um traço, que sujaria toda a lista
+                                  enquanto o campo não estiver preenchido. */}
+                              {rotuloDoMes(piece.mes_referencia) && (
+                                <span className="rounded-md border border-border/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                  {rotuloDoMes(piece.mes_referencia)}
+                                </span>
+                              )}
                               <span className="text-xs text-muted-foreground tabular-nums">
                                 {pp.done}/{pp.total}
                               </span>
@@ -1066,6 +1092,22 @@ export default function Producao() {
                   <SelectItem value="blog">Blog</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Fora do ternário de propósito: tarefa extra também pertence a
+                um mês. Deixá-lo só no ramo das peças criaria produção sem mês
+                justamente no caso mais avulso, que é o que mais precisa. */}
+            <div className="space-y-1.5">
+              <Label className="text-xs">Mês</Label>
+              <Input
+                type="month"
+                value={nova.mes}
+                onChange={(e) => setNova({ ...nova, mes: e.target.value })}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                A que mês esta produção pertence. Não é a data da captação —
+                essa fica na etapa.
+              </p>
             </div>
 
             {nova.tipo === "extra" ? (
