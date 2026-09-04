@@ -3,6 +3,9 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { insertPosts } from "@/lib/postsInsert";
+import {
+  buildStepRows, loadFunctionAssignees, loadPipelines, loadRoleMap, stepsFor,
+} from "@/lib/productionPipeline";
 import { postThumbnailUrl } from "@/lib/postThumbnail";
 import { deletePlanningCascade } from "@/lib/deletePlanning";
 import { useAuth } from "@/contexts/AuthContext";
@@ -367,6 +370,83 @@ export default function PlanningDetail() {
     },
   });
 
+  /**
+   * Cria no quadro de Producao a peca que espelha um post recem-adicionado.
+   *
+   * O `post_id` e o que importa: e por ele que o gatilho do banco marca as
+   * etapas conforme arte, video e legenda aparecem. Uma peca sem post fica
+   * parada para sempre.
+   */
+  const criarPecaDeProducao = async (postId: string, contentType: string) => {
+    try {
+      if (!organizationId || !user?.id || !planning) return;
+      // A query do planejamento e `as any` (schema multi-org ainda em migracao).
+      // Um unico acesso tipado aqui evita espalhar `any` pelo resto da funcao.
+      const pl = planning as unknown as { client_id: string | null; month: number; year: number };
+      const clientId = pl.client_id;
+      if (!clientId) return;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any;
+      const [roleMap, resolve, pipelines] = await Promise.all([
+        loadRoleMap(organizationId),
+        loadFunctionAssignees(organizationId),
+        loadPipelines(organizationId),
+      ]);
+
+      // Continua a numeracao daquele tipo para o cliente, para nao aparecerem
+      // dois "Reel 1" no quadro.
+      const { data: existentes } = await db
+        .from("production_items")
+        .select("piece_number")
+        .eq("organization_id", organizationId)
+        .eq("client_id", clientId)
+        .eq("content_type", contentType);
+      const usados = ((existentes ?? []) as Array<{ piece_number: number }>)
+        .map((linha) => linha.piece_number ?? 0);
+      const proximo = (usados.length ? Math.max(...usados) : 0) + 1;
+
+      const mes = String(pl.month).padStart(2, "0");
+      const { data: criada, error: erroPeca } = await db
+        .from("production_items")
+        .insert({
+          organization_id: organizationId,
+          client_id: clientId,
+          planning_id: planningId!,
+          post_id: postId,
+          content_type: contentType,
+          piece_number: proximo,
+          stage: stepsFor(contentType, pipelines)[0]?.key ?? "copy",
+          position: 9000 + proximo,
+          mes_referencia: `${pl.year}-${mes}-01`,
+          created_by: user.id,
+        })
+        .select("id, organization_id, content_type")
+        .maybeSingle();
+      if (erroPeca) throw erroPeca;
+      if (!criada) throw new Error("A peça não foi criada (sem permissão?).");
+
+      const etapas = buildStepRows(criada, roleMap, resolve, pipelines);
+      if (etapas.length > 0) {
+        const { error: erroEtapas } = await db
+          .from("production_item_steps").insert(etapas);
+        // Peca sem etapas nao serve para nada e ainda ocupa o post. Desfaz.
+        if (erroEtapas) {
+          await db.from("production_items").delete().eq("id", criada.id);
+          throw erroEtapas;
+        }
+      }
+    } catch (erro) {
+      // Nao derruba o post: avisa e segue. O head ainda pode ligar a peca pela
+      // Producao ("Vincular ao planejamento").
+      console.error("Falha ao criar a peça de produção:", erro);
+      toast.warning(
+        "Item adicionado, mas a peça não apareceu na Produção: " +
+          ((erro as Error).message ?? "motivo desconhecido"),
+      );
+    }
+  };
+
   const addPost = useMutation({
     mutationFn: async (type: string) => {
       const allPosts = posts || [];
@@ -380,10 +460,22 @@ export default function PlanningDetail() {
         .select("id")
         .single();
       if (error) throw error;
+
+      // Item adicionado ao planejamento DEPOIS da criacao tambem precisa de
+      // peca na Producao. Antes so nascia peca no momento de criar o
+      // planejamento (a partir das quantidades) — quem acrescentava um reel na
+      // semana seguinte ficava com o quadro de Producao desatualizado, e a
+      // peca faltante era justamente a que ninguem via emperrada.
+      //
+      // Best-effort: o post ja foi criado, e o planejamento nao pode falhar
+      // por causa do espelho.
+      await criarPecaDeProducao(data.id, type);
+
       return { postId: data.id, type };
     },
     onSuccess: ({ postId, type }) => {
       queryClient.invalidateQueries({ queryKey: ["posts", planningId] });
+      queryClient.invalidateQueries({ queryKey: ["production-items"] });
       if (type === "blog") {
         openPostEditor(postId);
         toast.info("Preencha título e conteúdo antes de enviar ao cliente");
