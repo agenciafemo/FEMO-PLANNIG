@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
   CalendarClock, Check, ChevronDown, ChevronRight, CircleCheck, ExternalLink, Flag,
-  ListChecks, Loader2, Plus, RotateCcw, Send, Settings2, UserRound, Workflow, X,
+  Link2, ListChecks, Loader2, Plus, RotateCcw, Send, Settings2, UserRound, Workflow, X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateRangeFields } from "@/components/filters/DateRangeFields";
+import { VincularPlanejamentoDialog } from "@/components/producao/VincularPlanejamentoDialog";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { hasActiveDateRange, isDayWithinRange } from "@/lib/dateRange";
 import { cn } from "@/lib/utils";
@@ -62,6 +63,9 @@ type Item = {
   title: string | null;
   client_id: string | null;
   planning_id: string | null;
+  /** Post do planejamento que esta peca espelha. null = peca solta, sem
+   *  marcacao automatica de etapas. */
+  post_id: string | null;
   notes: string | null;
   position: number;
   /** Tarefa do Kanban gerada a partir desta peça. null = ainda não enviada. */
@@ -134,6 +138,8 @@ export default function Producao() {
   // Peça escolhida para virar tarefa no Kanban. `tasks` exige responsável e
   // prazo (ambos NOT NULL), então não dá para enviar num clique só.
   const [paraKanban, setParaKanban] = useState<Item | null>(null);
+  // Peca solta que o head vai amarrar a um post do planejamento.
+  const [paraVincular, setParaVincular] = useState<Item | null>(null);
   const [kanbanResponsavel, setKanbanResponsavel] = useState("");
   const [kanbanPrazo, setKanbanPrazo] = useState(
     () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
@@ -191,7 +197,7 @@ export default function Producao() {
     queryKey: ["production-items", organizationId],
     queryFn: async () => {
       const { data, error } = await (supabase as AnyClient).from("production_items")
-        .select("id, content_type, piece_number, title, client_id, planning_id, notes, position, task_id, mes_referencia, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, reason_codes, reason_note, assignee_id, capture_event_id, schedule_source)")
+        .select("id, content_type, piece_number, title, client_id, planning_id, post_id, notes, position, task_id, mes_referencia, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, reason_codes, reason_note, assignee_id, capture_event_id, schedule_source)")
         .eq("organization_id", organizationId!)
         .order("position");
       if (error) throw new Error(error.message);
@@ -754,6 +760,19 @@ export default function Producao() {
                                   <ListChecks className="h-3 w-3" /> Enviar para o Kanban
                                 </button>
                               )}
+                              {/* Peca sem post nao espelha nada: as etapas so se
+                                  marcam pelo conteudo do post do planejamento.
+                                  O convite fica na propria peca, onde a duvida
+                                  aparece. */}
+                              {!piece.post_id && (
+                                <button
+                                  type="button"
+                                  onClick={() => setParaVincular(piece)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-warning/50 bg-warning-soft/40 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-brand/50 hover:text-brand"
+                                >
+                                  <Link2 className="h-3 w-3" /> Vincular ao planejamento
+                                </button>
+                              )}
                               {planningHref(piece) && (
                                 <Link
                                   to={planningHref(piece)!}
@@ -1060,6 +1079,15 @@ export default function Producao() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Vincular uma peça solta ao post do planejamento que ela representa */}
+      {organizationId && (
+        <VincularPlanejamentoDialog
+          peca={paraVincular}
+          organizationId={organizationId}
+          onOpenChange={(aberto) => { if (!aberto) setParaVincular(null); }}
+        />
+      )}
 
       {/* Adicionar produção: peça avulsa ou tarefa extra, para qualquer cliente */}
       <Dialog open={novaOpen} onOpenChange={setNovaOpen}>
