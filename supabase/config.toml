@@ -102,3 +102,21 @@ verify_jwt = true
 
 [functions.google-calendar-disconnect]
 verify_jwt = true
+
+# Google Business Profile: OAuth por agencia, unidade vinculada por cliente e
+# leitura de metricas. O callback e publico apenas para receber o redirect do
+# Google; o state de uso unico e validado antes de qualquer gravacao.
+[functions.google-business-oauth-start]
+verify_jwt = true
+
+[functions.google-business-oauth-callback]
+verify_jwt = false
+
+[functions.google-business-locations]
+verify_jwt = true
+
+[functions.google-business-insights]
+verify_jwt = true
+
+[functions.google-business-disconnect]
+verify_jwt = true

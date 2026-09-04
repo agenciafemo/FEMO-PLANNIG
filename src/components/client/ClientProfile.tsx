@@ -21,7 +21,12 @@ import { InstagramConnection } from "@/components/client/InstagramConnection";
 import { ClientReports } from "@/components/client/ClientReports";
 import { ClientDocuments } from "@/components/client/ClientDocuments";
 import { ClientMeetings } from "@/components/client/ClientMeetings";
-import { REUNIOES_ENABLED, META_CONNECT_ENABLED } from "@/lib/featureFlags";
+import { GoogleBusinessConnection } from "@/components/client/GoogleBusinessConnection";
+import {
+  GOOGLE_BUSINESS_ENABLED,
+  META_CONNECT_ENABLED,
+  REUNIOES_ENABLED,
+} from "@/lib/featureFlags";
 
 const CONTRACT_FIELDS = [
   { key: "qty_static", label: "Posts (feed)", icon: ImageIcon },
@@ -357,6 +362,9 @@ export function ClientProfile({
 
       {/* Conexões (Instagram / Facebook) */}
       {META_CONNECT_ENABLED && <InstagramConnection clientId={clientId} />}
+      {GOOGLE_BUSINESS_ENABLED && (
+        <GoogleBusinessConnection clientId={clientId} />
+      )}
 
       {/* Relatórios e documentos do cliente */}
       <ClientReports clientId={clientId} />

@@ -22,6 +22,11 @@ export const RELATORIOS_ENABLED = import.meta.env.VITE_RELATORIOS_ENABLED !== "f
 // Desligado por padrão; aparece com VITE_REUNIOES_ENABLED === "true".
 export const REUNIOES_ENABLED = import.meta.env.VITE_REUNIOES_ENABLED === "true";
 
+// Perfil da Empresa no Google por cliente. Mantido desligado ate migration,
+// secrets OAuth e Edge Functions estarem aplicados no ambiente.
+export const GOOGLE_BUSINESS_ENABLED =
+  import.meta.env.VITE_GOOGLE_BUSINESS_ENABLED === "true";
+
 // Áudio no portal público adiado: enquanto não houver uma Edge Function segura
 // que valide o token público e devolva uma signed upload URL para o bucket
 // `comment-audios`, os botões de gravar/enviar áudio ficam ocultos no portal
