@@ -604,8 +604,19 @@ export interface InstagramOAuthConfig {
 }
 
 export function instagramOAuthConfig(): InstagramOAuthConfig {
+  // `instagram_business_manage_insights` entra no padrão porque sem ele o
+  // relatório do cliente nasce pela metade: perfil e publicações aparecem,
+  // mas alcance e visualizações voltam vazios — e a tela não tem como
+  // distinguir "não houve alcance" de "não fui autorizado a ler".
+  //
+  // Escopo NÃO é retroativo: quem já autorizou continua sem a permissão até
+  // reconectar. Acrescentar aqui só muda as autorizações NOVAS.
+  //
+  // O override por env continua valendo e é a saída de emergência: se a Meta
+  // recusar algum destes, dá para voltar ao conjunto antigo por secret, sem
+  // deploy.
   const scopes = (Deno.env.get("META_INSTAGRAM_SCOPES") ??
-    "instagram_business_basic,instagram_business_content_publish")
+    "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights")
     .split(",").map((s) => s.trim()).filter(Boolean);
   return {
     appId: requiredEnv("META_INSTAGRAM_APP_ID"),
