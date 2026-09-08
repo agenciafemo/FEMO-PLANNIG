@@ -237,3 +237,47 @@ Deno.test("lista as contas filhas da MCC com a administradora por último", () =
   // Moeda fora do padrão ISO vira null em vez de sujar o relatório.
   assertEquals(contas[1].currencyCode, "BRL");
 });
+
+// ---------------------------------------------------------------------------
+// CONTRATO com o relatório. O PDF, o prompt da IA e a mensagem pro cliente leem
+// estes nomes de campo por string. Renomear um deles aqui não quebra
+// compilação nenhuma — o campo só chega `undefined` do outro lado e vira zero
+// no relatório. Foi assim que as métricas do Perfil da Empresa saíram zeradas.
+// ---------------------------------------------------------------------------
+Deno.test("mantém os nomes de campo que o relatório consome", () => {
+  const resultado = normalizeGoogleAdsInsights([
+    {
+      campaign: { name: "X", status: "ENABLED", advertisingChannelType: "SEARCH" },
+      segments: { date: "2026-09-01" },
+      metrics: { costMicros: "1000000", impressions: "10", clicks: "1", conversions: 1 },
+    },
+  ]);
+
+  assertEquals(Object.keys(resultado).sort(), ["campaigns", "daily", "totals"]);
+  assertEquals(Object.keys(resultado.totals).sort(), [
+    "clicks",
+    "conversions",
+    "cost",
+    "cost_per_conversion",
+    "cpc",
+    "cpm",
+    "ctr",
+    "impressions",
+  ]);
+  assertEquals(Object.keys(resultado.campaigns[0]).sort(), [
+    "channel",
+    "clicks",
+    "conversions",
+    "cost",
+    "impressions",
+    "name",
+    "status",
+  ]);
+  assertEquals(Object.keys(resultado.daily[0]).sort(), [
+    "clicks",
+    "conversions",
+    "cost",
+    "date",
+    "impressions",
+  ]);
+});

@@ -11,6 +11,7 @@ import {
 import type { MediaItem, MetaInsights } from "@/lib/reportRpc";
 import type { AdsInsights } from "@/lib/adsRpc";
 import type { GoogleBusinessInsights } from "@/lib/googleBusiness";
+import type { GoogleAdsInsights } from "@/lib/googleAds";
 
 // Nomes amigáveis dos resultados de Ads (subconjunto do usado na tela).
 const AD_ACTION_LABELS: Record<string, string> = {
@@ -31,6 +32,24 @@ const AD_ACTION_LABELS: Record<string, string> = {
 
 function formatMoney(value: number): string {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+/**
+ * Dinheiro na moeda DA CONTA de anúncios, não na da agência.
+ *
+ * O Google Ads reporta na moeda em que a conta fatura. Imprimir "R$" em cima
+ * de uma conta em dólar não erra o número — erra o significado, que é pior:
+ * o cliente lê um investimento cinco vezes menor do que foi.
+ */
+function formatMoneyIn(value: number, currency: string | null): string {
+  try {
+    return value.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: currency || "BRL",
+    });
+  } catch {
+    return `${currency ?? ""} ${value.toFixed(2)}`.trim();
+  }
 }
 
 import {
@@ -74,6 +93,7 @@ export type ReportPdfDocumentProps = {
   insights: MetaInsights;
   ads?: AdsInsights | null;
   googleBusiness?: GoogleBusinessInsights | null;
+  googleAds?: GoogleAdsInsights | null;
   deltas?: ReportPdfDeltas;
   generatedAt?: Date;
   norteiaLogoUrl?: string;
@@ -576,6 +596,7 @@ export function ReportPdfDocument({
   insights,
   ads,
   googleBusiness,
+  googleAds,
   deltas,
   generatedAt = new Date(),
   norteiaLogoUrl = "/brand/norteia/logo/NORTEIA.png",
@@ -656,6 +677,13 @@ export function ReportPdfDocument({
     googleBusiness?.insights.daily.map((day) => ({
       label: day.date.slice(5).replace("-", "/"),
       value: day.search_impressions + day.maps_impressions,
+    })) ?? [];
+  const googleAdsCurrency = googleAds?.account.currency ?? null;
+  const googleAdsCampaigns = googleAds ? googleAds.campaigns.slice(0, 10) : [];
+  const googleAdsSeries: ReportPdfChartPoint[] =
+    googleAds?.daily.map((day) => ({
+      label: day.date.slice(5).replace("-", "/"),
+      value: day.cost,
     })) ?? [];
 
   return (
@@ -885,6 +913,75 @@ export function ReportPdfDocument({
               <ReportPdfLineChart data={googleSeries} />
             </View>
           )}
+          <PageFooter />
+        </Page>
+      )}
+
+      {googleAds && (
+        <Page size="A4" style={styles.page}>
+          <PageHeader client={client} period={period} />
+          <View style={styles.section}>
+            <Text style={styles.sectionEyebrow}>Tráfego pago</Text>
+            <Text style={styles.sectionTitle}>Desempenho dos anúncios (Google Ads)</Text>
+            <Text style={styles.sectionDescription}>
+              {googleAds.account.name} · anúncios na Busca, no Display e nos demais canais do Google.
+              Não confundir com o Perfil da Empresa, que é alcance orgânico.
+            </Text>
+            <View style={styles.metricsGrid}>
+              <View style={styles.metricCard} wrap={false}>
+                <Text style={styles.metricLabel}>Investimento</Text>
+                <Text style={styles.metricValue}>
+                  {formatMoneyIn(googleAds.totals.cost, googleAdsCurrency)}
+                </Text>
+              </View>
+              <MetricCard metric={{ label: "Impressões", value: googleAds.totals.impressions }} />
+              <MetricCard metric={{ label: "Cliques", value: googleAds.totals.clicks }} />
+              <MetricCard metric={{ label: "Conversões", value: googleAds.totals.conversions }} />
+              <View style={styles.metricCard} wrap={false}>
+                <Text style={styles.metricLabel}>Custo por clique</Text>
+                <Text style={styles.metricValue}>
+                  {formatMoneyIn(googleAds.totals.cpc, googleAdsCurrency)}
+                </Text>
+              </View>
+              <View style={styles.metricCard} wrap={false}>
+                <Text style={styles.metricLabel}>CTR</Text>
+                <Text style={styles.metricValue}>{googleAds.totals.ctr.toFixed(2)}%</Text>
+              </View>
+            </View>
+          </View>
+
+          {googleAdsSeries.length > 1 && (
+            <View style={styles.section} wrap={false}>
+              <Text style={styles.chartTitle}>Investimento por dia</Text>
+              <ReportPdfLineChart data={googleAdsSeries} />
+            </View>
+          )}
+
+          <View style={styles.section}>
+            <Text style={styles.chartTitle}>Campanhas no período</Text>
+            {googleAdsCampaigns.length > 0 ? (
+              <>
+                <View style={styles.adTableHead}>
+                  <Text style={[styles.adColName, styles.adColHead]}>Campanha</Text>
+                  <Text style={[styles.adColNum, styles.adColHead]}>Investimento</Text>
+                  <Text style={[styles.adColNum, styles.adColHead]}>Cliques</Text>
+                  <Text style={[styles.adColNum, styles.adColHead]}>Conversões</Text>
+                </View>
+                {googleAdsCampaigns.map((campaign, index) => (
+                  <View key={index} style={styles.adRow} wrap={false}>
+                    <Text style={styles.adColName}>{campaign.name}</Text>
+                    <Text style={styles.adColNum}>
+                      {formatMoneyIn(campaign.cost, googleAdsCurrency)}
+                    </Text>
+                    <Text style={styles.adColNum}>{formatNumber(campaign.clicks)}</Text>
+                    <Text style={styles.adColNum}>{formatNumber(campaign.conversions)}</Text>
+                  </View>
+                ))}
+              </>
+            ) : (
+              <Text style={styles.empty}>Nenhuma campanha com dados no período.</Text>
+            )}
+          </View>
           <PageFooter />
         </Page>
       )}

@@ -28,6 +28,7 @@ import { AdsReport } from "@/components/reports/AdsReport";
 import { loadClientAdAccounts, type AdsInsights } from "@/lib/adsRpc";
 import { GoogleBusinessReport } from "@/components/reports/GoogleBusinessReport";
 import { GoogleAdsReport } from "@/components/reports/GoogleAdsReport";
+import { formatGoogleAdsMoney, type GoogleAdsInsights } from "@/lib/googleAds";
 import type { GoogleBusinessInsights } from "@/lib/googleBusiness";
 import { GOOGLE_ADS_ENABLED, GOOGLE_BUSINESS_ENABLED } from "@/lib/featureFlags";
 
@@ -142,9 +143,11 @@ export default function Relatorios() {
   const [adsData, setAdsData] = useState<AdsInsights | null>(null);
   const [googleBusinessData, setGoogleBusinessData] =
     useState<GoogleBusinessInsights | null>(null);
+  const [googleAdsData, setGoogleAdsData] = useState<GoogleAdsInsights | null>(null);
   useEffect(() => {
     setAdsData(null);
     setGoogleBusinessData(null);
+    setGoogleAdsData(null);
   }, [clientId]);
 
   // Quais clientes têm conta de anúncios (Meta Ads) vinculada — para o ícone
@@ -182,6 +185,10 @@ export default function Relatorios() {
         clientId,
         insights: ins,
         googleBusiness: googleBusinessData,
+        // As duas plataformas pagas vao juntas. So o Google faria a IA escrever
+        // "o investimento do mes" enxergando metade do investimento.
+        googleAds: googleAdsData,
+        metaAds: adsData,
         from: range.from,
         to: range.to,
       });
@@ -238,6 +245,7 @@ export default function Relatorios() {
           insights={prepared.insights}
           ads={adsData}
           googleBusiness={googleBusinessData}
+          googleAds={googleAdsData}
         />,
       ).toBlob();
       const href = URL.createObjectURL(blob);
@@ -268,6 +276,21 @@ export default function Relatorios() {
     const media = Array.isArray(insights.media) ? insights.media : [];
     const eng = media.reduce((a, m) => a + (m.like_count || 0) + (m.comments_count || 0), 0);
     const num = (n: number | null | undefined) => (n != null ? n.toLocaleString("pt-BR") : "—");
+    // Tráfego pago entra só quando existe. A mensagem é curta de propósito, e
+    // uma linha "Investimento: R$ 0,00" num cliente que não anuncia levanta
+    // uma dúvida que não precisava existir.
+    const blocoGoogleAds = googleAdsData
+      ? [
+        ``,
+        `💰 Google Ads:`,
+        `• Investimento: ${formatGoogleAdsMoney(googleAdsData.totals.cost, googleAdsData.account.currency)}`,
+        `• Cliques: ${num(googleAdsData.totals.clicks)}`,
+        ...(googleAdsData.totals.conversions > 0
+          ? [`• Conversões: ${num(googleAdsData.totals.conversions)}`]
+          : []),
+      ]
+      : [];
+
     const msg = [
       `Olá! 👋 Segue o resumo do desempenho do Instagram${p.username ? ` (@${p.username})` : ""} — período ${range.from} a ${range.to}:`,
       ``,
@@ -276,6 +299,7 @@ export default function Relatorios() {
       `• Visualizações: ${num(insights.views_total)}`,
       `• Engajamento: ${num(eng)} interações`,
       `• Seguidores: ${num(p.followers_count)}`,
+      ...blocoGoogleAds,
       ``,
       `O relatório completo está em anexo. Qualquer dúvida, estou à disposição! 🚀`,
     ].join("\n");
@@ -480,6 +504,7 @@ export default function Relatorios() {
           clientId={clientId}
           from={range.from}
           to={range.to}
+          onReport={setGoogleAdsData}
         />
       )}
 
