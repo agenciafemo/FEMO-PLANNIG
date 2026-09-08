@@ -271,6 +271,21 @@ export async function activeGoogleAdsCredentials(
  */
 export function googleAdsFailureCodes(payload: unknown): string[] {
   const codigos: string[] = [];
+
+  // O searchStream responde ARRAY — e o ERRO dele tambem vem em array. Ler
+  // `payload.error` direto num array devolve undefined, o codigo especifico
+  // some, e um 403 de "token nao aprovado" se disfarca de "sem permissao nesta
+  // conta" — que a listagem trata como problema de UMA conta e engole.
+  // Mesmo formato do sucesso, mesma armadilha.
+  const blocos = Array.isArray(payload) ? payload : [payload];
+  for (const bloco of blocos) {
+    for (const codigo of codigosDoBloco(bloco)) codigos.push(codigo);
+  }
+  return codigos;
+}
+
+function codigosDoBloco(payload: unknown): string[] {
+  const codigos: string[] = [];
   const erro = (payload as { error?: unknown })?.error;
   const detalhes = (erro as { details?: unknown })?.details;
   if (!Array.isArray(detalhes)) return codigos;

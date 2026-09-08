@@ -5,7 +5,7 @@
 // num módulo só transformaria cada mudança numa fonte em risco para a outra.
 
 import { supabase } from "@/integrations/supabase/client";
-import { edgeReasonCode, invokeEdge } from "@/lib/edgeInvoke";
+import { edgeDetail, edgeReasonCode, invokeEdge } from "@/lib/edgeInvoke";
 
 export type GoogleAdsStatus = {
   organization_id: string;
@@ -73,7 +73,11 @@ export type GoogleAdsInsights = {
 };
 
 export class GoogleAdsFunctionError extends Error {
-  constructor(public readonly reasonCode: string) {
+  constructor(
+    public readonly reasonCode: string,
+    /** O que a API do Google respondeu, quando a categoria não basta. */
+    public readonly detail: string | null = null,
+  ) {
     super(reasonCode);
     this.name = "GoogleAdsFunctionError";
   }
@@ -84,6 +88,7 @@ async function invokeGoogleAds<T>(body: Record<string, unknown>): Promise<T> {
   if (error) {
     throw new GoogleAdsFunctionError(
       (await edgeReasonCode(error)) ?? error.message ?? "google_ads_request_failed",
+      await edgeDetail(error),
     );
   }
   return data as T;
@@ -206,6 +211,22 @@ export function googleAdsErrorMessage(reasonCode: string): string {
   };
   return messages[reasonCode] ??
     "Não foi possível concluir a ação no Google Ads.";
+}
+
+/**
+ * Mensagem para a tela a partir do erro, já com o detalhe técnico quando ele
+ * existe. O detalhe vem por último e em outra frase: quem só quer saber o que
+ * fazer lê a primeira, quem vai diagnosticar lê as duas.
+ */
+export function googleAdsErrorText(erro: unknown): string {
+  const reason = erro instanceof GoogleAdsFunctionError
+    ? erro.reasonCode
+    : erro instanceof Error
+      ? erro.message
+      : "google_ads_request_failed";
+  const base = googleAdsErrorMessage(reason);
+  const detail = erro instanceof GoogleAdsFunctionError ? erro.detail : null;
+  return detail ? `${base} (${detail})` : base;
 }
 
 /** Formata na moeda DA CONTA — não no BRL da agência. */

@@ -59,6 +59,10 @@ async function discoverAccounts(
   const ids = await listAccessibleCustomerIds(accessToken);
   const encontradas = new Map<string, GoogleAdsAccount>();
   let loginCustomerId: string | null = null;
+  // Guarda o que o Google respondeu em cada conta pulada. Sem isso, "não
+  // consegui ler nenhuma conta" é um beco sem saída: nem a tela nem o log
+  // dizem POR QUE, e sobra adivinhar.
+  const recusas = new Set<string>();
 
   for (const customerId of ids.slice(0, 20)) {
     let conta: GoogleAdsAccount | null = null;
@@ -80,6 +84,7 @@ async function discoverAccounts(
       // ver com contas — e manda a agência procurar no lugar errado.
       if (!(error instanceof GoogleAdsApiError)) throw error;
       if (isFatalGoogleAdsReason(error.reasonCode)) throw error;
+      recusas.add(error.reasonCode);
       continue;
     }
     if (!conta) continue;
@@ -102,6 +107,7 @@ async function discoverAccounts(
       } catch (error) {
         if (!(error instanceof GoogleAdsApiError)) throw error;
         if (isFatalGoogleAdsReason(error.reasonCode)) throw error;
+        recusas.add(error.reasonCode);
       }
     }
   }
@@ -109,7 +115,17 @@ async function discoverAccounts(
   // Havia contas para consultar e nenhuma sobreviveu: não é "sem contas", é
   // falha. Devolver vazio aqui seria trocar um erro por uma informação errada.
   if (ids.length > 0 && encontradas.size === 0) {
-    throw new HttpError(502, "google_ads_accounts_unreadable");
+    throw new HttpError(
+      502,
+      "google_ads_accounts_unreadable",
+      undefined,
+      // Códigos crus, na tela. São sanitizados na origem (a-z0-9_.:-) e dizem
+      // em uma linha o que o Google recusou — a diferença entre corrigir e
+      // tentar de novo no escuro.
+      `${ids.length} conta(s) acessível(is), nenhuma legível. Google respondeu: ${
+        [...recusas].join(", ") || "sem código"
+      }`,
+    );
   }
 
   return {
