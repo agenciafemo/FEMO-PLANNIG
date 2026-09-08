@@ -1,6 +1,7 @@
-import { AlertTriangle, Check, FileText, Loader2 } from "lucide-react";
+import { Check, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { CHANNEL_ICONS } from "@/components/reports/channelIconMap";
 import {
   CANAIS,
   rotuloDoCanal,
@@ -18,26 +19,24 @@ type Props = {
   resultados: ResultadoCanal[] | null;
 };
 
-const GRUPOS: Array<{ chave: "organico" | "pago"; titulo: string; nota: string }> = [
-  {
-    chave: "organico",
-    titulo: "Orgânico",
-    nota: "alcance conquistado, sem investimento",
-  },
-  {
-    chave: "pago",
-    titulo: "Tráfego pago",
-    nota: "campanhas com investimento em mídia",
-  },
+const GRUPOS: Array<{ chave: "organico" | "pago"; titulo: string }> = [
+  { chave: "organico", titulo: "Orgânico" },
+  { chave: "pago", titulo: "Tráfego pago" },
 ];
+
+/** "2026-08-09" -> "09/08". O ano é o mesmo nos dois lados quase sempre. */
+function dia(iso: string): string {
+  const [, mes, d] = iso.split("-");
+  return d && mes ? `${d}/${mes}` : iso;
+}
 
 /**
  * Escolhe os canais e gera o relatório num clique.
  *
- * A tela antiga tinha um botão por fonte, espalhados entre os cards, e o gestor
- * precisava lembrar de clicar em todos — na ordem certa — antes de baixar o
- * PDF. Esquecer um não dava erro: o relatório saía sem aquele canal, e ninguém
- * percebia. Aqui a decisão vem antes da ação, e o resultado diz o que entrou.
+ * Os canais são LADRILHOS com a marca grande, não linhas com descrição: quem
+ * usa esta tela todo dia reconhece o logo antes de ler qualquer palavra. A
+ * explicação de cada canal virou `title` — continua acessível a quem passa o
+ * mouse, sem ocupar a tela de quem já sabe.
  */
 export function ReportBuilder({
   canais,
@@ -55,19 +54,15 @@ export function ReportBuilder({
     onChange([...proximo]);
   };
 
-  const semInstagram = !marcados.has("instagram");
-
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-brand" />
-            <h3 className="text-sm font-semibold">Montar relatório</h3>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Escolha os canais e gere tudo de uma vez · {periodo.from} a {periodo.to}
-          </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-brand" />
+          <h3 className="text-sm font-semibold">Montar relatório</h3>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {dia(periodo.from)} – {dia(periodo.to)}
+          </span>
         </div>
         <Button onClick={onGerar} disabled={gerando || canais.length === 0}>
           {gerando
@@ -76,44 +71,44 @@ export function ReportBuilder({
         </Button>
       </div>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      <div className="mt-4 flex flex-wrap gap-x-8 gap-y-4">
         {GRUPOS.map((grupo) => (
           <div key={grupo.chave}>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {grupo.titulo}
             </p>
-            <p className="mb-2 text-[11px] text-muted-foreground/80">{grupo.nota}</p>
-            <div className="space-y-1.5">
+            <div className="flex flex-wrap gap-2">
               {CANAIS.filter((canal) => canal.grupo === grupo.chave).map((canal) => {
                 const ativo = marcados.has(canal.id);
+                const Icon = CHANNEL_ICONS[canal.id];
                 return (
                   <button
                     key={canal.id}
                     type="button"
                     onClick={() => alternar(canal.id)}
                     aria-pressed={ativo}
+                    title={canal.descricao}
                     className={cn(
-                      "flex w-full items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors",
+                      "relative flex w-[86px] flex-col items-center gap-1.5 rounded-xl border px-2 py-3 transition-colors",
                       ativo
-                        ? "border-brand/50 bg-brand-soft/40"
-                        : "border-border/70 hover:border-brand/30",
+                        ? "border-brand/50 bg-brand-soft/40 text-foreground"
+                        : "border-border/70 text-muted-foreground hover:border-brand/30 hover:text-foreground",
                     )}
                   >
-                    <span
-                      className={cn(
-                        "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border",
-                        ativo
-                          ? "border-brand bg-brand text-background"
-                          : "border-border",
-                      )}
-                    >
-                      {ativo && <Check className="h-3 w-3" />}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium">{canal.label}</span>
-                      <span className="block text-[11px] text-muted-foreground">
-                        {canal.descricao}
+                    {/* O sinal fica na quina para não empurrar o logo do centro
+                        — o ladrilho não pode mudar de tamanho ao ser marcado. */}
+                    {ativo && (
+                      <span className="absolute right-1.5 top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-brand text-background">
+                        <Check className="h-2.5 w-2.5" />
                       </span>
+                    )}
+                    <Icon className={cn("h-7 w-7", ativo && "text-brand")} />
+                    {/* Caixa de DUAS linhas sempre, mesmo para nome curto: sem
+                        isso, "Google Meu Negócio" quebra em duas e estica só a
+                        fileira dele — os ladrilhos do orgânico ficavam 85px e
+                        os do pago 72px, e os dois grupos não se alinhavam. */}
+                    <span className="flex h-[26px] items-center text-center text-[10px] font-medium leading-tight">
+                      {canal.label}
                     </span>
                   </button>
                 );
@@ -123,38 +118,33 @@ export function ReportBuilder({
         ))}
       </div>
 
-      {/* O PDF é construído sobre o Instagram: cabeçalho, capa e as primeiras
-          páginas saem de lá. Sem ele, a análise e a mensagem funcionam, mas o
-          download não — melhor avisar antes do clique do que depois. */}
-      {semInstagram && (
-        <p className="mt-3 flex items-start gap-1.5 rounded-lg border border-warning/30 bg-warning-soft/30 px-3 py-2 text-[11px] text-muted-foreground">
-          <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-warning" />
-          Sem o Instagram, o PDF não é gerado — ele usa esses dados como base.
-          A análise com IA e a mensagem pro cliente continuam funcionando.
+      {/* O PDF é construído sobre o Instagram: capa e primeiras páginas saem de
+          lá. Avisar antes do clique é melhor que falhar depois. */}
+      {!marcados.has("instagram") && (
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          Sem o Instagram não há PDF — a análise e a mensagem continuam.
         </p>
       )}
 
       {resultados && resultados.length > 0 && (
-        <div className="mt-4 border-t border-border/60 pt-3">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            O que entrou
-          </p>
-          <div className="space-y-1">
-            {resultados.map((resultado) => (
-              <div key={resultado.id} className="flex items-start gap-2 text-[11px]">
-                <span
-                  className={cn(
-                    "mt-1 h-1.5 w-1.5 shrink-0 rounded-full",
-                    resultado.status === "ok" ? "bg-success" : "bg-warning",
-                  )}
-                />
-                <span className="font-medium">{rotuloDoCanal(resultado.id)}</span>
-                <span className="text-muted-foreground">
-                  {resultado.status === "ok" ? "incluído" : resultado.motivo}
-                </span>
-              </div>
-            ))}
-          </div>
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border/60 pt-3">
+          {resultados.map((resultado) => (
+            <span
+              key={resultado.id}
+              title={resultado.motivo ?? "incluído no relatório"}
+              className="flex items-center gap-1.5 text-[11px]"
+            >
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full",
+                  resultado.status === "ok" ? "bg-success" : "bg-warning",
+                )}
+              />
+              <span className={resultado.status === "ok" ? "" : "text-muted-foreground"}>
+                {rotuloDoCanal(resultado.id)}
+              </span>
+            </span>
+          ))}
         </div>
       )}
     </div>

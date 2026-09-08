@@ -41,7 +41,7 @@ export function ReportHistory({
     <div className="rounded-2xl border border-border bg-card p-5">
       <div className="mb-3 flex items-center gap-2">
         <FileClock className="h-4 w-4 text-brand" />
-        <h3 className="text-sm font-semibold">Histórico de relatórios deste cliente</h3>
+        <h3 className="text-sm font-semibold">Histórico</h3>
       </div>
 
       {historyQuery.isLoading ? (
@@ -50,7 +50,7 @@ export function ReportHistory({
         </div>
       ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Nenhum relatório gerado ainda. Os que você gerar a partir de agora ficam salvos aqui.
+          Nenhum relatório gerado ainda.
         </p>
       ) : (
         <div className="divide-y">
