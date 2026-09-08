@@ -83,7 +83,6 @@ async function discoverAccounts(
       // dizendo "nenhuma conta encontrada" para um problema que não tem nada a
       // ver com contas — e manda a agência procurar no lugar errado.
       if (!(error instanceof GoogleAdsApiError)) throw error;
-      if (isFatalGoogleAdsReason(error.reasonCode)) throw error;
       recusas.add(error.reasonCode);
       continue;
     }
@@ -106,18 +105,26 @@ async function discoverAccounts(
         }
       } catch (error) {
         if (!(error instanceof GoogleAdsApiError)) throw error;
-        if (isFatalGoogleAdsReason(error.reasonCode)) throw error;
         recusas.add(error.reasonCode);
       }
     }
   }
 
-  // Havia contas para consultar e nenhuma sobreviveu: não é "sem contas", é
-  // falha. Devolver vazio aqui seria trocar um erro por uma informação errada.
+  // A decisão fica para o FIM, e não no primeiro erro.
+  //
+  // Abortar na primeira falha fatal parece certo, mas quebra o caso misto: um
+  // login que enxerga a MCC real (que recusa) E uma conta de teste (que
+  // responde) perderia a segunda por causa da primeira. Coletando até o fim,
+  // sucesso parcial continua sendo sucesso.
+  //
+  // Só quando NADA foi lido é que vira erro — e aí sobe a razão mais
+  // específica que apareceu, não a genérica. "Sem contas" e "não consegui ler"
+  // são conclusões opostas para quem está na tela.
   if (ids.length > 0 && encontradas.size === 0) {
+    const especifica = [...recusas].find(isFatalGoogleAdsReason);
     throw new HttpError(
-      502,
-      "google_ads_accounts_unreadable",
+      especifica ? 409 : 502,
+      especifica ?? "google_ads_accounts_unreadable",
       undefined,
       // Códigos crus, na tela. São sanitizados na origem (a-z0-9_.:-) e dizem
       // em uma linha o que o Google recusou — a diferença entre corrigir e
