@@ -312,6 +312,29 @@ export function apiReason(status: number, payload?: unknown): string {
   return `google_ads_http_${status}`;
 }
 
+/**
+ * Este erro condena TODAS as contas, ou so aquela?
+ *
+ * A listagem pula a conta que falha, para uma conta problematica nao derrubar a
+ * lista inteira. Mas token nao aprovado, token invalido e sessao expirada nao
+ * sao problemas DAQUELA conta — eles vao falhar em todas. Pulando uma por uma,
+ * a funcao termina com lista vazia e SEM erro, e a tela diz "nenhuma conta
+ * encontrada" para um problema que nao tem nada a ver com contas.
+ *
+ * Foi exatamente o que aconteceu: a agencia foi vincular contas na MCC por
+ * causa de uma mensagem que na verdade significava "o token so le conta de
+ * teste".
+ */
+export function isFatalGoogleAdsReason(reasonCode: string): boolean {
+  return (
+    reasonCode === "google_ads_developer_token_not_approved" ||
+    reasonCode === "google_ads_developer_token_invalid" ||
+    reasonCode === "google_ads_developer_token_missing" ||
+    reasonCode === "google_ads_reauthorization_required" ||
+    reasonCode === "google_ads_rate_limited"
+  );
+}
+
 function adsHeaders(accessToken: string, loginCustomerId: string | null) {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
