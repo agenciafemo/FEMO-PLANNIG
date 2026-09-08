@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -24,12 +24,20 @@ import {
 } from "@/components/ui/chart";
 import { generateReport, getMetaInsights, type ReportResult, type MetaInsights } from "@/lib/reportRpc";
 import { ReportHistory } from "@/components/reports/ReportHistory";
+import { ReportBuilder } from "@/components/reports/ReportBuilder";
+import {
+  coletarCanais,
+  resumoDaColeta,
+  TODOS_OS_CANAIS,
+  type CanalId,
+  type ResultadoCanal,
+} from "@/lib/reportChannels";
 import { AdsReport } from "@/components/reports/AdsReport";
-import { loadClientAdAccounts, type AdsInsights } from "@/lib/adsRpc";
+import { getAdsInsights, loadClientAdAccounts, type AdsInsights } from "@/lib/adsRpc";
 import { GoogleBusinessReport } from "@/components/reports/GoogleBusinessReport";
 import { GoogleAdsReport } from "@/components/reports/GoogleAdsReport";
-import { formatGoogleAdsMoney, type GoogleAdsInsights } from "@/lib/googleAds";
-import type { GoogleBusinessInsights } from "@/lib/googleBusiness";
+import { formatGoogleAdsMoney, getGoogleAdsInsights, type GoogleAdsInsights } from "@/lib/googleAds";
+import { getGoogleBusinessInsights, type GoogleBusinessInsights } from "@/lib/googleBusiness";
 import { GOOGLE_ADS_ENABLED, GOOGLE_BUSINESS_ENABLED } from "@/lib/featureFlags";
 
 // Logo da Meta (o lucide-react não tem). Usa currentColor para herdar a cor.
@@ -144,10 +152,16 @@ export default function Relatorios() {
   const [googleBusinessData, setGoogleBusinessData] =
     useState<GoogleBusinessInsights | null>(null);
   const [googleAdsData, setGoogleAdsData] = useState<GoogleAdsInsights | null>(null);
+  const [canais, setCanais] = useState<CanalId[]>(TODOS_OS_CANAIS);
+  const [coleta, setColeta] = useState<ResultadoCanal[] | null>(null);
   useEffect(() => {
     setAdsData(null);
     setGoogleBusinessData(null);
     setGoogleAdsData(null);
+    // A seleção de canais NÃO reseta ao trocar de cliente: quem monta relatório
+    // costuma usar o mesmo recorte para a carteira inteira. O resultado da
+    // coleta, sim — ele é do cliente anterior.
+    setColeta(null);
   }, [clientId]);
 
   // Quais clientes têm conta de anúncios (Meta Ads) vinculada — para o ícone
@@ -196,6 +210,71 @@ export default function Relatorios() {
     enabled: false,
   });
   const result = reportQuery.data ?? null;
+
+  /**
+   * Busca todos os canais escolhidos e já escreve a análise.
+   *
+   * Tudo numa mutation, e não encadeando os useQuery existentes, porque a
+   * análise precisa dos dados dos canais NO MESMO tick. Passando pelo estado do
+   * React, o `generateReport` rodaria com os valores do render anterior — e a
+   * IA escreveria o relatório sem o canal que acabou de chegar.
+   */
+  const gerarRelatorio = useMutation({
+    mutationFn: async () => {
+      const dados = await coletarCanais(canais, {
+        meta: () => getMetaInsights({
+          clientId, from: range.from, to: range.to,
+          compareFrom: cmp.from, compareTo: cmp.to,
+        }),
+        metaAds: () => getAdsInsights({
+          clientId, from: range.from, to: range.to,
+        }),
+        googleAds: () => getGoogleAdsInsights({
+          organizationId: organizationId!, clientId, from: range.from, to: range.to,
+        }),
+        googleBusiness: () => getGoogleBusinessInsights({
+          organizationId: organizationId!, clientId, from: range.from, to: range.to,
+        }),
+      });
+
+      // Alimenta o cache e o estado para o resto da tela (cards, PDF, mensagem).
+      queryClient.setQueryData(insightsKey, dados.instagram);
+      setAdsData(dados.metaAds);
+      setGoogleAdsData(dados.googleAds);
+      setGoogleBusinessData(dados.googleBusiness);
+      setColeta(dados.resultados);
+
+      // A análise só faz sentido com alguma métrica; sem nenhuma, o texto seria
+      // inventado a partir da atividade de produção e pareceria um relatório.
+      const temAlgumDado = !!(dados.instagram || dados.metaAds || dados.googleAds ||
+        dados.googleBusiness);
+      if (!temAlgumDado) return { dados, analise: null };
+
+      const analise = await generateReport({
+        clientId,
+        insights: dados.instagram,
+        googleBusiness: dados.googleBusiness,
+        googleAds: dados.googleAds,
+        metaAds: dados.metaAds,
+        from: range.from,
+        to: range.to,
+      });
+      queryClient.setQueryData(
+        ["report-analysis", clientId, range.from, range.to],
+        analise,
+      );
+      return { dados, analise };
+    },
+    onSuccess: ({ dados, analise }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["report-history", organizationId, clientId],
+      });
+      const resumo = resumoDaColeta(dados.resultados);
+      if (analise) toast.success(resumo);
+      else toast.warning(`${resumo} Nenhum dado para a IA analisar.`);
+    },
+    onError: (erro: Error) => toast.error("Erro ao gerar: " + erro.message),
+  });
 
   // Erros → toast (o useQuery do v5 não tem onError).
   useEffect(() => {
@@ -402,6 +481,15 @@ export default function Relatorios() {
           </div>
 
           <ReportHistory organizationId={organizationId!} clientId={clientId} />
+
+          <ReportBuilder
+            canais={canais}
+            onChange={setCanais}
+            onGerar={() => gerarRelatorio.mutate()}
+            gerando={gerarRelatorio.isPending}
+            periodo={{ from: range.from, to: range.to }}
+            resultados={coleta}
+          />
 
           <AdsReport key={clientId} clientId={clientId} onReport={setAdsData} />
 
