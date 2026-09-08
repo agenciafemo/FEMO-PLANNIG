@@ -33,7 +33,8 @@ import {
   type ResultadoCanal,
 } from "@/lib/reportChannels";
 import { AdsReport } from "@/components/reports/AdsReport";
-import { getAdsInsights, loadClientAdAccounts, type AdsInsights } from "@/lib/adsRpc";
+import { getAdsInsights, type AdsInsights } from "@/lib/adsRpc";
+import { ClientConnectionIndicators } from "@/components/reports/ClientConnectionIndicators";
 import { GoogleBusinessReport } from "@/components/reports/GoogleBusinessReport";
 import { GoogleAdsReport } from "@/components/reports/GoogleAdsReport";
 import { formatGoogleAdsMoney, getGoogleAdsInsights, type GoogleAdsInsights } from "@/lib/googleAds";
@@ -48,7 +49,6 @@ function MetaIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-import { getClientMetaStatus } from "@/lib/metaRpc";
 import { usePersistedState } from "@/hooks/usePersistedState";
 
 const chartConfig = {
@@ -122,26 +122,6 @@ export default function Relatorios() {
     enabled: !!user && (isLegacy || !!organizationId),
   });
 
-  // Quais canais cada cliente tem conectado (para os ícones do grid).
-  // As tabelas Meta são fechadas (só via RPC), então consulto o status por
-  // cliente em paralelo. Fica em cache (staleTime 5min) — uma leva por vez.
-  const clientIds = (clients ?? []).map((c) => c.id);
-  const { data: connMap } = useQuery({
-    queryKey: ["report-connections", clientIds.join(",")],
-    queryFn: async () => {
-      const results = await Promise.all(
-        clientIds.map(async (id) => {
-          const rows = await getClientMetaStatus(id).catch(() => []);
-          const chans = rows
-            .filter((r) => r.connection_status === "active" && r.channel_type)
-            .map((r) => r.channel_type as string);
-          return [id, chans] as const;
-        }),
-      );
-      return Object.fromEntries(results) as Record<string, string[]>;
-    },
-    enabled: clientIds.length > 0,
-  });
 
   const clientId = selected;
   const currentClient = (clients ?? []).find((c) => c.id === clientId);
@@ -164,13 +144,6 @@ export default function Relatorios() {
     setColeta(null);
   }, [clientId]);
 
-  // Quais clientes têm conta de anúncios (Meta Ads) vinculada — para o ícone
-  // da Meta no card. Mesma key do AdsReport, então compartilha cache.
-  const { data: adMap } = useQuery({
-    queryKey: ["ads-mapping", organizationId],
-    queryFn: () => loadClientAdAccounts(organizationId!),
-    enabled: !!organizationId,
-  });
 
   // Métricas e análise ficam no CACHE do React Query (keyed por cliente), não
   // no estado do componente — assim sobrevivem a sair e voltar da página.
@@ -396,9 +369,10 @@ export default function Relatorios() {
       </div>
 
       {!selected ? (
+        <div className="space-y-3">
+        <p className="text-xs text-muted-foreground">✓ Conectado · ↗ Conta vinculada · ! Requer atenção · — Não conectado. Passe sobre cada ícone para ver o detalhe. Conexão não garante acesso a todas as métricas.</p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {(clients ?? []).map((c) => {
-            const chans = connMap?.[c.id] ?? [];
             return (
               // Abrir o relatório e abrir a ficha são duas ações diferentes, e
               // um <a> dentro de um <button> não é HTML válido: o link fica
@@ -420,14 +394,7 @@ export default function Relatorios() {
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{c.name}</p>
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <Instagram className={`h-4 w-4 ${chans.includes("instagram") ? "text-brand" : "text-muted-foreground/30"}`} />
-                      <Facebook className={`h-4 w-4 ${chans.includes("facebook_page") ? "text-brand" : "text-muted-foreground/30"}`} />
-                      <MetaIcon className={`h-4 w-4 ${adMap?.[c.id] ? "text-brand" : "text-muted-foreground/30"}`} />
-                      <span className="ml-1 text-xs text-muted-foreground">
-                        {chans.length > 0 ? "Conectado" : "Sem conexão"}
-                      </span>
-                    </div>
+                    <ClientConnectionIndicators clientId={c.id} organizationId={organizationId} MetaIcon={MetaIcon} />
                   </div>
                 </button>
                 {/* Aparece no hover/foco: um ícone fixo por card, numa grade
@@ -443,6 +410,7 @@ export default function Relatorios() {
               </div>
             );
           })}
+        </div>
         </div>
       ) : (
         <>
