@@ -367,3 +367,37 @@ Deno.test("erro de uma conta só continua sendo pulável", () => {
     assertEquals(isFatalGoogleAdsReason(razao), false);
   }
 });
+
+// ---------------------------------------------------------------------------
+// O searchStream responde ARRAY — e o ERRO dele também vem em array. Ler
+// `payload.error` num array devolve undefined: o código específico some e um
+// "token não aprovado" se disfarça de "sem permissão nesta conta", que a
+// listagem trata como problema de UMA conta e engole. Mesma armadilha do
+// sucesso, mesmo lugar.
+// ---------------------------------------------------------------------------
+Deno.test("acha o código de erro mesmo quando o corpo vem em array", () => {
+  const corpoEmArray = [erro403("DEVELOPER_TOKEN_NOT_APPROVED")];
+  assertEquals(
+    googleAdsFailureCodes(corpoEmArray),
+    ["DEVELOPER_TOKEN_NOT_APPROVED"],
+  );
+  assertEquals(
+    apiReason(403, corpoEmArray),
+    "google_ads_developer_token_not_approved",
+  );
+  // E o de sempre, em objeto, continua funcionando.
+  assertEquals(
+    apiReason(403, erro403("DEVELOPER_TOKEN_NOT_APPROVED")),
+    "google_ads_developer_token_not_approved",
+  );
+});
+
+Deno.test("junta os códigos de vários blocos do array", () => {
+  assertEquals(
+    googleAdsFailureCodes([
+      erro403("USER_PERMISSION_DENIED"),
+      erro403("CUSTOMER_NOT_ENABLED"),
+    ]),
+    ["USER_PERMISSION_DENIED", "CUSTOMER_NOT_ENABLED"],
+  );
+});

@@ -31,7 +31,7 @@ import {
   formatGoogleAdsMoney,
   getGoogleAdsInsights,
   getGoogleAdsStatus,
-  googleAdsErrorMessage,
+  googleAdsErrorText,
   listGoogleAdsAccounts,
   selectGoogleAdsAccount,
   startGoogleAdsOAuth,
@@ -42,10 +42,6 @@ const number = new Intl.NumberFormat("pt-BR");
 const chartConfig = {
   investimento: { label: "Investimento", color: "hsl(217 91% 60%)" },
 } satisfies ChartConfig;
-
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : "google_ads_request_failed";
-}
 
 type Props = {
   clientId: string;
@@ -100,7 +96,7 @@ export function GoogleAdsReport({ clientId, from, to, onReport }: Props) {
       );
       window.location.assign(url);
     },
-    onError: (error) => toast.error(googleAdsErrorMessage(reasonOf(error))),
+    onError: (error) => toast.error(googleAdsErrorText(error)),
   });
 
   const vincular = useMutation({
@@ -114,7 +110,7 @@ export function GoogleAdsReport({ clientId, from, to, onReport }: Props) {
       setEscolhendoConta(false);
       queryClient.invalidateQueries({ queryKey: ["google-ads-status"] });
     },
-    onError: (error) => toast.error(googleAdsErrorMessage(reasonOf(error))),
+    onError: (error) => toast.error(googleAdsErrorText(error)),
   });
 
   const desconectar = useMutation({
@@ -123,7 +119,7 @@ export function GoogleAdsReport({ clientId, from, to, onReport }: Props) {
       toast.success("Conta Google Ads desconectada.");
       queryClient.invalidateQueries({ queryKey: ["google-ads-status"] });
     },
-    onError: (error) => toast.error(googleAdsErrorMessage(reasonOf(error))),
+    onError: (error) => toast.error(googleAdsErrorText(error)),
   });
 
   const status = statusQuery.data;
@@ -218,7 +214,7 @@ export function GoogleAdsReport({ clientId, from, to, onReport }: Props) {
         </div>
       ) : metricsQuery.isError ? (
         <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm">
-          {googleAdsErrorMessage(reasonOf(metricsQuery.error))}
+          {googleAdsErrorText(metricsQuery.error)}
         </div>
       ) : dados ? (
         <div className="mt-4 space-y-4">
@@ -356,7 +352,7 @@ export function GoogleAdsReport({ clientId, from, to, onReport }: Props) {
             </div>
           ) : contasQuery.isError ? (
             <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
-              {googleAdsErrorMessage(reasonOf(contasQuery.error))}
+              {googleAdsErrorText(contasQuery.error)}
             </p>
           ) : (contasQuery.data ?? []).length === 0 ? (
             <p className="rounded-lg border border-border p-3 text-sm text-muted-foreground">

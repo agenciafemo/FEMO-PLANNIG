@@ -57,6 +57,25 @@ export async function invokeEdge<T = unknown>(
  * Devolve `null` quando não há corpo legível (erro de rede, HTML de proxy),
  * para quem chama poder cair numa mensagem genérica sem quebrar.
  */
+/**
+ * Frase de diagnóstico que a Edge Function anexou ao erro.
+ *
+ * O `reason_code` diz a CATEGORIA; o `detail` diz o que a API de terceiro
+ * respondeu de fato. Sem ele, um erro do tipo "não consegui ler nenhuma conta"
+ * é um beco sem saída: nem a tela nem o log dizem por quê, e sobra adivinhar.
+ */
+export async function edgeDetail(error: unknown): Promise<string | null> {
+  const context = (error as { context?: unknown })?.context;
+  if (!context || typeof (context as Response).json !== "function") return null;
+  try {
+    const body = await (context as Response).clone().json();
+    const detail = (body as { detail?: unknown })?.detail;
+    return typeof detail === "string" && detail ? detail : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function edgeReasonCode(error: unknown): Promise<string | null> {
   const context = (error as { context?: unknown })?.context;
   if (!context || typeof (context as Response).json !== "function") return null;
