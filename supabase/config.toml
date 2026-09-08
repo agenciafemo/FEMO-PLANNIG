@@ -120,3 +120,14 @@ verify_jwt = true
 
 [functions.google-business-disconnect]
 verify_jwt = true
+
+[functions.google-ads-oauth-start]
+verify_jwt = true
+
+# Publica: recebe o redirecionamento do Google, que nao carrega o JWT do app.
+# A defesa e o `state` de uso unico, guardado so como hash e com expiracao.
+[functions.google-ads-oauth-callback]
+verify_jwt = false
+
+[functions.google-ads]
+verify_jwt = true
