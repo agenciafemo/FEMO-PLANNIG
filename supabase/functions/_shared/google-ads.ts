@@ -256,7 +256,55 @@ export async function activeGoogleAdsCredentials(
   }
 }
 
-function apiReason(status: number): string {
+/**
+ * Extrai os codigos de erro que o Google Ads esconde dentro do corpo.
+ *
+ * O status HTTP sozinho mente: um token so aprovado para conta de teste e um
+ * usuario sem permissao na conta chegam AMBOS como 403. Traduzir pelo status
+ * manda a pessoa conferir acesso de conta quando o problema e aprovacao do
+ * token — dois caminhos completamente diferentes.
+ *
+ * A forma e `error.details[].errors[].errorCode.<algumTipo>`, e o nome do tipo
+ * varia (authorizationError, quotaError...). Por isso a leitura e por forma, e
+ * nao por caminho fixo: caminho fixo quebra em silencio quando o Google muda a
+ * familia do erro, e volta a caber no `else` generico.
+ */
+export function googleAdsFailureCodes(payload: unknown): string[] {
+  const codigos: string[] = [];
+  const erro = (payload as { error?: unknown })?.error;
+  const detalhes = (erro as { details?: unknown })?.details;
+  if (!Array.isArray(detalhes)) return codigos;
+
+  for (const detalhe of detalhes) {
+    const erros = (detalhe as { errors?: unknown })?.errors;
+    if (!Array.isArray(erros)) continue;
+    for (const item of erros) {
+      const errorCode = (item as { errorCode?: unknown })?.errorCode;
+      if (!errorCode || typeof errorCode !== "object") continue;
+      for (const valor of Object.values(errorCode as Record<string, unknown>)) {
+        if (typeof valor === "string" && valor) codigos.push(valor);
+      }
+    }
+  }
+  return codigos;
+}
+
+export function apiReason(status: number, payload?: unknown): string {
+  // O corpo tem prioridade sobre o status: ele e especifico, o status e uma
+  // familia inteira.
+  const codigos = new Set(googleAdsFailureCodes(payload));
+  if (
+    codigos.has("DEVELOPER_TOKEN_NOT_APPROVED") ||
+    codigos.has("DEVELOPER_TOKEN_PROHIBITED")
+  ) {
+    return "google_ads_developer_token_not_approved";
+  }
+  if (codigos.has("DEVELOPER_TOKEN_INVALID")) {
+    return "google_ads_developer_token_invalid";
+  }
+  if (codigos.has("CUSTOMER_NOT_ENABLED")) return "google_ads_customer_not_enabled";
+  if (codigos.has("USER_PERMISSION_DENIED")) return "google_ads_permission_denied";
+
   if (status === 401) return "google_ads_reauthorization_required";
   if (status === 403) return "google_ads_permission_denied";
   if (status === 404) return "google_ads_customer_not_found";
@@ -294,7 +342,7 @@ export async function listAccessibleCustomerIds(
   );
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
-    throw new GoogleAdsApiError(response.status, apiReason(response.status));
+    throw new GoogleAdsApiError(response.status, apiReason(response.status, payload));
   }
   const names = Array.isArray(payload.resourceNames) ? payload.resourceNames : [];
   const ids: string[] = [];
@@ -347,7 +395,7 @@ export async function runGaql(input: {
   );
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new GoogleAdsApiError(response.status, apiReason(response.status));
+    throw new GoogleAdsApiError(response.status, apiReason(response.status, payload));
   }
   return unwrapSearchStream(payload);
 }

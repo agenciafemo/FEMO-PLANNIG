@@ -1,4 +1,6 @@
 import {
+  apiReason,
+  googleAdsFailureCodes,
   fromMicros,
   parseCustomerClientRows,
   normalizeCustomerId,
@@ -280,4 +282,58 @@ Deno.test("mantém os nomes de campo que o relatório consome", () => {
     "date",
     "impressions",
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// O status HTTP sozinho MENTE. Token aprovado só para conta de teste e usuário
+// sem permissão na conta chegam AMBOS como 403 — e mandam a pessoa para
+// caminhos opostos. O código real vem enterrado em error.details[].errors[].
+// ---------------------------------------------------------------------------
+const erro403 = (codigo: string) => ({
+  error: {
+    code: 403,
+    status: "PERMISSION_DENIED",
+    details: [
+      {
+        "@type": "type.googleapis.com/google.ads.googleads.v25.errors.GoogleAdsFailure",
+        errors: [
+          { errorCode: { authorizationError: codigo }, message: "..." },
+        ],
+      },
+    ],
+  },
+});
+
+Deno.test("token de conta de teste não vira 'sem permissão na conta'", () => {
+  assertEquals(
+    apiReason(403, erro403("DEVELOPER_TOKEN_NOT_APPROVED")),
+    "google_ads_developer_token_not_approved",
+  );
+  // Sem ler o corpo, este mesmo 403 cairia em permission_denied e mandaria o
+  // usuário conferir acesso de conta — o problema é aprovação do token.
+  assertEquals(apiReason(403), "google_ads_permission_denied");
+});
+
+Deno.test("distingue os outros erros que compartilham o 403", () => {
+  assertEquals(
+    apiReason(403, erro403("USER_PERMISSION_DENIED")),
+    "google_ads_permission_denied",
+  );
+  assertEquals(
+    apiReason(403, erro403("CUSTOMER_NOT_ENABLED")),
+    "google_ads_customer_not_enabled",
+  );
+  assertEquals(
+    apiReason(403, erro403("DEVELOPER_TOKEN_INVALID")),
+    "google_ads_developer_token_invalid",
+  );
+});
+
+Deno.test("corpo desconhecido ou ausente cai no status, sem quebrar", () => {
+  assertEquals(googleAdsFailureCodes(null), []);
+  assertEquals(googleAdsFailureCodes({ error: {} }), []);
+  assertEquals(googleAdsFailureCodes({ error: { details: "nao e array" } }), []);
+  assertEquals(apiReason(401), "google_ads_reauthorization_required");
+  assertEquals(apiReason(429), "google_ads_rate_limited");
+  assertEquals(apiReason(500), "google_ads_http_500");
 });

@@ -178,6 +178,12 @@ export function googleAdsErrorMessage(reasonCode: string): string {
       "Somente ADM ou Head pode gerenciar a conexão do Google Ads.",
     google_ads_not_connected:
       "Conecte a conta Google da agência antes de vincular uma conta de anúncios.",
+    google_ads_developer_token_not_approved:
+      "O token de desenvolvedor da agência só tem acesso a contas de TESTE. Para ler contas reais, solicite o acesso básico em Central de API → Nível de acesso, no Google Ads. A conexão e a conta vinculada estão certas.",
+    google_ads_developer_token_invalid:
+      "O Google não aceitou o token de desenvolvedor. Confira o valor na Central de API da conta de administrador.",
+    google_ads_customer_not_enabled:
+      "Esta conta de anúncios está desativada ou cancelada no Google Ads.",
     google_ads_developer_token_missing:
       "Falta o token de desenvolvedor do Google Ads. Ele é gerado na conta de administrador (MCC) e precisa de aprovação do Google — a conexão está certa, o que falta é esse acesso.",
     google_ads_account_not_linked:
