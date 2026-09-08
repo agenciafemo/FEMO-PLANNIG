@@ -4,6 +4,8 @@
 
 import { invokeEdge } from "@/lib/edgeInvoke";
 import type { GoogleBusinessInsights } from "@/lib/googleBusiness";
+import type { GoogleAdsInsights } from "@/lib/googleAds";
+import type { AdsInsights } from "@/lib/adsRpc";
 
 export interface ReportResult {
   analysis: string;
@@ -32,6 +34,11 @@ export async function generateReport(input: {
   to?: string; // ISO
   insights?: MetaInsights | null; // métricas já buscadas, para a IA analisar
   googleBusiness?: GoogleBusinessInsights | null;
+  // As DUAS fontes de tráfego pago vão juntas de propósito. Mandar só uma faria
+  // a IA escrever "o investimento do mês" enxergando metade do investimento —
+  // um número errado com cara de certo, que o gestor levaria para o cliente.
+  googleAds?: GoogleAdsInsights | null;
+  metaAds?: AdsInsights | null;
 }): Promise<ReportResult> {
   const { data, error } = await invokeEdge("generate-report", {
     body: {
@@ -40,6 +47,8 @@ export async function generateReport(input: {
       to: input.to,
       insights: input.insights ?? undefined,
       google_business: input.googleBusiness ?? undefined,
+      google_ads: input.googleAds ?? undefined,
+      meta_ads: input.metaAds ?? undefined,
     },
   });
   if (error) throw error;

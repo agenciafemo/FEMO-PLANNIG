@@ -27,6 +27,12 @@ interface ReportBody {
   // Métricas normalizadas do Perfil da Empresa no Google, já obtidas pela
   // Edge Function autenticada google-business-insights.
   google_business?: unknown;
+  // Trafego PAGO, uma chave por plataforma. Separadas de proposito: sao moedas,
+  // vocabularios e objetivos diferentes, e somar as duas num "investimento
+  // total" e o tipo de conta que so faz sentido depois de alguem decidir que
+  // faz — nao dentro de um parser.
+  google_ads?: unknown;
+  meta_ads?: unknown;
 }
 
 // Chama o Gemini com o prompt e devolve o texto. A chave vem SÓ do env
@@ -189,6 +195,63 @@ Deno.serve(async (request) => {
       }
       : null;
 
+    // -----------------------------------------------------------------------
+    // Trafego pago: Google Ads e Meta Ads.
+    // -----------------------------------------------------------------------
+    const googleAdsInput = body.google_ads as {
+      account?: { name?: string; currency?: string | null };
+      totals?: {
+        cost?: number; impressions?: number; clicks?: number;
+        conversions?: number; ctr?: number; cpc?: number;
+        cost_per_conversion?: number;
+      };
+      campaigns?: Array<{ name?: string; cost?: number; clicks?: number; conversions?: number }>;
+    } | undefined;
+    const googleAdsTotals = googleAdsInput?.totals;
+    const metricasGoogleAds = googleAdsTotals
+      ? {
+        conta: googleAdsInput?.account?.name ?? "Conta vinculada",
+        // A moeda viaja junto com os numeros. Sem ela a IA assume real e
+        // escreve "R$" em cima de uma conta que fatura em dolar.
+        moeda: googleAdsInput?.account?.currency ?? "BRL",
+        investimento: Number(googleAdsTotals.cost ?? 0),
+        impressoes: Number(googleAdsTotals.impressions ?? 0),
+        cliques: Number(googleAdsTotals.clicks ?? 0),
+        ctr_percentual: Number(googleAdsTotals.ctr ?? 0),
+        custo_por_clique: Number(googleAdsTotals.cpc ?? 0),
+        conversoes: Number(googleAdsTotals.conversions ?? 0),
+        custo_por_conversao: Number(googleAdsTotals.cost_per_conversion ?? 0),
+        principais_campanhas: (googleAdsInput?.campaigns ?? []).slice(0, 5).map((c) => ({
+          nome: c?.name ?? "—",
+          investimento: Number(c?.cost ?? 0),
+          cliques: Number(c?.clicks ?? 0),
+          conversoes: Number(c?.conversions ?? 0),
+        })),
+      }
+      : null;
+
+    const metaAdsInput = body.meta_ads as {
+      conta?: { nome?: string | null };
+      totais?: {
+        gasto?: number; impressoes?: number; alcance?: number;
+        cliques?: number; ctr?: number; cpc?: number;
+      };
+    } | undefined;
+    const metaAdsTotais = metaAdsInput?.totais;
+    const metricasMetaAds = metaAdsTotais
+      ? {
+        conta: metaAdsInput?.conta?.nome ?? "Conta vinculada",
+        investimento: Number(metaAdsTotais.gasto ?? 0),
+        impressoes: Number(metaAdsTotais.impressoes ?? 0),
+        alcance: Number(metaAdsTotais.alcance ?? 0),
+        cliques: Number(metaAdsTotais.cliques ?? 0),
+        ctr_percentual: Number(metaAdsTotais.ctr ?? 0),
+        custo_por_clique: Number(metaAdsTotais.cpc ?? 0),
+      }
+      : null;
+
+    const temPago = !!(metricasGoogleAds || metricasMetaAds);
+
     const prompt = [
       "Você é um analista de social media da agência Norteia.",
       "Escreva uma análise de relatório mensal, em português do Brasil, clara, objetiva e",
@@ -200,12 +263,22 @@ Deno.serve(async (request) => {
       metricasGoogle
         ? "Inclua uma seção curta sobre presença local no Google. Diferencie visualizações na Busca e no Maps de ações de intenção (ligações, rotas e cliques no site). Não trate esses dados orgânicos como tráfego pago e não invente conversões."
         : "Não mencione métricas do Perfil da Empresa no Google, pois elas não foram fornecidas.",
+      temPago
+        ? "Inclua uma seção de TRÁFEGO PAGO. Trate cada plataforma separadamente: Google Ads e Meta Ads são investimentos distintos, com públicos e objetivos diferentes. NÃO some os investimentos das duas num total único e NÃO compare o custo por clique de uma com o da outra como se fossem equivalentes. Use o símbolo da moeda informada em cada conta."
+        : "Não mencione tráfego pago: não há dados de investimento no período.",
+      metricasGoogleAds && metricasGoogle
+        ? "ATENÇÃO: o Perfil da Empresa (orgânico) e o Google Ads (pago) são coisas diferentes dentro do Google. Não misture os números nem atribua ao anúncio um resultado que veio da busca orgânica."
+        : "",
       "Estruture com títulos curtos. Não use tabelas. Tom encorajador, mas honesto.",
       "",
       metricas ? "Métricas reais do Instagram (JSON):" : "",
       metricas ? JSON.stringify(metricas, null, 2) : "",
       metricasGoogle ? "Métricas reais do Perfil da Empresa no Google (JSON):" : "",
       metricasGoogle ? JSON.stringify(metricasGoogle, null, 2) : "",
+      metricasGoogleAds ? "Tráfego pago no Google Ads (JSON):" : "",
+      metricasGoogleAds ? JSON.stringify(metricasGoogleAds, null, 2) : "",
+      metricasMetaAds ? "Tráfego pago no Meta Ads (JSON):" : "",
+      metricasMetaAds ? JSON.stringify(metricasMetaAds, null, 2) : "",
       "Atividade de produção no Norteia (JSON):",
       JSON.stringify(dados, null, 2),
     ].filter(Boolean).join("\n");
@@ -230,8 +303,13 @@ Deno.serve(async (request) => {
             dados,
             // Mantém as chaves históricas do Instagram no nível raiz para não
             // quebrar relatórios antigos e acrescenta o Google como seção.
-            metricas: metricas || metricasGoogle
-              ? { ...(metricas ?? {}), google_business: metricasGoogle }
+            metricas: metricas || metricasGoogle || metricasGoogleAds || metricasMetaAds
+              ? {
+                ...(metricas ?? {}),
+                google_business: metricasGoogle,
+                google_ads: metricasGoogleAds,
+                meta_ads: metricasMetaAds,
+              }
               : null,
             created_by: userData.user.id,
           });
