@@ -4,6 +4,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/lib/edgeInvoke";
+import { metaReportError } from "@/lib/metaReportError";
 
 export interface AdAccount {
   account_id: string; // numérico, sem "act_"
@@ -49,7 +50,7 @@ export async function listAdAccounts(): Promise<AdAccount[]> {
   const { data, error } = await invokeEdge("meta-ads-insights", {
     body: { mode: "accounts" },
   });
-  if (error) throw error;
+  if (error) throw await metaReportError(error);
   return (data as { accounts: AdAccount[] }).accounts ?? [];
 }
 
@@ -70,7 +71,7 @@ export async function getAdsInsights(input: {
       date_preset: input.datePreset,
     },
   });
-  if (error) throw error;
+  if (error) throw await metaReportError(error);
   return data as AdsInsights;
 }
 

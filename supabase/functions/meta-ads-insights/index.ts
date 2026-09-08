@@ -9,8 +9,9 @@ import {
   jsonResponse,
   methodNotAllowed,
 } from "../_shared/http.ts";
-import { createUserClient, requiredEnv } from "../_shared/supabase.ts";
+import { createUserClient } from "../_shared/supabase.ts";
 import { metaConfig } from "../_shared/meta-client.ts";
+import { insightsFailure } from "../_shared/meta-insights.ts";
 
 // Relatório de TRÁFEGO PAGO (Meta Ads).
 //
@@ -24,7 +25,10 @@ import { metaConfig } from "../_shared/meta-client.ts";
 //                 client_ad_accounts) + quebra por campanha.
 
 // appsecret_proof (HMAC-SHA256 do token com o App Secret) — exigido nas chamadas.
-async function appSecretProof(token: string, appSecret: string): Promise<string> {
+async function appSecretProof(
+  token: string,
+  appSecret: string,
+): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(appSecret),
@@ -74,9 +78,22 @@ async function metaGet(
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    // Loga o erro real do Meta (aparece nos logs) e devolve o status no code.
-    console.error("meta_ads_error", res.status, JSON.stringify(json).slice(0, 800));
-    throw new HttpError(502, `meta_${res.status}`);
+    console.error(
+      "meta_ads_error",
+      res.status,
+      json?.error?.code,
+      json?.error?.error_subcode,
+    );
+    const failure = insightsFailure(json, res.status, "ads_read");
+    if (failure.reasonCode === "meta_reauthorization_required") {
+      throw new HttpError(
+        409,
+        "meta_ads_token_invalid",
+        res.status,
+        "A autorização de anúncios da agência foi recusada pela Meta. Um administrador precisa renovar a credencial de Meta Ads; reconectar apenas o Instagram não resolve esta etapa.",
+      );
+    }
+    throw failure;
   }
   return json;
 }
@@ -100,7 +117,15 @@ Deno.serve(async (request) => {
     const { data: userData, error: userError } = await supabase.auth.getUser();
     if (userError || !userData?.user) throw new HttpError(401, "unauthorized");
 
-    const adsToken = requiredEnv("META_ADS_SYSTEM_TOKEN");
+    const adsToken = Deno.env.get("META_ADS_SYSTEM_TOKEN")?.trim();
+    if (!adsToken) {
+      throw new HttpError(
+        409,
+        "meta_ads_not_configured",
+        undefined,
+        "O acesso de Meta Ads da agência ainda não está configurado. Um administrador precisa configurar a credencial de anúncios.",
+      );
+    }
     const cfg = metaConfig();
     const base = `https://graph.facebook.com/${cfg.graphVersion}`;
     const proof = await appSecretProof(adsToken, cfg.appSecret);
@@ -158,7 +183,10 @@ Deno.serve(async (request) => {
       const today = new Date().toISOString().slice(0, 10);
       const to = body.to ?? today;
       const from = body.from ??
-        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(
+          0,
+          10,
+        );
       const timeRange = JSON.stringify({ since: from, until: to });
       applyPeriod = (u) => u.searchParams.set("time_range", timeRange);
       periodo = { de: from, ate: to };
@@ -212,7 +240,10 @@ Deno.serve(async (request) => {
 
     return jsonResponse(
       {
-        conta: { id: mapping.ad_account_id, nome: mapping.ad_account_name ?? null },
+        conta: {
+          id: mapping.ad_account_id,
+          nome: mapping.ad_account_name ?? null,
+        },
         periodo,
         totais,
         campanhas: campaigns,
