@@ -1,6 +1,7 @@
 import {
   apiReason,
   googleAdsFailureCodes,
+  isFatalGoogleAdsReason,
   fromMicros,
   parseCustomerClientRows,
   normalizeCustomerId,
@@ -336,4 +337,33 @@ Deno.test("corpo desconhecido ou ausente cai no status, sem quebrar", () => {
   assertEquals(apiReason(401), "google_ads_reauthorization_required");
   assertEquals(apiReason(429), "google_ads_rate_limited");
   assertEquals(apiReason(500), "google_ads_http_500");
+});
+
+// ---------------------------------------------------------------------------
+// A listagem pula a conta que falha — mas erro de TOKEN falha em TODAS. Pular
+// uma por uma devolve lista vazia sem erro, e a tela diz "nenhuma conta
+// encontrada" para um problema que não tem nada a ver com contas. Aconteceu:
+// a agência foi vincular contas na MCC por causa dessa mensagem.
+// ---------------------------------------------------------------------------
+Deno.test("erro de token condena todas as contas e não pode ser engolido", () => {
+  for (const razao of [
+    "google_ads_developer_token_not_approved",
+    "google_ads_developer_token_invalid",
+    "google_ads_developer_token_missing",
+    "google_ads_reauthorization_required",
+    "google_ads_rate_limited",
+  ]) {
+    assertEquals(isFatalGoogleAdsReason(razao), true);
+  }
+});
+
+Deno.test("erro de uma conta só continua sendo pulável", () => {
+  for (const razao of [
+    "google_ads_permission_denied",
+    "google_ads_customer_not_found",
+    "google_ads_customer_not_enabled",
+    "google_ads_http_500",
+  ]) {
+    assertEquals(isFatalGoogleAdsReason(razao), false);
+  }
 });

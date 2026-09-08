@@ -22,6 +22,7 @@ import {
   buildInsightsQuery,
   type GoogleAdsAccount,
   GoogleAdsApiError,
+  isFatalGoogleAdsReason,
   listAccessibleCustomerIds,
   normalizeCustomerId,
   normalizeGoogleAdsInsights,
@@ -73,7 +74,12 @@ async function discoverAccounts(
     } catch (error) {
       // Uma conta sem permissão não pode derrubar a lista inteira: as outras
       // ainda servem, e o head precisa ver o que dá para vincular hoje.
+      //
+      // Mas erro de TOKEN vai falhar em todas. Engolir um desses deixa a tela
+      // dizendo "nenhuma conta encontrada" para um problema que não tem nada a
+      // ver com contas — e manda a agência procurar no lugar errado.
       if (!(error instanceof GoogleAdsApiError)) throw error;
+      if (isFatalGoogleAdsReason(error.reasonCode)) throw error;
       continue;
     }
     if (!conta) continue;
@@ -95,8 +101,15 @@ async function discoverAccounts(
         }
       } catch (error) {
         if (!(error instanceof GoogleAdsApiError)) throw error;
+        if (isFatalGoogleAdsReason(error.reasonCode)) throw error;
       }
     }
+  }
+
+  // Havia contas para consultar e nenhuma sobreviveu: não é "sem contas", é
+  // falha. Devolver vazio aqui seria trocar um erro por uma informação errada.
+  if (ids.length > 0 && encontradas.size === 0) {
+    throw new HttpError(502, "google_ads_accounts_unreadable");
   }
 
   return {
