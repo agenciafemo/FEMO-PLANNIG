@@ -3,6 +3,7 @@
 // RLS). Nenhuma chave ou lógica de IA vive no frontend.
 
 import { invokeEdge } from "@/lib/edgeInvoke";
+import { metaReportError } from "@/lib/metaReportError";
 import type { GoogleBusinessInsights } from "@/lib/googleBusiness";
 import type { GoogleAdsInsights } from "@/lib/googleAds";
 import type { AdsInsights } from "@/lib/adsRpc";
@@ -123,6 +124,6 @@ export async function getMetaInsights(input: {
       compare_to: input.compareTo,
     },
   });
-  if (error) throw error;
+  if (error) throw await metaReportError(error);
   return data as MetaInsights;
 }
