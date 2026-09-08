@@ -32,3 +32,11 @@ export const GOOGLE_BUSINESS_ENABLED =
 // `comment-audios`, os botões de gravar/enviar áudio ficam ocultos no portal
 // (comentários de texto continuam funcionando). Religar quando a função existir.
 export const PUBLIC_AUDIO_ENABLED = false;
+
+// Tráfego pago no Google (Google Ads). Desligado por padrão e assim deve
+// ficar até existir um DEVELOPER TOKEN aprovado: sem ele a conexão até
+// funciona, mas toda leitura de métrica falha. Um card que só sabe dar erro
+// gasta a paciência da equipe e vira "aquilo ali não funciona".
+// Ligar com VITE_GOOGLE_ADS_ENABLED="true".
+export const GOOGLE_ADS_ENABLED =
+  import.meta.env.VITE_GOOGLE_ADS_ENABLED === "true";

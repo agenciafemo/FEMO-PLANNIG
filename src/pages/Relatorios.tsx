@@ -27,8 +27,9 @@ import { ReportHistory } from "@/components/reports/ReportHistory";
 import { AdsReport } from "@/components/reports/AdsReport";
 import { loadClientAdAccounts, type AdsInsights } from "@/lib/adsRpc";
 import { GoogleBusinessReport } from "@/components/reports/GoogleBusinessReport";
+import { GoogleAdsReport } from "@/components/reports/GoogleAdsReport";
 import type { GoogleBusinessInsights } from "@/lib/googleBusiness";
-import { GOOGLE_BUSINESS_ENABLED } from "@/lib/featureFlags";
+import { GOOGLE_ADS_ENABLED, GOOGLE_BUSINESS_ENABLED } from "@/lib/featureFlags";
 
 // Logo da Meta (o lucide-react não tem). Usa currentColor para herdar a cor.
 function MetaIcon({ className }: { className?: string }) {
@@ -468,6 +469,17 @@ export default function Relatorios() {
           from={range.from}
           to={range.to}
           onReport={setGoogleBusinessData}
+        />
+      )}
+
+      {/* Trafego pago no Google. Fica ao lado do Perfil da Empresa de
+          proposito: um mostra a descoberta organica, o outro a paga — juntos
+          respondem "de onde veio o resultado deste mes". */}
+      {GOOGLE_ADS_ENABLED && (
+        <GoogleAdsReport
+          clientId={clientId}
+          from={range.from}
+          to={range.to}
         />
       )}
 
