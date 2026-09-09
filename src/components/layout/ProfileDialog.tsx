@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { AlterarSenha } from "@/components/layout/AlterarSenha";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = any;
@@ -80,7 +81,7 @@ export function ProfileDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-h-[85vh] max-w-sm overflow-y-auto">
         <DialogHeader><DialogTitle>Editar perfil</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="flex flex-col items-center gap-3">
@@ -113,6 +114,11 @@ export function ProfileDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} Salvar
             </Button>
           </div>
+
+          {/* Abaixo do "Salvar" de propósito: a senha tem o próprio botão e não
+              é salva junto com nome e foto. Misturar as duas coisas num botão
+              só faria trocar a senha sem querer ao ajustar a foto. */}
+          <AlterarSenha />
         </div>
       </DialogContent>
     </Dialog>
