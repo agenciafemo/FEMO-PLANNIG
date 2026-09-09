@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { summarizeProduction, type ProductionMetricRow } from "@/lib/productionDashboard";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { addDays, format, startOfWeek } from "date-fns";
@@ -28,6 +29,7 @@ interface QueryBuilder<T> extends PromiseLike<QueryResult<T>> {
   lt(column: string, value: unknown): QueryBuilder<T>;
   or(filters: string): QueryBuilder<T>;
   order(column: string, options?: { ascending?: boolean }): QueryBuilder<T>;
+  range(from: number, to: number): QueryBuilder<T>;
 }
 interface UntypedDatabaseClient { from<T>(table: string): QueryBuilder<T>; }
 type RpcResult = { data: unknown; error: DatabaseError | null };
@@ -214,6 +216,7 @@ export default function ControlDashboard() {
   const periodLabel = period === "week" ? "esta semana" : "este mês";
 
   const tasks = useQuery({
+    staleTime: 0, refetchOnWindowFocus: true, refetchInterval: 30_000,
     queryKey: ["control-dashboard", "tasks", organizationId, today],
     queryFn: async () => {
       const { data, error } = await db.from<TaskRow>("tasks").select("status,due_date,updated_at,done_at,assignee_id").eq("organization_id", organizationId);
@@ -224,6 +227,7 @@ export default function ControlDashboard() {
   // Tarefas extras da Produção entram nos mesmos indicadores das tarefas do
   // quadro. Não têm prazo, então nunca contam como atrasadas.
   const extras = useQuery({
+    staleTime: 0, refetchOnWindowFocus: true, refetchInterval: 30_000,
     queryKey: ["control-dashboard", "extras", organizationId, today],
     queryFn: async () => {
       const { data, error } = await db.from<ExtraRow>("production_items")
@@ -332,6 +336,24 @@ export default function ControlDashboard() {
     (capacity.data?.assignments ?? []).filter((item) => item.tag_id === activeFunction).map((item) => item.user_id),
   ), [activeFunction, capacity.data?.assignments]);
   const filteredTasks = useMemo(() => (tasks.data ?? []).filter((row) => !functionMemberIds || functionMemberIds.has(row.assignee_id)), [functionMemberIds, tasks.data]);
+  const production = useQuery({
+    queryKey: ["control-dashboard", "production", organizationId],
+    queryFn: async () => {
+      const rows: ProductionMetricRow[] = [];
+      // Avoid silently limiting the dashboard to the API's first page.
+      for (let offset = 0; ; offset += 500) {
+        const { data, error } = await db.from<ProductionMetricRow>("production_items")
+          .select("id,client_id,content_type,post_id,assignee_id,production_item_steps(done,done_at,assignee_id)")
+          .eq("organization_id", organizationId).order("id").range(offset, offset + 499);
+        if (error) throw error;
+        rows.push(...(data ?? []));
+        if (!data || data.length < 500) return rows;
+      }
+    },
+    enabled: !!organizationId,
+    staleTime: 0, refetchOnWindowFocus: true, refetchInterval: 30_000,
+  });
+  const productionSummary = useMemo(() => summarizeProduction(production.data ?? [], periodStart, tomorrow, functionMemberIds), [production.data, periodStart, tomorrow, functionMemberIds]);
   // Cada tarefa extra vira uma "tarefa" equivalente: o status sai do quanto das
   // suas etapas já foi concluído, e o responsável é o da peça (ou o da primeira
   // etapa em aberto, quando a peça não tem um).
@@ -402,6 +424,7 @@ export default function ControlDashboard() {
   // gestor (e nós) sabermos o motivo em vez de um aviso genérico.
   const failedIndicators = ([
     ["Tarefas", tasks],
+    ["Produção", production],
     ["Tarefas extras", extras],
     ["Capacidade da equipe", capacity],
     ["Permissão do ponto", pointPermission],
@@ -416,10 +439,11 @@ export default function ControlDashboard() {
       return `${label}: ${message.slice(0, 160)}`;
     });
   const anyError = failedIndicators.length > 0;
-  const analysisContextKey = `${period}:${activeFunction}`;
+  const analysisContextKey = `${period}:${activeFunction}:${JSON.stringify(productionSummary)}`;
   const [generatedAnalysis, setGeneratedAnalysis] = useState<GeneratedAnalysis | null>(null);
   const analysisIsStale = generatedAnalysis !== null && generatedAnalysis.contextKey !== analysisContextKey;
   const analysisReady = !anyError
+    && !production.isPending
     && !tasks.isLoading
     && !extras.isLoading
     && !capacity.isLoading
@@ -434,6 +458,7 @@ export default function ControlDashboard() {
         ? "Todas as funções"
         : capacity.data?.functions.find((item) => item.id === activeFunction)?.name ?? "Função selecionada";
       const metrics = {
+        producao: { ...productionSummary, observacao: "Peças e etapas, separadas do Kanban. Não somar os totais: uma peça pode ter tarefa vinculada. Em aberto é o estoque atual; concluídas no período usam datas das etapas." },
         periodo: {
           tipo: period,
           rotulo: periodLabel,
@@ -539,6 +564,19 @@ export default function ControlDashboard() {
 
       <section className="space-y-4">
         <SectionHeader title="Tarefas" icon={ListTodo} action={actionLink("/tasks", "Abrir quadro")} />
+        <div className="rounded-xl border bg-surface p-4 space-y-3">
+          <SectionHeader title="Produção de conteúdo" icon={CheckCircle2} action={actionLink("/producao", "Abrir produção")} />
+          <p className="text-xs text-muted-foreground">Todas as peças, incluindo LinkedIn e extras. Respeita a função selecionada abaixo. Não some este total ao Kanban: uma peça pode ter uma tarefa vinculada.</p>
+          {production.isError ? <p role="alert">Produção indisponível. <Button variant="outline" size="sm" onClick={() => void production.refetch()}>Tentar novamente</Button></p> : production.isPending ? <p role="status">Carregando produção…</p> : <>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <MetricCard label="Peças em aberto" value={productionSummary.open} icon={ListTodo} hint="Estoque atual de todos os meses" />
+              <MetricCard label="Peças em andamento" value={productionSummary.doing} icon={Clock3} hint="Parte das etapas concluída" />
+              <MetricCard label={`Peças concluídas ${periodLabel}`} value={productionSummary.completedInPeriod} icon={CheckCircle2} hint="Todas as etapas feitas; data da última conclusão" />
+            </div>
+            <p className="text-xs text-muted-foreground">{productionSummary.total} peças · {productionSummary.unlinked} peças de conteúdo sem post vinculado · {productionSummary.withoutSteps} sem etapas.</p>
+            {productionSummary.unknownCompletionDate > 0 && <p className="text-xs text-muted-foreground">{productionSummary.unknownCompletionDate} concluídas sem data completa: não contabilizadas nas entregas do período.</p>}
+          </>}
+        </div>
         <div className="flex flex-col gap-1.5 sm:max-w-[280px]"><span className="text-caption text-muted-foreground">Segmentar por função</span><Select value={activeFunction} onValueChange={setSelectedFunction}><SelectTrigger className="h-9" aria-label="Filtrar por função"><SelectValue placeholder="Todas as funções" /></SelectTrigger><SelectContent><SelectItem value="all">Todas as funções</SelectItem>{(capacity.data?.functions ?? []).map((item) => <SelectItem key={item.id} value={item.id}><span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />{item.name}</span></SelectItem>)}</SelectContent></Select></div>
         <div className="grid gap-3 sm:grid-cols-3">
           <MetricCard label="Tarefas abertas" value={tasks.isLoading || extras.isLoading ? <LoadingValue /> : task.open} icon={ListTodo} tone="info" hint={task.extrasOpen > 0 ? `Inclui ${task.extrasOpen} ${task.extrasOpen === 1 ? "extra" : "extras"} da Produção` : "Inclui as tarefas extras da Produção"} />

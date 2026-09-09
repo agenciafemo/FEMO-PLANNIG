@@ -281,3 +281,22 @@
     page-break-inside: auto;
   }
 }
+@keyframes nrt-tetris-drop {
+  0% { transform: translateY(-18px); opacity: 0; }
+  12% { opacity: 1; }
+  82% { transform: translateY(var(--nrt-tetris-distance)); opacity: 1; }
+  100% { transform: translateY(var(--nrt-tetris-distance)); opacity: 0; }
+}
+
+.nrt-tetris-piece {
+  animation: nrt-tetris-drop 1.7s steps(9, end) infinite;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nrt-tetris-piece {
+    animation: none;
+    opacity: 1;
+    transform: translateY(18px);
+  }
+}

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ShieldCheck, RotateCcw } from "lucide-react";
+import { LockKeyhole, ShieldCheck, RotateCcw } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -59,15 +59,22 @@ export function PermissionsPanel({
     enabled: !!organizationId,
   });
 
+  const catalogoConfiguravel = useMemo(
+    () => (mapaQuery.data?.catalogo ?? []).filter(
+      (permission) => permission.key !== "financeiro.ver" && permission.key !== "financeiro.editar",
+    ),
+    [mapaQuery.data?.catalogo],
+  );
+
   const porCategoria = useMemo(() => {
     const grupos = new Map<string, Permissao[]>();
-    for (const p of mapaQuery.data?.catalogo ?? []) {
+    for (const p of catalogoConfiguravel) {
       const lista = grupos.get(p.category) ?? [];
       lista.push(p);
       grupos.set(p.category, lista);
     }
     return [...grupos.entries()];
-  }, [mapaQuery.data]);
+  }, [catalogoConfiguravel]);
 
   const alterarCargo = useMutation({
     mutationFn: (input: { permissao: Permissao; role: string; permitido: boolean }) =>
@@ -123,6 +130,20 @@ export function PermissionsPanel({
           O que cada cargo pode fazer. O Proprietário sempre pode tudo.
         </p>
       </header>
+
+      <div className="rounded-2xl border border-brand/20 bg-brand-soft/20 p-4">
+        <div className="flex items-start gap-3">
+          <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+          <div>
+            <p className="text-sm font-semibold">Acesso administrativo é fixo</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Clientes e seus perfis ficam disponíveis para toda a equipe. Financeiro,
+              Equipe e acessos, Cofre e Configurações aparecem somente para Proprietário
+              e Gestor / Head; funções profissionais não liberam essas áreas.
+            </p>
+          </div>
+        </div>
+      </div>
 
       {porCategoria.map(([categoria, permissoes]) => (
         <div key={categoria} className="rounded-2xl border border-border/70 bg-card">
@@ -246,7 +267,7 @@ export function PermissionsPanel({
               <tr className="border-b border-border/60 text-left text-xs text-muted-foreground">
                 <th className="px-4 py-2 font-medium">Pessoa</th>
                 <th className="px-4 py-2 font-medium">Cargo</th>
-                {mapa.catalogo.map((p) => (
+                {catalogoConfiguravel.map((p) => (
                   <th key={p.key} className="px-3 py-2 font-medium">{p.label}</th>
                 ))}
               </tr>
@@ -258,7 +279,7 @@ export function PermissionsPanel({
                   <td className="px-4 py-2 text-xs text-muted-foreground">
                     {PAPEL_LABEL[membro.role] ?? membro.role}
                   </td>
-                  {mapa.catalogo.map((p) => {
+                  {catalogoConfiguravel.map((p) => {
                     const { permitido, origem } = permitidoParaPessoa(
                       mapa, p, membro.user_id, membro.role,
                     );

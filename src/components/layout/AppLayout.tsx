@@ -13,12 +13,15 @@ import { ProfileDialog } from "./ProfileDialog";
 import { TimeClockReviewBell } from "@/components/time-clock/TimeClockReviewBell";
 import { FloatingTaskTimer } from "@/components/tasks/FloatingTaskTimer";
 import { NavbarTaskTimer } from "@/components/tasks/NavbarTaskTimer";
+import { useOrganizationContext } from "@/contexts/OrganizationContext";
+import { MULTI_ORG_ENABLED } from "@/lib/featureFlags";
 
 // Sem barra lateral: o Dashboard é o hub de navegação (grade de módulos).
 // O topo mantém o essencial — logo (volta ao início), notificações e a conta.
 export function AppLayout() {
   const { signOut, user } = useAuth();
   const isAdmin = useIsAdmin();
+  const { organizationName } = useOrganizationContext();
   const [profileOpen, setProfileOpen] = useState(false);
 
   // Foto + nome do próprio usuário para o botão da conta.
@@ -47,6 +50,7 @@ export function AppLayout() {
         </Link>
 
         <div className="flex items-center gap-1.5">
+          {MULTI_ORG_ENABLED && <Link to="/organizations/select" className="max-w-36 truncate rounded-md border px-2 py-1.5 text-xs sm:max-w-56" title="Escolher ou encontrar agência">{organizationName ?? "Minhas agências"}</Link>}
           <NavbarTaskTimer />
           <TimeClockReviewBell />
           <NotificationBell />

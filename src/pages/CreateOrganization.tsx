@@ -28,15 +28,13 @@ export default function CreateOrganization() {
     setLoading(true);
     try {
       const slug = slugify(name) || `agencia-${Date.now()}`;
-      // TODO(multi-org-migration): RPC ainda não existe no schema real;
-      // só é alcançável com VITE_MULTI_ORG_ENABLED=true.
-      const { error } = await (supabase.rpc as any)("create_organization", { _name: name, _slug: slug });
+      const { error } = await supabase.rpc("create_organization", { _name: name.trim(), _slug: slug });
       if (error) throw error;
       await refresh();
       toast.success("Equipe criada!");
       navigate("/dashboard", { replace: true });
-    } catch (error: any) {
-      toast.error(error.message ?? "Não foi possível criar a equipe");
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível criar a equipe");
     } finally {
       setLoading(false);
     }
@@ -46,10 +44,11 @@ export default function CreateOrganization() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md border-border">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">Crie sua equipe</CardTitle>
-          <CardDescription>Dê um nome para a sua agência para começar a usar o painel</CardDescription>
+          <CardTitle className="text-2xl">Criar uma nova agência</CardTitle>
+          <CardDescription>Isso cria um espaço separado e vazio. Para entrar na Femo ou em outra equipe existente, solicite acesso em vez de criar outra agência.</CardDescription>
         </CardHeader>
         <CardContent>
+          <Button variant="outline" className="mb-4 w-full" onClick={() => navigate("/organizations/select", { replace: true })}>Voltar para minhas agências</Button>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="org-name">Nome da agência</Label>
@@ -59,6 +58,8 @@ export default function CreateOrganization() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
+                minLength={2}
+                maxLength={100}
                 autoFocus
               />
             </div>

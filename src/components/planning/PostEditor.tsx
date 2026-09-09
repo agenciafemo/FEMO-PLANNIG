@@ -418,6 +418,8 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
       clearLocalDraft();
       queryClient.invalidateQueries({ queryKey: ["posts", planningId] });
       queryClient.invalidateQueries({ queryKey: ["post", postId] });
+      queryClient.invalidateQueries({ queryKey: ["production-items"] });
+      queryClient.invalidateQueries({ queryKey: ["control-dashboard"] });
       toast.success("Post salvo!");
       onClose("saved");
     },
