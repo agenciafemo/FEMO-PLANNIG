@@ -347,6 +347,8 @@ export default function Plannings() {
       queryClient.invalidateQueries({ queryKey: ["plannings"] });
       queryClient.invalidateQueries({ queryKey: ["tasks-board"] });
       queryClient.invalidateQueries({ queryKey: ["production-board"] });
+      queryClient.invalidateQueries({ queryKey: ["production-items"] });
+      queryClient.invalidateQueries({ queryKey: ["prod-plannings"] });
       setOpen(false);
       toast.success("Planejamento criado! Tarefa gerada no quadro do responsável.");
     },

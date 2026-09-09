@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ClientOperationalContext } from "@/components/client/ClientOperationalContext";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
@@ -79,7 +80,7 @@ type Member = { user_id: string; display_name: string; avatar_url: string | null
 type ClientRow = { id: string; name: string };
 type ProductionDateFilter = { from: string; to: string };
 
-const GROUP_ORDER = ["reels", "carousel", "static", "story", "blog", "extra"];
+const GROUP_ORDER = [...EDITABLE_PIECE_TYPES, "extra"];
 
 // Rótulos dos motivos — tanto os internos quanto os que o cliente escolhe no portal.
 const REASON_LABELS: Record<string, string> = {
@@ -569,6 +570,7 @@ export default function Producao() {
   return (
     <div className="nrt-surface -mx-4 -mt-4 min-h-screen px-4 pb-16 pt-6 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-8">
       <div className="mx-auto max-w-[1200px] space-y-6">
+        {activeClient && <ClientOperationalContext key={activeClient} clientId={activeClient} />}
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
