@@ -83,6 +83,16 @@ export const PIPELINES: Record<string, StepDef[]> = {
     S("enviar_planejamento", "Enviar para o planejamento", "acao", "design"),
     S("aprov_cliente", "Aprovação do cliente", "gate", "review"),
   ],
+  // O LinkedIn e o Instagram parecem iguais e não são: lá o TEXTO carrega a
+  // peça, e a arte acompanha. Por isso a copy vem antes e é de quem escreve,
+  // não de quem desenha.
+  linkedin: [
+    S("copy", "Copy", "check", "writing"),
+    S("design", "Arte", "check", "design"),
+    S("enviar_planejamento", "Enviar para o planejamento", "acao", "design"),
+    S("revisao", "Revisão", "check", "review"),
+    S("aprov_cliente", "Aprovação do cliente", "gate", "review"),
+  ],
   // Trabalho que não vem de um planejamento. Nasce enxuta — a equipe acrescenta
   // as etapas que aquela tarefa precisar.
   extra: [
@@ -117,7 +127,7 @@ export function stepDef(contentType: string, key: string, pipelines?: PipelineMa
   return stepsFor(contentType, pipelines).find((s) => s.key === key) ?? null;
 }
 
-export const EDITABLE_PIECE_TYPES = ["reels", "carousel", "static", "story", "blog"] as const;
+export const EDITABLE_PIECE_TYPES = ["reels", "carousel", "static", "story", "blog", "linkedin"] as const;
 
 export async function loadPipelines(organizationId: string): Promise<PipelineMap> {
   const { data } = await (supabase as AnyClient)
@@ -316,10 +326,10 @@ export function assigneeForRole(
 // ---------------------------------------------------------------------------
 export const PIECE_LABEL: Record<string, string> = {
   carousel: "Carrossel", static: "Post", story: "Story", reels: "Reel", blog: "Blog",
-  extra: "Tarefa extra",
+  linkedin: "LinkedIn", extra: "Tarefa extra",
 };
 
-export type PieceCounts = { static: number; reels: number; carousel: number; story: number; blog: number };
+export type PieceCounts = { static: number; reels: number; carousel: number; story: number; blog: number; linkedin: number };
 
 // Uma linha por peça. As etapas vêm depois (precisam do id da peça).
 export function buildProductionItems(
@@ -338,7 +348,7 @@ export function buildProductionItems(
   writingNotes: string | null,
   pipelines?: PipelineMap | null,
 ): Array<Record<string, unknown>> {
-  const order: Array<keyof PieceCounts> = ["reels", "carousel", "static", "story", "blog"];
+  const order: Array<keyof PieceCounts> = ["reels", "carousel", "static", "story", "blog", "linkedin"];
   const rows: Array<Record<string, unknown>> = [];
   let pos = 0;
   for (const ct of order) {
@@ -351,7 +361,7 @@ export function buildProductionItems(
         piece_number: i,
         stage: stepsFor(ct, pipelines)[0]?.key ?? "copy", // compatibilidade com a coluna antiga
         assignee_id: null,
-        notes: (ct === "reels" || ct === "blog") ? writingNotes : null,
+        notes: (ct === "reels" || ct === "blog" || ct === "linkedin") ? writingNotes : null,
         position: pos++,
       });
     }

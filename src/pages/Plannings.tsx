@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Calendar, Copy, Image, Layers, Trash2, Film, LayoutGrid, FileText, ChevronDown, ChevronsDownUp, ChevronsUpDown, UserRound } from "lucide-react";
+import { Plus, Calendar, Copy, Image, Layers, Trash2, Film, LayoutGrid, FileText, Linkedin, ChevronDown, ChevronsDownUp, ChevronsUpDown, UserRound } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Link, useParams } from "react-router-dom";
@@ -99,6 +99,7 @@ export default function Plannings() {
   const [carouselCount, setCarouselCount] = useState(0);
   const [storiesCount, setStoriesCount] = useState(0);
   const [blogCount, setBlogCount] = useState(0);
+  const [linkedinCount, setLinkedinCount] = useState(0);
 
   // Ao escolher um cliente, pré-preenche as quantidades com o CONTRATO dele
   // (se houver). O usuário ainda pode ajustar/adicionar extras antes de criar.
@@ -113,6 +114,7 @@ export default function Plannings() {
         setCarouselCount(c.qty_carousel);
         setStoriesCount(c.qty_story);
         setBlogCount(c.qty_blog);
+        setLinkedinCount(c.qty_linkedin);
       })
       .catch(() => { /* sem contrato: mantém o que está */ });
     return () => { cancelled = true; };
@@ -195,6 +197,7 @@ export default function Plannings() {
       addPosts(carouselCount, "carousel");
       addPosts(storiesCount, "story");
       addPosts(blogCount, "blog");
+      addPosts(linkedinCount, "linkedin");
 
       // Guarda os posts criados para ligar cada peça de produção ao seu post
       // (é o que faz o quadro se marcar sozinho conforme o conteúdo é montado).
@@ -277,7 +280,7 @@ export default function Plannings() {
               loadPipelines(organizationId),
             ]);
             const items = buildProductionItems(
-              { static: postCount, reels: reelsCount, carousel: carouselCount, story: storiesCount, blog: blogCount },
+              { static: postCount, reels: reelsCount, carousel: carouselCount, story: storiesCount, blog: blogCount, linkedin: linkedinCount },
               {
                 organization_id: organizationId,
                 planning_id: planning.id,
@@ -474,6 +477,7 @@ export default function Plannings() {
     { label: "Carrossel", icon: LayoutGrid, value: carouselCount, set: setCarouselCount, max: 20 },
     { label: "Stories", icon: Layers, value: storiesCount, set: setStoriesCount, max: 30 },
     { label: "Blog", icon: FileText, value: blogCount, set: setBlogCount, max: 10 },
+    { label: "LinkedIn", icon: Linkedin, value: linkedinCount, set: setLinkedinCount, max: 20 },
   ];
 
   return (
