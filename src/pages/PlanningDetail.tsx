@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ClientOperationalContext } from "@/components/client/ClientOperationalContext";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -645,6 +646,7 @@ export default function PlanningDetail() {
 
   return (
     <div className="space-y-6 relative">
+      <ClientOperationalContext clientId={planning.client_id ?? ""} pieces={posts ?? undefined} />
       {/* Barra colorida do cliente */}
       <div className="h-1 w-full rounded-full" style={{ background: `linear-gradient(90deg, ${accentColor} 0%, ${accentColor}55 100%)` }} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
