@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { loadContract } from "@/lib/clientContract";
+import { loadContract, planningContractCounts } from "@/lib/clientContract";
 import { buildProductionItems, buildStepRows, loadFunctionAssignees, loadPipelines, loadRoleMap } from "@/lib/productionPipeline";
 import { supabase } from "@/integrations/supabase/client";
 import { insertPosts } from "@/lib/postsInsert";
@@ -100,25 +100,30 @@ export default function Plannings() {
   const [storiesCount, setStoriesCount] = useState(0);
   const [blogCount, setBlogCount] = useState(0);
   const [linkedinCount, setLinkedinCount] = useState(0);
+  const [contractLoad, setContractLoad] = useState({ clientId: "", status: "loading" });
+  const [contractRetry, setContractRetry] = useState(0);
+  const contractReady = contractLoad.clientId === selectedClient && contractLoad.status === "ready";
 
   // Ao escolher um cliente, pré-preenche as quantidades com o CONTRATO dele
   // (se houver). O usuário ainda pode ajustar/adicionar extras antes de criar.
   useEffect(() => {
+    setPostCount(0); setReelsCount(0); setCarouselCount(0);
+    setStoriesCount(0); setBlogCount(0); setLinkedinCount(0);
+    setContractLoad({ clientId: selectedClient, status: "loading" });
     if (!selectedClient) return;
     let cancelled = false;
     loadContract(selectedClient)
       .then((c) => {
-        if (cancelled || !c) return;
-        setPostCount(c.qty_static);
-        setReelsCount(c.qty_reels);
-        setCarouselCount(c.qty_carousel);
-        setStoriesCount(c.qty_story);
-        setBlogCount(c.qty_blog);
-        setLinkedinCount(c.qty_linkedin);
+        if (cancelled) return;
+        const counts = planningContractCounts(c);
+        setPostCount(counts.static); setReelsCount(counts.reels);
+        setCarouselCount(counts.carousel); setStoriesCount(counts.story);
+        setBlogCount(counts.blog); setLinkedinCount(counts.linkedin);
+        setContractLoad({ clientId: selectedClient, status: "ready" });
       })
-      .catch(() => { /* sem contrato: mantém o que está */ });
+      .catch(() => { if (!cancelled) setContractLoad({ clientId: selectedClient, status: "error" }); });
     return () => { cancelled = true; };
-  }, [selectedClient]);
+  }, [selectedClient, contractRetry]);
 
   const { data: clients } = useQuery({
     queryKey: ["clients", organizationId],
@@ -150,6 +155,7 @@ export default function Plannings() {
 
   const createPlanning = useMutation({
     mutationFn: async () => {
+      if (!contractReady) throw new Error("Aguarde a leitura do contrato antes de criar o planejamento.");
       const mesNum = parseInt(month);
       const anoNum = parseInt(year);
 
@@ -537,6 +543,7 @@ export default function Plannings() {
                       max={s.max}
                       step={1}
                       value={[s.value]}
+                      disabled={!contractReady || createPlanning.isPending}
                       onValueChange={([v]) => s.set(v)}
                       className="flex-1"
                     />
@@ -544,7 +551,8 @@ export default function Plannings() {
                   </div>
                 ))}
               </div>
-              <Button type="submit" className="w-full" disabled={createPlanning.isPending || !selectedClient}>
+              {selectedClient && !contractReady && <div role="status" className="text-sm text-muted-foreground">{contractLoad.status === "error" ? <><p>Não foi possível carregar o contrato. A criação está bloqueada para evitar quantidades incorretas.</p><Button type="button" variant="outline" onClick={() => { setContractLoad({ clientId: selectedClient, status: "loading" }); setContractRetry((n) => n + 1); }}>Tentar novamente</Button></> : "Carregando quantidades do contrato…"}</div>}
+              <Button type="submit" className="w-full" disabled={createPlanning.isPending || !selectedClient || !contractReady}>
                 {createPlanning.isPending ? "Verificando..." : "Criar Planejamento"}
               </Button>
             </form>

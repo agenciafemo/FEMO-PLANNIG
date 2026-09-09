@@ -49,7 +49,7 @@ export const EMPTY_CONTRACT: ContentContract = {
 };
 
 export async function loadContract(clientId: string): Promise<ContentContract | null> {
-  const { data } = await (supabase as AnyClient)
+  const { data, error } = await (supabase as AnyClient)
     .from("client_content_contract")
     .select(
       "qty_static, qty_reels, qty_carousel, qty_story, qty_blog, qty_linkedin, " +
@@ -58,11 +58,21 @@ export async function loadContract(clientId: string): Promise<ContentContract | 
     )
     .eq("client_id", clientId)
     .maybeSingle();
+  if (error) throw new Error("Não foi possível carregar o contrato. Tente novamente antes de continuar.");
   if (!data) return null;
   // Contrato gravado ANTES desta migration nao tem os campos novos. Sem os
   // padroes aqui, `qty_linkedin` chegaria `undefined` no planejamento e o
   // contador ficaria vazio em vez de zero.
   return { ...EMPTY_CONTRACT, ...(data as Partial<ContentContract>) };
+}
+
+export function planningContractCounts(contract: ContentContract | null) {
+  const c = contract ?? EMPTY_CONTRACT;
+  return {
+    static: c.qty_static, reels: c.qty_reels, carousel: c.qty_carousel,
+    story: c.qty_story, blog: c.qty_blog,
+    linkedin: c.does_linkedin ? c.qty_linkedin : 0,
+  };
 }
 
 export async function saveContract(input: {
