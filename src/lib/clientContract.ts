@@ -4,26 +4,65 @@ import { supabase } from "@/integrations/supabase/client";
 type AnyClient = any;
 
 // Contrato de conteúdo: quantidade padrão de cada tipo de peça do cliente.
+export type PaidPlatform = "meta" | "google" | "outra";
+
 export type ContentContract = {
   qty_static: number;
   qty_reels: number;
   qty_carousel: number;
   qty_story: number;
   qty_blog: number;
+  qty_linkedin: number;
+  /** Separado da quantidade: "faz sob demanda" nao e "nao faz". */
+  does_linkedin: boolean;
+  does_paid_traffic: boolean;
+  paid_platforms: PaidPlatform[];
+  /** Nome da plataforma quando `paid_platforms` inclui "outra". */
+  paid_platforms_other: string | null;
+  /** 1 (menor) a 5 (maior). 3 e o meio, e o padrao. */
+  priority: number;
   notes: string | null;
 };
 
+export const PRIORIDADE_PADRAO = 3;
+
+/** Rotulo de cada passo da barra de importancia. */
+export const PRIORIDADE_LABELS: Record<number, string> = {
+  1: "Muito baixa",
+  2: "Baixa",
+  3: "Normal",
+  4: "Alta",
+  5: "Muito alta",
+};
+
+export const PLATAFORMAS_PAGAS: Array<{ id: PaidPlatform; label: string }> = [
+  { id: "meta", label: "Meta (Instagram e Facebook)" },
+  { id: "google", label: "Google Ads" },
+  { id: "outra", label: "Outra" },
+];
+
 export const EMPTY_CONTRACT: ContentContract = {
-  qty_static: 0, qty_reels: 0, qty_carousel: 0, qty_story: 0, qty_blog: 0, notes: null,
+  qty_static: 0, qty_reels: 0, qty_carousel: 0, qty_story: 0, qty_blog: 0,
+  qty_linkedin: 0, does_linkedin: false, does_paid_traffic: false,
+  paid_platforms: [], paid_platforms_other: null,
+  priority: PRIORIDADE_PADRAO, notes: null,
 };
 
 export async function loadContract(clientId: string): Promise<ContentContract | null> {
   const { data } = await (supabase as AnyClient)
     .from("client_content_contract")
-    .select("qty_static, qty_reels, qty_carousel, qty_story, qty_blog, notes")
+    .select(
+      "qty_static, qty_reels, qty_carousel, qty_story, qty_blog, qty_linkedin, " +
+        "does_linkedin, does_paid_traffic, paid_platforms, paid_platforms_other, " +
+        "priority, notes",
+    )
     .eq("client_id", clientId)
     .maybeSingle();
-  return (data as ContentContract | null) ?? null;
+  if (!data) return null;
+  // Contrato gravado ANTES desta migration nao tem os campos novos. Sem os
+  // padroes aqui, `qty_linkedin` chegaria `undefined` no planejamento e o
+  // contador ficaria vazio em vez de zero.
+  return { ...EMPTY_CONTRACT, ...(data as Partial<ContentContract>) };
 }
 
 export async function saveContract(input: {

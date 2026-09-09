@@ -11,12 +11,11 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
-  ArrowLeft, CalendarClock, Clapperboard, Copy, ExternalLink, FileText, Film,
-  Image as ImageIcon, LayoutGrid, Loader2, Pencil, Save, Sparkles,
+  ArrowLeft, CalendarClock, Copy, ExternalLink, FileText, FolderOpen, Loader2,
+  Pencil, Plug, Save, Sparkles, UserRound,
 } from "lucide-react";
-import {
-  EMPTY_CONTRACT, loadContextCompleteness, loadContract, saveContract, type ContentContract,
-} from "@/lib/clientContract";
+import { loadContextCompleteness } from "@/lib/clientContract";
+import { ClientContractSection } from "@/components/client/ClientContractSection";
 import { InstagramConnection } from "@/components/client/InstagramConnection";
 import { ClientReports } from "@/components/client/ClientReports";
 import { ClientDocuments } from "@/components/client/ClientDocuments";
@@ -28,13 +27,14 @@ import {
   REUNIOES_ENABLED,
 } from "@/lib/featureFlags";
 
-const CONTRACT_FIELDS = [
-  { key: "qty_static", label: "Posts (feed)", icon: ImageIcon },
-  { key: "qty_reels", label: "Reels", icon: Film },
-  { key: "qty_carousel", label: "Carrosséis", icon: LayoutGrid },
-  { key: "qty_story", label: "Stories", icon: Clapperboard },
-  { key: "qty_blog", label: "Textos de blog", icon: FileText },
-] as const;
+type SecaoId = "perfil" | "contrato" | "conexoes" | "arquivos";
+
+const SECOES: Array<{ id: SecaoId; label: string; icon: typeof UserRound }> = [
+  { id: "perfil", label: "Perfil do cliente", icon: UserRound },
+  { id: "contrato", label: "Contrato", icon: FileText },
+  { id: "conexoes", label: "Conexões", icon: Plug },
+  { id: "arquivos", label: "Arquivos", icon: FolderOpen },
+];
 
 interface ClientProfileProps {
   clientId: string;
@@ -81,27 +81,10 @@ export function ClientProfile({
     enabled: !!clientId,
   });
 
-  const contractQuery = useQuery({
-    queryKey: ["client-contract", clientId],
-    queryFn: () => loadContract(clientId),
-    enabled: !!clientId,
-  });
-  const [contract, setContract] = useState<ContentContract>(EMPTY_CONTRACT);
-  useEffect(() => { if (contractQuery.data) setContract(contractQuery.data); }, [contractQuery.data]);
-
   const ctxQuery = useQuery({
     queryKey: ["client-context", clientId],
     queryFn: () => loadContextCompleteness(clientId),
     enabled: !!clientId,
-  });
-
-  const save = useMutation({
-    mutationFn: () => saveContract({ clientId, organizationId: organizationId!, userId: user!.id, contract }),
-    onSuccess: () => {
-      toast.success("Contrato salvo. Novos planejamentos já usam essas quantidades.");
-      queryClient.invalidateQueries({ queryKey: ["client-contract", clientId] });
-    },
-    onError: (e) => toast.error((e as Error).message),
   });
 
   // Edição do cliente (nome, notas, cor, foto) — dentro da própria ficha.
@@ -163,7 +146,11 @@ export function ClientProfile({
       .catch(() => toast.error("Não foi possível copiar o link."));
   };
 
-  const totalPieces = CONTRACT_FIELDS.reduce((s, f) => s + (contract[f.key] || 0), 0);
+  // Qual seção está aberta. Estado simples de propósito: a ficha é um destino
+  // curto, e guardar isso na URL faria "voltar" andar de seção em seção antes
+  // de sair da tela.
+  const [secao, setSecao] = useState<SecaoId>("perfil");
+
   const pct = ctxQuery.data?.percent ?? 0;
   const pctColor = pct >= 70 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-destructive";
 
@@ -221,155 +208,167 @@ export function ClientProfile({
         </div>
       )}
 
-      {/* Dados do cliente (editar + foto) */}
-      <div className="rounded-2xl border border-border bg-card p-5">
-        <div className="mb-3 flex items-center gap-2">
-          <Pencil className="h-4 w-4 text-brand" />
-          <h2 className="text-sm font-semibold">Dados do cliente</h2>
-        </div>
-        <div className="flex flex-col gap-4 sm:flex-row">
-          <div className="flex flex-col items-center gap-2">
-            <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border" style={{ backgroundColor: editAccent }}>
-              {logoPreview || client?.logo_url ? (
-                <img src={logoPreview ?? client!.logo_url!} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <span className="text-xl font-black text-white">{(editName || "?").slice(0, 2).toUpperCase()}</span>
-              )}
+      {/* Navegação lateral.
+          A ficha juntava dados, contrato, briefing, conexões, relatórios,
+          documentos e reuniões numa coluna só — quem vinha atualizar o
+          contrato rolava por tudo até achar. Cada assunto agora tem endereço. */}
+      <div className="flex flex-col gap-5 md:flex-row md:items-start">
+        <nav className="flex gap-1.5 overflow-x-auto md:w-52 md:shrink-0 md:flex-col md:overflow-visible">
+          {SECOES.map((item) => {
+            const ativa = secao === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSecao(item.id)}
+                aria-current={ativa ? "page" : undefined}
+                className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors ${
+                  ativa
+                    ? "border-brand/50 bg-brand-soft/40 font-medium text-foreground"
+                    : "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                }`}
+              >
+                <item.icon className={`h-4 w-4 shrink-0 ${ativa ? "text-brand" : ""}`} />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="min-w-0 flex-1 space-y-5">
+          {secao === "perfil" && (
+            <>
+          {/* Dados do cliente (editar + foto) */}
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-brand" />
+              <h2 className="text-sm font-semibold">Dados do cliente</h2>
             </div>
-            <label className="cursor-pointer text-xs font-medium text-brand hover:underline">
-              {logoFile ? "Trocar foto" : "Adicionar foto"}
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) { setLogoFile(f); setLogoPreview(URL.createObjectURL(f)); }
-                }}
-              />
-            </label>
-          </div>
-          <div className="flex-1 space-y-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Nome</Label>
-              <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Notas</Label>
-              <Textarea rows={2} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Detalhes, tom de voz, preferências..." />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Cor do cliente</Label>
-              <div className="flex items-center gap-2">
-                <input type="color" value={editAccent} onChange={(e) => setEditAccent(e.target.value)} className="h-9 w-10 cursor-pointer rounded border-0 bg-transparent" />
-                <Input value={editAccent} onChange={(e) => setEditAccent(e.target.value)} className="w-32" />
+            <div className="flex flex-col gap-4 sm:flex-row">
+              <div className="flex flex-col items-center gap-2">
+                <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border" style={{ backgroundColor: editAccent }}>
+                  {logoPreview || client?.logo_url ? (
+                    <img src={logoPreview ?? client!.logo_url!} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="text-xl font-black text-white">{(editName || "?").slice(0, 2).toUpperCase()}</span>
+                  )}
+                </div>
+                <label className="cursor-pointer text-xs font-medium text-brand hover:underline">
+                  {logoFile ? "Trocar foto" : "Adicionar foto"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) { setLogoFile(f); setLogoPreview(URL.createObjectURL(f)); }
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="flex-1 space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Nome</Label>
+                  <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Notas</Label>
+                  <Textarea rows={2} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Detalhes, tom de voz, preferências..." />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Cor do cliente</Label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={editAccent} onChange={(e) => setEditAccent(e.target.value)} className="h-9 w-10 cursor-pointer rounded border-0 bg-transparent" />
+                    <Input value={editAccent} onChange={(e) => setEditAccent(e.target.value)} className="w-32" />
+                  </div>
+                </div>
+                <div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-muted/30 p-3">
+                  <div className="min-w-0">
+                    <Label htmlFor="traffic-only" className="text-sm font-medium">Só tráfego pago</Label>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Este cliente não tem planejamento de conteúdo. Marcando, ele fica de fora
+                      do alerta de clientes sem planejamento no Dashboard.
+                    </p>
+                  </div>
+                  <Switch
+                    id="traffic-only"
+                    checked={editTrafficOnly}
+                    onCheckedChange={setEditTrafficOnly}
+                    className="mt-0.5 shrink-0"
+                  />
+                </div>
               </div>
             </div>
-            <div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-muted/30 p-3">
-              <div className="min-w-0">
-                <Label htmlFor="traffic-only" className="text-sm font-medium">Só tráfego pago</Label>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Este cliente não tem planejamento de conteúdo. Marcando, ele fica de fora
-                  do alerta de clientes sem planejamento no Dashboard.
-                </p>
+            <div className="mt-4 flex justify-end">
+              <Button size="sm" onClick={() => saveClient.mutate()} disabled={saveClient.isPending || !editName.trim()}>
+                {saveClient.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
+                Salvar dados
+              </Button>
+            </div>
+          </div>
+
+          {/* Contexto para a IA */}
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <div className="mb-1 flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-brand" />
+              <h2 className="text-sm font-semibold">Contexto para a IA (briefing)</h2>
+            </div>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Quanto mais completo, melhor a IA cria conteúdo para este cliente.
+            </p>
+
+            <div className="mb-2 flex items-center justify-between text-sm">
+              <span className="font-medium">Completude</span>
+              <span className="tabular-nums font-semibold">{pct}%</span>
+            </div>
+            <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+              <div className={`h-full rounded-full transition-all ${pctColor}`} style={{ width: `${pct}%` }} />
+            </div>
+
+            {ctxQuery.data && ctxQuery.data.missing.length > 0 && (
+              <div className="mt-3">
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">Falta preencher:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {ctxQuery.data.missing.map((m) => (
+                    <span key={m} className="rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground">{m}</span>
+                  ))}
+                </div>
               </div>
-              <Switch
-                id="traffic-only"
-                checked={editTrafficOnly}
-                onCheckedChange={setEditTrafficOnly}
-                className="mt-0.5 shrink-0"
-              />
+            )}
+
+            <div className="mt-4">
+              <Button asChild size="sm" variant="outline">
+                <Link to="/conteudo/base"><Sparkles className="mr-1 h-4 w-4" /> Abrir Base de Conteúdo</Link>
+              </Button>
             </div>
           </div>
-        </div>
-        <div className="mt-4 flex justify-end">
-          <Button size="sm" onClick={() => saveClient.mutate()} disabled={saveClient.isPending || !editName.trim()}>
-            {saveClient.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
-            Salvar dados
-          </Button>
+
+            </>
+          )}
+
+          {secao === "contrato" && <ClientContractSection clientId={clientId} />}
+
+          {secao === "conexoes" && (
+            <>
+          {/* Conexões (Instagram / Facebook) */}
+          {META_CONNECT_ENABLED && <InstagramConnection clientId={clientId} />}
+          {GOOGLE_BUSINESS_ENABLED && (
+            <GoogleBusinessConnection clientId={clientId} />
+          )}
+
+            </>
+          )}
+
+          {secao === "arquivos" && (
+            <>
+          {/* Relatórios e documentos do cliente */}
+          <ClientReports clientId={clientId} />
+          <ClientDocuments clientId={clientId} />
+          {REUNIOES_ENABLED && <ClientMeetings clientId={clientId} />}
+            </>
+          )}
         </div>
       </div>
-
-      {/* Contrato de conteúdo */}
-      <div className="rounded-2xl border border-border bg-card p-5">
-        <div className="mb-1 flex items-center gap-2">
-          <FileText className="h-4 w-4 text-brand" />
-          <h2 className="text-sm font-semibold">Contrato de conteúdo</h2>
-        </div>
-        <p className="mb-4 text-xs text-muted-foreground">
-          Quantidade padrão de cada peça por mês. Os planejamentos deste cliente já nascem com esses números (você ainda pode adicionar extras no planejamento).
-        </p>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {CONTRACT_FIELDS.map((f) => (
-            <div key={f.key} className="space-y-1.5">
-              <Label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <f.icon className="h-3.5 w-3.5" /> {f.label}
-              </Label>
-              <Input
-                type="number"
-                min={0}
-                max={200}
-                value={contract[f.key]}
-                onChange={(e) => setContract((c) => ({ ...c, [f.key]: Math.max(0, Number(e.target.value) || 0) }))}
-              />
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">Total: <span className="font-medium text-foreground">{totalPieces}</span> peças/mês</span>
-          <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
-            {save.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
-            Salvar contrato
-          </Button>
-        </div>
-      </div>
-
-      {/* Contexto para a IA */}
-      <div className="rounded-2xl border border-border bg-card p-5">
-        <div className="mb-1 flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-brand" />
-          <h2 className="text-sm font-semibold">Contexto para a IA (briefing)</h2>
-        </div>
-        <p className="mb-3 text-xs text-muted-foreground">
-          Quanto mais completo, melhor a IA cria conteúdo para este cliente.
-        </p>
-
-        <div className="mb-2 flex items-center justify-between text-sm">
-          <span className="font-medium">Completude</span>
-          <span className="tabular-nums font-semibold">{pct}%</span>
-        </div>
-        <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
-          <div className={`h-full rounded-full transition-all ${pctColor}`} style={{ width: `${pct}%` }} />
-        </div>
-
-        {ctxQuery.data && ctxQuery.data.missing.length > 0 && (
-          <div className="mt-3">
-            <p className="mb-1.5 text-xs font-medium text-muted-foreground">Falta preencher:</p>
-            <div className="flex flex-wrap gap-1.5">
-              {ctxQuery.data.missing.map((m) => (
-                <span key={m} className="rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground">{m}</span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="mt-4">
-          <Button asChild size="sm" variant="outline">
-            <Link to="/conteudo/base"><Sparkles className="mr-1 h-4 w-4" /> Abrir Base de Conteúdo</Link>
-          </Button>
-        </div>
-      </div>
-
-      {/* Conexões (Instagram / Facebook) */}
-      {META_CONNECT_ENABLED && <InstagramConnection clientId={clientId} />}
-      {GOOGLE_BUSINESS_ENABLED && (
-        <GoogleBusinessConnection clientId={clientId} />
-      )}
-
-      {/* Relatórios e documentos do cliente */}
-      <ClientReports clientId={clientId} />
-      <ClientDocuments clientId={clientId} />
-      {REUNIOES_ENABLED && <ClientMeetings clientId={clientId} />}
     </div>
   );
 }
