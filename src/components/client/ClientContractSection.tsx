@@ -36,6 +36,10 @@ const QUANTIDADES = [
  * quem vendeu a conta.
  */
 export function ClientContractSection({ clientId }: { clientId: string }) {
+  return <ContractEditor key={clientId} clientId={clientId} />;
+}
+
+function ContractEditor({ clientId }: { clientId: string }) {
   const { user } = useAuth();
   const { organizationId } = useOrganization();
   const queryClient = useQueryClient();
@@ -47,16 +51,18 @@ export function ClientContractSection({ clientId }: { clientId: string }) {
   });
 
   const [contrato, setContrato] = useState<ContentContract>(EMPTY_CONTRACT);
+  const [dirty, setDirty] = useState(false);
   useEffect(() => {
-    if (contractQuery.data) setContrato(contractQuery.data);
-  }, [contractQuery.data]);
+    if (!dirty && contractQuery.isSuccess) setContrato(contractQuery.data ?? EMPTY_CONTRACT);
+  }, [contractQuery.data, contractQuery.isSuccess, dirty]);
 
   const alterar = <K extends keyof ContentContract>(
     campo: K,
     valor: ContentContract[K],
-  ) => setContrato((atual) => ({ ...atual, [campo]: valor }));
+  ) => { setDirty(true); setContrato((atual) => ({ ...atual, [campo]: valor })); };
 
   const alternarPlataforma = (id: PaidPlatform, marcada: boolean) => {
+    setDirty(true);
     const atuais = new Set(contrato.paid_platforms);
     if (marcada) atuais.add(id);
     else atuais.delete(id);
@@ -70,13 +76,17 @@ export function ClientContractSection({ clientId }: { clientId: string }) {
   };
 
   const salvar = useMutation({
-    mutationFn: () => saveContract({
+    mutationFn: () => {
+      if (!contractQuery.isSuccess || !user || !organizationId) throw new Error("Carregue o contrato antes de salvar.");
+      return saveContract({
       clientId,
       organizationId: organizationId!,
       userId: user!.id,
       contract: contrato,
-    }),
+    }); },
     onSuccess: () => {
+      queryClient.setQueryData(["client-contract", clientId], contrato);
+      setDirty(false);
       toast.success("Contrato salvo. Novos planejamentos já usam essas quantidades.");
       queryClient.invalidateQueries({ queryKey: ["client-contract", clientId] });
     },
@@ -86,8 +96,11 @@ export function ClientContractSection({ clientId }: { clientId: string }) {
   const totalPecas = QUANTIDADES.reduce((soma, campo) => soma + (contrato[campo.key] || 0), 0)
     + (contrato.does_linkedin ? contrato.qty_linkedin : 0);
 
+  if (contractQuery.isPending) return <p role="status">Carregando contrato…</p>;
+  if (contractQuery.isError) return <div role="alert" className="space-y-3 rounded-xl border p-4"><p>Não foi possível carregar o contrato. Seus dados não foram alterados.</p><Button onClick={() => void contractQuery.refetch()} disabled={contractQuery.isFetching}>Tentar novamente</Button></div>;
+
   return (
-    <div className="space-y-5">
+    <fieldset disabled={salvar.isPending} className="min-w-0 space-y-5">
       {/* Quantidades do mês */}
       <div className="rounded-2xl border border-border bg-card p-5">
         <div className="mb-1 flex items-center gap-2">
@@ -259,6 +272,6 @@ export function ClientContractSection({ clientId }: { clientId: string }) {
           </Button>
         </div>
       </div>
-    </div>
+    </fieldset>
   );
 }
