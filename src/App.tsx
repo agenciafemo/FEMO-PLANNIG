@@ -38,6 +38,7 @@ import SocialSelling from "./pages/financeiro/SocialSelling";
 import Analitico from "./pages/financeiro/Analitico";
 import DashboardAnual from "./pages/financeiro/DashboardAnual";
 import ConfiguracoesFinanceiro from "./pages/financeiro/Configuracoes";
+import Movimentacoes from "./pages/financeiro/Movimentacoes";
 import { FinanceiroLayout } from "@/components/financeiro/FinanceiroLayout";
 import { isOrganizationAdministrator } from "@/lib/organizationRoles";
 import Calendario from "./pages/Calendario";
@@ -228,6 +229,7 @@ const App = () => (
                     <Route path="fluxo" element={<Fluxo />} />
                     <Route path="social-selling" element={<SocialSelling />} />
                     <Route path="configuracoes" element={<ConfiguracoesFinanceiro />} />
+                    <Route path="movimentacoes" element={<Movimentacoes />} />
                     <Route path="equipe" element={<TeamCollaborators />} />
                     <Route path="cofre" element={<Vault />} />
                   </Route>

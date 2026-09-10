@@ -39,6 +39,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      auditoria_administrativa: {
+        Row: {
+          acao: string
+          autor_id: string | null
+          autor_nome: string | null
+          criado_em: string
+          entidade: string
+          id: string
+          organization_id: string
+          registro_descricao: string | null
+          registro_id: string | null
+          tabela: string
+        }
+        Insert: {
+          acao: string
+          autor_id?: string | null
+          autor_nome?: string | null
+          criado_em?: string
+          entidade: string
+          id?: string
+          organization_id: string
+          registro_descricao?: string | null
+          registro_id?: string | null
+          tabela: string
+        }
+        Update: {
+          acao?: string
+          autor_id?: string | null
+          autor_nome?: string | null
+          criado_em?: string
+          entidade?: string
+          id?: string
+          organization_id?: string
+          registro_descricao?: string | null
+          registro_id?: string | null
+          tabela?: string
+        }
+        Relationships: []
+      }
       categorias: {
         Row: {
           organization_id: string | null

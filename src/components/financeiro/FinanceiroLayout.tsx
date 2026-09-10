@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   LineChart,
   KeyRound,
+  History,
   Settings,
   Target,
   UserCog,
@@ -40,6 +41,8 @@ const ABAS_FINANCEIRAS = [
   { to: "/administrativo/fluxo", label: "Fluxo de Caixa", icon: ArrowLeftRight },
   { to: "/administrativo/social-selling", label: "Social Selling", icon: Target },
   { to: "/administrativo/configuracoes", label: "Configurações", icon: Settings },
+  // Fecha o bloco: primeiro o que se faz, por último o registro de quem fez.
+  { to: "/administrativo/movimentacoes", label: "Movimentações", icon: History },
 ] as const;
 
 type AbaAdministrativa =
