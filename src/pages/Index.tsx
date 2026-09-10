@@ -8,7 +8,7 @@ export default function Index() {
 
   useEffect(() => {
     if (!loading) {
-      navigate(user ? "/dashboard" : "/auth");
+      navigate(user ? "/organizations/select" : "/auth", { replace: true });
     }
   }, [user, loading, navigate]);
 

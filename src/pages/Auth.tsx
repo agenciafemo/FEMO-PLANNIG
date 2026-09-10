@@ -26,7 +26,7 @@ export default function Auth() {
   const { user } = useAuth();
 
   useEffect(() => {
-    if (user) navigate(inviteToken ? `/invite/${inviteToken}` : "/dashboard", { replace: true });
+    if (user) navigate(inviteToken ? `/invite/${encodeURIComponent(inviteToken)}` : "/organizations/select", { replace: true });
   }, [user, navigate, inviteToken]);
 
   const handleEmailAuth = async (e: React.FormEvent) => {
@@ -43,7 +43,7 @@ export default function Auth() {
           password,
           options: {
             data: { full_name: fullName },
-            emailRedirectTo: window.location.origin,
+            emailRedirectTo: window.location.origin + (inviteToken ? `/invite/${encodeURIComponent(inviteToken)}` : "/organizations/select"),
           },
         });
         if (error) throw error;
@@ -54,8 +54,8 @@ export default function Auth() {
           toast.success("Conta criada! Verifique seu email para confirmar.");
         }
       }
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível entrar");
     } finally {
       setLoading(false);
     }
@@ -65,11 +65,11 @@ export default function Auth() {
     setLoading(true);
     try {
       const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin + (inviteToken ? `/invite/${inviteToken}` : "/dashboard"),
+        redirect_uri: window.location.origin + (inviteToken ? `/invite/${encodeURIComponent(inviteToken)}` : "/organizations/select"),
       });
       if (result.error) throw result.error;
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível entrar com Google");
       setLoading(false);
     }
   };

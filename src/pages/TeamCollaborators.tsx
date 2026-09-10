@@ -34,6 +34,8 @@ import { useOrganization } from "@/hooks/useOrganization";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { ProfileDialog } from "@/components/layout/ProfileDialog";
+import { OrganizationAccessRequests } from "@/components/team/OrganizationAccessRequests";
+import { canReviewOrganizationAccess } from "@/lib/organizationAccess";
 
 type OrganizationRole = "owner" | "admin" | "manager" | "editor" | "viewer";
 
@@ -446,6 +448,8 @@ export default function TeamCollaborators() {
             </div>
           ) : undefined}
         />
+
+        {organizationId && canReviewOrganizationAccess(role) && <OrganizationAccessRequests organizationId={organizationId} canConfigure={canManage} />}
 
         {organizationId && user && (
           <PermissionsPanel

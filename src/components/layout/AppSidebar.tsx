@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { LayoutGrid, LogOut, Shield, Bell, ListTodo, MessageSquareHeart, Clock3, CalendarDays, Video, Wallet } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,6 +14,9 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { ProfileDialog } from "@/components/layout/ProfileDialog";
 import { Pencil } from "lucide-react";
 import { REUNIOES_ENABLED } from "@/lib/featureFlags";
+import { Button } from "@/components/ui/button";
+import { canReviewOrganizationAccess, organizationReviewQueue, reviewOrganizationRequest } from "@/lib/organizationAccess";
+import { toast } from "sonner";
 
 const navItems = [
   { to: "/dashboard", icon: LayoutGrid, label: "Dashboard" },
@@ -25,27 +28,38 @@ const navItems = [
   { to: "/administrativo", icon: Wallet, label: "Administrativo" },
 ];
 
-// A tabela `notifications` ainda não está no types.ts gerado, então o cast é
-// inevitável — mas ele fica num lugar só, com o formato declarado, em vez de
-// `any` espalhado por cada uso.
-interface NotificationRow {
-  id: string;
-  title: string | null;
-  body: string | null;
-  read: boolean | null;
-  created_at: string;
-}
-
 export function NotificationBell() {
   const queryClient = useQueryClient();
-  const { organizationId, isLegacy } = useOrganization();
+  const { organizationId, isLegacy, role } = useOrganization();
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  const canReviewAccess = !isLegacy && !!organizationId && canReviewOrganizationAccess(role);
 
-  // TODO(pending-schema-check): "notifications" não está confirmada no
-  // schema real (types.ts). Tratamos como tabela não confiável: qualquer
-  // falha (tabela inexistente, coluna organization_id ausente etc.) deve
-  // resultar em sino vazio, nunca em erro visível ou quebra da tela.
+  // Usa a mesma chave da tela Administrativo > Equipe. Assim o React Query
+  // deduplica a consulta: sino e tela compartilham uma única fonte de verdade.
+  const { data: accessQueue } = useQuery({
+    queryKey: ["organization-access-review", organizationId],
+    queryFn: () => organizationReviewQueue(organizationId!),
+    enabled: canReviewAccess,
+    staleTime: 0,
+    refetchInterval: 30000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    retry: false,
+  });
+  const accessRequests = useMemo(() => accessQueue?.requests ?? [], [accessQueue?.requests]);
+  const accessDecision = useMutation({
+    mutationFn: ({ id, approve }: { id: string; approve: boolean }) => reviewOrganizationRequest(id, approve),
+    onSuccess: async (_, { approve }) => {
+      toast.success(approve ? "Acesso aprovado como colaborador." : "Solicitação recusada.");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["organization-access-review", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["team-function-management", organizationId] }),
+      ]);
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
   // Cada notificação tem um destinatário (user_id). Mostramos só as MINHAS
   // (user_id = eu) mais as gerais/broadcast (user_id nulo). Assim ninguém vê —
   // nem ouve — a notificação de outra pessoa. Ex.: evento da equipe só avisa
@@ -59,12 +73,12 @@ export function NotificationBell() {
       // aumento de contagem, cada oscilação dessas tocava o som de novo, para
       // notificações antigas. Lançando, o React Query mantém o último resultado
       // bom em `data` e a tela simplesmente não muda.
-      let query = supabase.from("notifications" as any).select("*") as any;
+      let query = supabase.from("notifications").select("*");
       if (!isLegacy) query = query.eq("organization_id", organizationId!);
       query = query.or(mineOrBroadcast);
       const { data, error } = await query.order("created_at", { ascending: false }).limit(20);
       if (error) throw new Error(error.message);
-      return (data ?? []) as NotificationRow[];
+      return data ?? [];
     },
     enabled: isLegacy || !!organizationId,
     refetchInterval: 30000,
@@ -81,19 +95,20 @@ export function NotificationBell() {
   const markAllRead = useMutation({
     mutationFn: async () => {
       try {
-        let query = (supabase.from("notifications" as any) as any).update({ read: true }).eq("read", false);
+        let query = supabase.from("notifications").update({ read: true }).eq("read", false);
         if (!isLegacy) query = query.eq("organization_id", organizationId!);
         query = query.or(mineOrBroadcast);
-        await query;
+        const { error } = await query;
+        if (error) throw new Error(error.message);
       } catch {
-        // Silencioso: sino de notificações é best-effort enquanto a tabela
-        // não estiver confirmada no banco real.
+        // Silencioso: falha ao marcar como lida não deve quebrar o sino.
       }
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications", organizationId, user?.id] }),
   });
 
   const unreadCount = notifications?.filter((n) => !n.read).length ?? 0;
+  const attentionCount = unreadCount + accessRequests.length;
 
   // Som quando chega notificação nova (além do sininho). Dois beeps curtos via
   // Web Audio. Reaproveita um único AudioContext e o "acorda" (resume) porque
@@ -163,6 +178,7 @@ export function NotificationBell() {
   // IDs já anunciados. Começa preenchido com o que veio na primeira carga: sem
   // isso, abrir o app dispararia um alerta para cada notificação antiga.
   const announcedRef = useRef<Set<string> | null>(null);
+  const accessAnnouncedRef = useRef<{ organizationId: string | null; ids: Set<string> } | null>(null);
 
   const requestNotifPermission = async () => {
     if (typeof Notification === "undefined") return;
@@ -233,16 +249,42 @@ export function NotificationBell() {
     } catch { /* aviso do SO é best-effort */ }
   }, [notifications, notifPermission]);
 
+  // Pedidos de entrada são alertas acionáveis: abrir o sino não os marca como
+  // resolvidos. Eles permanecem no contador e no painel até Aprovar/Recusar.
+  useEffect(() => {
+    if (!canReviewAccess || !organizationId || !accessQueue) return;
+    const ids = accessRequests.map((request) => request.id);
+    const previous = accessAnnouncedRef.current;
+    if (!previous || previous.organizationId !== organizationId) {
+      accessAnnouncedRef.current = { organizationId, ids: new Set(ids) };
+      return;
+    }
+    const newRequests = accessRequests.filter((request) => !previous.ids.has(request.id));
+    ids.forEach((id) => previous.ids.add(id));
+    if (newRequests.length === 0) return;
+    playChime();
+    if (notifPermission !== "granted" || typeof Notification === "undefined" || !document.hidden) return;
+    try {
+      new Notification("Nova solicitação de acesso", {
+        body: newRequests.length === 1
+          ? `${newRequests[0].email} está aguardando sua autorização.`
+          : `${newRequests.length} pessoas estão aguardando sua autorização.`,
+        tag: `norteia-access-${organizationId}`,
+        icon: "/favicon.ico",
+      });
+    } catch { /* aviso do sistema é best-effort */ }
+  }, [accessQueue, accessRequests, canReviewAccess, organizationId, notifPermission]);
+
   // Na primeira vez que a pessoa abre o app no dia, o painel de notificações
   // abre sozinho (uma vez por dia) para ela conferir o que aconteceu.
   useEffect(() => {
-    if (!notifications || notifications.length === 0) return;
+    if ((notifications?.length ?? 0) === 0 && accessRequests.length === 0) return;
     const key = `norteia-notif-auto-open-${organizationId ?? "legacy"}`;
     const today = new Date().toISOString().slice(0, 10);
     if (localStorage.getItem(key) === today) return;
     localStorage.setItem(key, today);
     setOpen(true);
-  }, [notifications, organizationId]);
+  }, [accessRequests.length, notifications, organizationId]);
 
   const handleOpen = (v: boolean) => {
     setOpen(v);
@@ -252,11 +294,11 @@ export function NotificationBell() {
   return (
     <Popover open={open} onOpenChange={handleOpen}>
       <PopoverTrigger asChild>
-        <button className="relative flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <button aria-label={attentionCount > 0 ? `Notificações: ${attentionCount} pendente(s)` : "Notificações"} className="relative flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <Bell className="h-5 w-5" />
-          {unreadCount > 0 && (
+          {attentionCount > 0 && (
             <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground ring-2 ring-background">
-              {unreadCount > 9 ? "9+" : unreadCount}
+              {attentionCount > 9 ? "9+" : attentionCount}
             </span>
           )}
         </button>
@@ -290,10 +332,32 @@ export function NotificationBell() {
           </p>
         )}
         <div className="max-h-80 overflow-y-auto">
-          {!notifications || notifications.length === 0 ? (
+          {accessRequests.length > 0 && (
+            <section aria-label="Solicitações de acesso pendentes" className="border-b bg-warning/5 px-4 py-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold">Aguardando sua autorização</p>
+                <Link to="/administrativo/equipe" onClick={() => setOpen(false)} className="text-xs font-medium underline underline-offset-4">Ver equipe</Link>
+              </div>
+              <div className="space-y-3">
+                {accessRequests.map((request) => (
+                  <div key={request.id} className="space-y-2 rounded-lg border bg-background p-3">
+                    <div>
+                      <p className="break-all text-sm font-medium">{request.email}</p>
+                      <p className="text-xs text-muted-foreground">Quer entrar nesta agência</p>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="outline" disabled={accessDecision.isPending} onClick={() => accessDecision.mutate({ id: request.id, approve: false })}>Recusar</Button>
+                      <Button size="sm" disabled={accessDecision.isPending} onClick={() => accessDecision.mutate({ id: request.id, approve: true })}>Aprovar</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+          {(!notifications || notifications.length === 0) && accessRequests.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">Nenhuma notificação</p>
           ) : (
-            notifications.map((n) => (
+            (notifications ?? []).map((n) => (
               <div key={n.id} className={cn("border-b px-4 py-3 last:border-0", !n.read && "bg-info/10")}>
                 <div className="flex items-start gap-2">
                   {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-info" />}

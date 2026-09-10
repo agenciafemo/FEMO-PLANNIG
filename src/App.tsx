@@ -7,8 +7,12 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemePreferenceProvider } from "@/contexts/ThemePreferenceContext";
 import { OrganizationProvider, useOrganizationContext } from "@/contexts/OrganizationContext";
-import { MULTI_ORG_ENABLED } from "@/lib/featureFlags";
 import { AppLayout } from "@/components/layout/AppLayout";
+import {
+  OrganizationGuard,
+  RequireOrganizationAdministrator,
+  RequireOrganizationCreator,
+} from "@/components/auth/OrganizationRouteGuards";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -27,13 +31,15 @@ import TeamCollaborators from "./pages/TeamCollaborators";
 import DashboardFinanceiro from "./pages/financeiro/Dashboard";
 import Fluxo from "./pages/financeiro/Fluxo";
 import ClientesFinanceiro from "./pages/financeiro/Clientes";
+import AdministrativeClients from "./pages/AdministrativeClients";
+import AdministrativeClientProfile from "./pages/AdministrativeClientProfile";
 import ColaboradoresFinanceiro from "./pages/financeiro/Colaboradores";
 import SocialSelling from "./pages/financeiro/SocialSelling";
 import Analitico from "./pages/financeiro/Analitico";
 import DashboardAnual from "./pages/financeiro/DashboardAnual";
 import ConfiguracoesFinanceiro from "./pages/financeiro/Configuracoes";
-import { usePermission } from "@/hooks/usePermission";
 import { FinanceiroLayout } from "@/components/financeiro/FinanceiroLayout";
+import { isOrganizationAdministrator } from "@/lib/organizationRoles";
 import Calendario from "./pages/Calendario";
 import AgendaEquipe from "./pages/AgendaEquipe";
 import Reunioes from "./pages/Reunioes";
@@ -70,29 +76,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// Garante que o usuário tenha uma organização ativa antes de acessar o app.
-// Sem organização -> tela de criação. Mais de uma sem organização ativa
-// resolvida -> tela de seleção. A segurança real está na RLS; este guard é
-// só um roteamento de UX (ver OrganizationContext.tsx).
-//
-// Com VITE_MULTI_ORG_ENABLED=false, o guard nunca redireciona: o app se
-// comporta exatamente como antes da migration multi-org existir.
-function OrganizationGuard({ children }: { children: React.ReactNode }) {
-  const { memberships, organizationId, loading } = useOrganizationContext();
-  if (!MULTI_ORG_ENABLED) return <>{children}</>;
-  if (loading) return null;
-  if (memberships.length === 0) return <Navigate to="/organizations/new" replace />;
-  if (!organizationId) return <Navigate to="/organizations/select" replace />;
-  return <>{children}</>;
-}
-
-// Rotas novas de organização só existem de verdade com a flag ligada.
-// Com a flag desligada, nenhuma dessas telas é alcançável.
-function RequireMultiOrgFlag({ children }: { children: React.ReactNode }) {
-  if (!MULTI_ORG_ENABLED) return <Navigate to="/dashboard" replace />;
-  return <>{children}</>;
-}
-
 function RequireTeamManager({ children }: { children: React.ReactNode }) {
   const { role, loading } = useOrganizationContext();
   if (loading) return null;
@@ -102,27 +85,12 @@ function RequireTeamManager({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/**
- * O financeiro é só do administrativo da agência: folha de pagamento, comissão
- * e fluxo de caixa não são da equipe. A RLS já barra os dados; esta guarda
- * evita a tela vazia com erro no lugar de um "você não tem acesso".
- *
- * `undefined` é "ainda carregando" — tratá-lo como negativa mandaria quem tem
- * acesso para o dashboard antes da resposta chegar.
- */
-function RequireFinanceiro({ children }: { children: React.ReactNode }) {
-  const podeVer = usePermission("financeiro.ver");
-  if (podeVer === undefined) return null;
-  if (!podeVer) return <Navigate to="/dashboard" replace />;
-  return <>{children}</>;
-}
-
 function AdministrativoIndex() {
-  const podeVerFinanceiro = usePermission("financeiro.ver");
-  if (podeVerFinanceiro === undefined) return null;
-  return podeVerFinanceiro
+  const { role, loading } = useOrganizationContext();
+  if (loading) return null;
+  return isOrganizationAdministrator(role)
     ? <DashboardFinanceiro />
-    : <Navigate to="/administrativo/equipe" replace />;
+    : <Navigate to="/administrativo/clientes" replace />;
 }
 
 /**
@@ -145,7 +113,9 @@ function ClientToPlanningRedirect() {
  */
 function FinanceiroParaAdministrativo() {
   const { pathname, search, hash } = useLocation();
-  const destino = pathname.replace(/^\/financeiro/, "/administrativo");
+  const destino = pathname === "/financeiro/clientes"
+    ? "/administrativo/financeiro-clientes"
+    : pathname.replace(/^\/financeiro/, "/administrativo");
   return <Navigate to={`${destino}${search}${hash}`} replace />;
 }
 
@@ -169,9 +139,9 @@ const App = () => (
                 path="/organizations/new"
                 element={
                   <ProtectedRoute>
-                    <RequireMultiOrgFlag>
+                    <RequireOrganizationCreator>
                       <CreateOrganization />
-                    </RequireMultiOrgFlag>
+                    </RequireOrganizationCreator>
                   </ProtectedRoute>
                 }
               />
@@ -179,9 +149,7 @@ const App = () => (
                 path="/organizations/select"
                 element={
                   <ProtectedRoute>
-                    <RequireMultiOrgFlag>
-                      <SelectOrganization />
-                    </RequireMultiOrgFlag>
+                    <SelectOrganization />
                   </ProtectedRoute>
                 }
               />
@@ -250,17 +218,19 @@ const App = () => (
                   element={<FinanceiroLayout />}
                 >
                   <Route index element={<AdministrativoIndex />} />
-                  <Route element={<RequireFinanceiro><Outlet /></RequireFinanceiro>}>
+                  <Route path="clientes" element={<AdministrativeClients />} />
+                  <Route path="clientes/:clientId" element={<AdministrativeClientProfile />} />
+                  <Route element={<RequireOrganizationAdministrator><Outlet /></RequireOrganizationAdministrator>}>
                     <Route path="anual" element={<DashboardAnual />} />
                     <Route path="analitico" element={<Analitico />} />
-                    <Route path="clientes" element={<ClientesFinanceiro />} />
+                    <Route path="financeiro-clientes" element={<ClientesFinanceiro />} />
                     <Route path="colaboradores" element={<ColaboradoresFinanceiro />} />
                     <Route path="fluxo" element={<Fluxo />} />
                     <Route path="social-selling" element={<SocialSelling />} />
                     <Route path="configuracoes" element={<ConfiguracoesFinanceiro />} />
+                    <Route path="equipe" element={<TeamCollaborators />} />
+                    <Route path="cofre" element={<Vault />} />
                   </Route>
-                  <Route path="equipe" element={<TeamCollaborators />} />
-                  <Route path="cofre" element={<Vault />} />
                 </Route>
               </Route>
               <Route path="*" element={<NotFound />} />

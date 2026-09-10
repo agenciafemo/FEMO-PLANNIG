@@ -196,6 +196,7 @@ export default function Producao() {
   // Peças + etapas de toda a organização (o resumo precisa de todos os clientes).
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["production-items", organizationId],
+    refetchInterval: 30_000,
     queryFn: async () => {
       const { data, error } = await (supabase as AnyClient).from("production_items")
         .select("id, content_type, piece_number, title, client_id, planning_id, post_id, notes, position, task_id, mes_referencia, production_item_steps(id, step_key, label, kind, position, done, scheduled_at, outcome, reason_codes, reason_note, assignee_id, capture_event_id, schedule_source)")

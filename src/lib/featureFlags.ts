@@ -1,7 +1,7 @@
-// TODO(multi-org-migration): remover este flag quando a migration 3
-// (NOT NULL + RLS) estiver aplicada em produção e o modo legado do
-// OrganizationContext puder ser removido.
-export const MULTI_ORG_ENABLED = import.meta.env.VITE_MULTI_ORG_ENABLED === "true";
+// Multi-organização faz parte da barreira de acesso do Norteia. Não pode ser
+// desligada por variável de ambiente: isso transformava qualquer sessão válida
+// em um falso "proprietário legado" e permitia entrar no dashboard sem equipe.
+export const MULTI_ORG_ENABLED = true;
 
 // Conexão Meta/Instagram por cliente. Desligada por padrão: a tela só aparece
 // quando VITE_META_CONNECT_ENABLED === "true". Permite publicar o código com
