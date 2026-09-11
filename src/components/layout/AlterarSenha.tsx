@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { avaliarSenha } from "@/lib/senha";
+import { avaliarSenha, MINIMO_DE_CARACTERES } from "@/lib/senha";
 import { initialPasswordQueryKey, markInitialPasswordComplete } from "@/lib/initialPassword";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -118,6 +118,7 @@ export function AlterarSenha() {
             id="senha-nova"
             type={mostrar ? "text" : "password"}
             autoComplete="new-password"
+            minLength={MINIMO_DE_CARACTERES}
             value={nova}
             onChange={(e) => setNova(e.target.value)}
             className="pr-10"
@@ -140,6 +141,7 @@ export function AlterarSenha() {
           id="senha-confirmacao"
           type={mostrar ? "text" : "password"}
           autoComplete="new-password"
+          minLength={MINIMO_DE_CARACTERES}
           value={confirmacao}
           onChange={(e) => setConfirmacao(e.target.value)}
         />

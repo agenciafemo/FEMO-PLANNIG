@@ -8,6 +8,10 @@ describe("avaliarSenha", () => {
     expect(avaliarSenha(boa, boa, "fernanda@femo.com.br")).toEqual({ ok: true, erro: "" });
   });
 
+  it("aceita uma senha com exatamente seis caracteres", () => {
+    expect(avaliarSenha("abc123", "abc123")).toEqual({ ok: true, erro: "" });
+  });
+
   it("recusa curta demais", () => {
     const r = avaliarSenha("abc12", "abc12");
     expect(r.ok).toBe(false);

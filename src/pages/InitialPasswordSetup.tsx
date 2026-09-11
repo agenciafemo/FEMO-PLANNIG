@@ -16,7 +16,7 @@ import {
   markInitialPasswordComplete,
   safePasswordReturnPath,
 } from "@/lib/initialPassword";
-import { avaliarSenha } from "@/lib/senha";
+import { avaliarSenha, MINIMO_DE_CARACTERES } from "@/lib/senha";
 
 type PasswordLocationState = { next?: unknown } | null;
 
@@ -85,6 +85,7 @@ export default function InitialPasswordSetup() {
                     id="initial-password"
                     type={showPassword ? "text" : "password"}
                     autoComplete="new-password"
+                    minLength={MINIMO_DE_CARACTERES}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     className="pr-10"
@@ -108,6 +109,7 @@ export default function InitialPasswordSetup() {
                   id="initial-password-confirmation"
                   type={showPassword ? "text" : "password"}
                   autoComplete="new-password"
+                  minLength={MINIMO_DE_CARACTERES}
                   value={confirmation}
                   onChange={(event) => setConfirmation(event.target.value)}
                   required
@@ -116,7 +118,7 @@ export default function InitialPasswordSetup() {
 
               <div className="flex items-start gap-2 rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
                 <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-                <p>Use pelo menos 8 caracteres. Sua senha fica protegida pelo Supabase e não pode ser vista pela agência.</p>
+                <p>Use pelo menos {MINIMO_DE_CARACTERES} caracteres. Sua senha fica protegida pelo Supabase e não pode ser vista pela agência.</p>
               </div>
 
               <Button type="submit" className="h-11 w-full" disabled={saving || !password || !confirmation}>
