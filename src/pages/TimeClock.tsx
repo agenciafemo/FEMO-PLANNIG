@@ -23,6 +23,7 @@ import {
 } from "@/lib/timeClockReport";
 
 import { EmptyState, MetricCard, PageHeader, SectionHeader, StatusBadge } from "@/components/common";
+import { ReferenceClock } from "@/components/team/ReferenceClock";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1073,6 +1074,9 @@ export default function TimeClock() {
         <div className="mt-6">
           <section className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm sm:p-7">
             <StatusBadge variant={currentStatus.variant}>{currentStatus.label}</StatusBadge>
+            <div className="mt-5">
+              <ReferenceClock timeZone={AGENCY_TIME_ZONE} />
+            </div>
             <h2 className="mt-5 text-2xl font-semibold tracking-tight text-foreground">
               {nextStep ? nextStep.action : "Jornada finalizada"}
             </h2>
