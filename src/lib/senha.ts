@@ -7,7 +7,7 @@
 // bastante ANTES de mandar.
 
 /** Curto demais é o erro mais comum, e o mais fácil de quebrar por força bruta. */
-export const MINIMO_DE_CARACTERES = 8;
+export const MINIMO_DE_CARACTERES = 6;
 
 export interface ResultadoDaSenha {
   ok: boolean;
@@ -46,9 +46,10 @@ export function avaliarSenha(
     return { ok: false, erro: "Só números é fácil de adivinhar. Misture letras." };
   }
 
-  // Repetição de um caractere só ("aaaaaaaa") passa no comprimento e não
-  // protege nada.
-  if (new Set(senha).size < 4) {
+  // Em senhas maiores, repetição de poucos caracteres ("aaaaaaaa") passa no
+  // comprimento e não protege nada. A regra só se aplica a partir de 8 para
+  // não conflitar com o mínimo de 6 aceito pelo Supabase.
+  if (senha.length >= 8 && new Set(senha).size < 4) {
     return { ok: false, erro: "A senha é repetitiva demais. Varie os caracteres." };
   }
 
