@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { avaliarSenha } from "@/lib/senha";
+import { initialPasswordQueryKey, markInitialPasswordComplete } from "@/lib/initialPassword";
+import { useQueryClient } from "@tanstack/react-query";
 
 // Cada pessoa define a própria senha, e por isso passa a entrar na própria
 // conta — que é o ponto: com login compartilhado, o histórico do app mente
@@ -20,6 +22,7 @@ import { avaliarSenha } from "@/lib/senha";
 
 export function AlterarSenha() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [atual, setAtual] = useState("");
   const [nova, setNova] = useState("");
   const [confirmacao, setConfirmacao] = useState("");
@@ -68,6 +71,9 @@ export function AlterarSenha() {
 
       const { error } = await supabase.auth.updateUser({ password: nova });
       if (error) throw error;
+
+      await markInitialPasswordComplete(user!.id);
+      queryClient.setQueryData(initialPasswordQueryKey(user!.id), true);
 
       toast.success("Senha alterada. Use a nova no próximo acesso.");
       limpar();
