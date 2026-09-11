@@ -3067,6 +3067,7 @@ export type Database = {
           email: string | null
           full_name: string | null
           id: string
+          password_changed_at: string | null
           theme_preference: string
           updated_at: string | null
         }
@@ -3077,6 +3078,7 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id: string
+          password_changed_at?: string | null
           theme_preference?: string
           updated_at?: string | null
         }
@@ -3087,6 +3089,7 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id?: string
+          password_changed_at?: string | null
           theme_preference?: string
           updated_at?: string | null
         }

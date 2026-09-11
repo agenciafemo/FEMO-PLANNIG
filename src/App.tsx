@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemePreferenceProvider } from "@/contexts/ThemePreferenceContext";
 import { OrganizationProvider, useOrganizationContext } from "@/contexts/OrganizationContext";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { InitialPasswordGuard } from "@/components/auth/InitialPasswordGuard";
 import {
   OrganizationGuard,
   RequireOrganizationAdministrator,
@@ -53,6 +54,7 @@ import Privacidade from "./pages/Privacidade";
 import CreateOrganization from "./pages/CreateOrganization";
 import SelectOrganization from "./pages/SelectOrganization";
 import AcceptInvite from "./pages/AcceptInvite";
+import InitialPasswordSetup from "./pages/InitialPasswordSetup";
 import NotFound from "./pages/NotFound";
 
 // Defaults que evitam o "recarregar tudo ao trocar de guia": os dados ficam
@@ -137,12 +139,22 @@ const App = () => (
               <Route path="/privacidade" element={<Privacidade />} />
               <Route path="/exclusao-de-dados" element={<Privacidade />} />
               <Route
+                path="/primeiro-acesso/senha"
+                element={
+                  <ProtectedRoute>
+                    <InitialPasswordSetup />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/organizations/new"
                 element={
                   <ProtectedRoute>
-                    <RequireOrganizationCreator>
-                      <CreateOrganization />
-                    </RequireOrganizationCreator>
+                    <InitialPasswordGuard>
+                      <RequireOrganizationCreator>
+                        <CreateOrganization />
+                      </RequireOrganizationCreator>
+                    </InitialPasswordGuard>
                   </ProtectedRoute>
                 }
               />
@@ -150,7 +162,9 @@ const App = () => (
                 path="/organizations/select"
                 element={
                   <ProtectedRoute>
-                    <SelectOrganization />
+                    <InitialPasswordGuard>
+                      <SelectOrganization />
+                    </InitialPasswordGuard>
                   </ProtectedRoute>
                 }
               />
@@ -160,9 +174,11 @@ const App = () => (
               <Route
                 element={
                   <ProtectedRoute>
-                    <OrganizationGuard>
-                      <AppLayout />
-                    </OrganizationGuard>
+                    <InitialPasswordGuard>
+                      <OrganizationGuard>
+                        <AppLayout />
+                      </OrganizationGuard>
+                    </InitialPasswordGuard>
                   </ProtectedRoute>
                 }
               >
