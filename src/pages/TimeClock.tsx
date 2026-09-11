@@ -1073,14 +1073,7 @@ export default function TimeClock() {
 
         <div className="mt-6">
           <section className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm sm:p-7">
-            <StatusBadge variant={currentStatus.variant}>{currentStatus.label}</StatusBadge>
-            <div className="mt-5">
-              <ReferenceClock timeZone={AGENCY_TIME_ZONE} />
-            </div>
-            <h2 className="mt-5 text-2xl font-semibold tracking-tight text-foreground">
-              {nextStep ? nextStep.action : "Jornada finalizada"}
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">{currentStatus.detail}</p>
+            <ReferenceClock timeZone={AGENCY_TIME_ZONE} />
 
             <Button
               type="button"
