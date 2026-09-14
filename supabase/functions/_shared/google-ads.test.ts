@@ -462,6 +462,26 @@ Deno.test("sem código específico, o diagnóstico usa o status do erro", () => 
   assertEquals(googleAdsDiagnosticCodes(null), []);
 });
 
+// 14/09/2026, depois do diagnóstico: o código real era este, e a tela ainda o
+// traduzia como "permission_denied" — mandando conferir acesso de conta quando
+// o que falta é aprovação do projeto do Cloud.
+Deno.test("projeto do Cloud não aprovado tem motivo próprio e vale para todas as contas", () => {
+  assertEquals(
+    apiReason(403, erro403("CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION")),
+    "google_ads_cloud_project_not_approved",
+  );
+  assertEquals(
+    apiReason(403, [erro403("CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION")]),
+    "google_ads_cloud_project_not_approved",
+  );
+  // Também se vier como ErrorInfo, e não no formato do Ads.
+  assertEquals(
+    apiReason(403, erroInfo("CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION")),
+    "google_ads_cloud_project_not_approved",
+  );
+  assertEquals(isFatalGoogleAdsReason("google_ads_cloud_project_not_approved"), true);
+});
+
 Deno.test("diagnóstico nunca repassa texto livre do Google", () => {
   assertEquals(
     googleAdsDiagnosticCodes({ error: { status: "Mensagem com dado da conta 123" } }),

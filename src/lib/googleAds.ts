@@ -191,6 +191,8 @@ export function googleAdsErrorMessage(reasonCode: string): string {
       "Esta conta de anúncios está desativada ou cancelada no Google Ads.",
     google_ads_developer_token_missing:
       "Falta o token de desenvolvedor do Google Ads. Ele é gerado na conta de administrador (MCC) e precisa de aprovação do Google — a conexão está certa, o que falta é esse acesso.",
+    google_ads_cloud_project_not_approved:
+      "O Google ainda não aprovou o projeto do Google Cloud da integração para contas reais. O login e as contas estão certos. Confira em Google Ads → Ferramentas → Central de API (conta de administrador): se o acesso básico já saiu e para qual projeto do Cloud. A integração usa o projeto Norteia (norteia-505214, nº 61306775686) — se a aprovação foi para outro projeto, é preciso incluir este ou trocar a credencial de login para o projeto aprovado.",
     google_ads_api_disabled:
       "A Google Ads API está desligada no projeto do Google Cloud usado pela integração. Ative em Google Cloud → APIs e serviços → Biblioteca → Google Ads API.",
     google_ads_scope_insufficient:
