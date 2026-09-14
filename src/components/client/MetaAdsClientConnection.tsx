@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Loader2, Megaphone } from "lucide-react";
+import { AlertTriangle, Loader2, Megaphone, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -13,11 +13,18 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useOrganization } from "@/hooks/useOrganization";
 import { cn } from "@/lib/utils";
 import {
   daysUntil,
   disconnectMetaAds,
+  formatarQuando,
   getMetaAdsClientStatus,
   metaAdsReasonMessage,
   startMetaAdsOAuth,
@@ -25,6 +32,38 @@ import {
 
 // A partir de quantos dias antes do vencimento a ficha começa a avisar.
 const AVISO_VENCIMENTO_DIAS = 10;
+
+/**
+ * Desconectar mora num menu, longe do Reconectar: em 14/09 a conexão da
+ * agência foi desligada com um clique ao lado dele. modal={false}: abrir o
+ * AlertDialog a partir de um menu modal deixa a página sem receber cliques.
+ */
+function MenuDesconectar({
+  onDesconectar,
+  desabilitado,
+}: {
+  onDesconectar: () => void;
+  desabilitado: boolean;
+}) {
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Mais opções do Meta Ads do cliente">
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          className="text-destructive focus:text-destructive"
+          disabled={desabilitado}
+          onSelect={onDesconectar}
+        >
+          Desconectar perfil do cliente
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 /**
  * Meta Ads com o PERFIL DO CLIENTE, na ficha → Conexões.
@@ -146,7 +185,7 @@ export function MetaAdsClientConnection({ clientId }: { clientId: string }) {
             </p>
           )}
           {status.can_manage && (
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex items-center justify-between gap-2">
               <Button
                 size="sm"
                 variant={venceEmBreve ? "outline" : "ghost"}
@@ -156,20 +195,24 @@ export function MetaAdsClientConnection({ clientId }: { clientId: string }) {
                 {conectar.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
                 Reconectar perfil do cliente
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive hover:text-destructive"
-                onClick={() => setConfirmarDesconexao(true)}
-                disabled={desconectar.isPending}
-              >
-                Desconectar
-              </Button>
+              <MenuDesconectar
+                onDesconectar={() => setConfirmarDesconexao(true)}
+                desabilitado={desconectar.isPending}
+              />
             </div>
           )}
         </div>
       ) : (
         <div className="mt-3">
+          {status.connection_status === "disconnected" && status.disconnected_at && (
+            <p className="mb-2 text-xs text-muted-foreground">
+              Desconectado
+              {status.disconnected_by_name && (
+                <> por <span className="font-medium text-foreground">{status.disconnected_by_name}</span></>
+              )}{" "}
+              em {formatarQuando(status.disconnected_at)}.
+            </p>
+          )}
           {precisaReconectar && (
             <p className="flex items-center gap-2 text-sm font-medium">
               <AlertTriangle className="h-4 w-4 text-destructive" />
@@ -190,15 +233,12 @@ export function MetaAdsClientConnection({ clientId }: { clientId: string }) {
                   {precisaReconectar ? "Reconectar perfil do cliente" : "Conectar com o perfil do cliente"}
                 </Button>
                 {precisaReconectar && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive hover:text-destructive"
-                    onClick={() => setConfirmarDesconexao(true)}
-                    disabled={desconectar.isPending}
-                  >
-                    Desconectar
-                  </Button>
+                  <div className="ml-auto">
+                    <MenuDesconectar
+                      onDesconectar={() => setConfirmarDesconexao(true)}
+                      desabilitado={desconectar.isPending}
+                    />
+                  </div>
                 )}
               </div>
             </>
