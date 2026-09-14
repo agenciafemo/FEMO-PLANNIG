@@ -5,6 +5,8 @@ import {
   BriefcaseBusiness,
   CalendarRange,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   Coffee,
   Download,
@@ -193,6 +195,19 @@ function agencyDayRange(dateKey: string) {
     start: start.toISOString(),
     end: new Date(start.getTime() + 24 * 60 * 60 * 1000).toISOString(),
   };
+}
+
+// Mês no formato yyyy-MM deslocado em N meses.
+function shiftMonth(monthKey: string, delta: number) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const total = year * 12 + (month - 1) + delta;
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}`;
+}
+
+function formatMonthLabel(monthKey: string) {
+  const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" })
+    .format(new Date(`${monthKey}-15T12:00:00Z`));
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function formatPunchTime(punchedAt: string) {
@@ -424,9 +439,17 @@ export default function TimeClock() {
   const [absenceKind, setAbsenceKind] = useState<AbsenceKind>("atestado");
   const [absenceReason, setAbsenceReason] = useState("");
   const [absenceFile, setAbsenceFile] = useState<File | null>(null);
-  const historyStart = useMemo(
-    () => new Date(new Date(dayRange.start).getTime() - 29 * 24 * 60 * 60 * 1000).toISOString(),
-    [dayRange.start]
+  const currentMonth = todayKey.slice(0, 7);
+  const [historyMonth, setHistoryMonth] = useState(currentMonth);
+  const isCurrentHistoryMonth = historyMonth >= currentMonth;
+  const historyRange = useMemo(
+    () => ({
+      start: agencyDayRange(`${historyMonth}-01`).start,
+      end: isCurrentHistoryMonth
+        ? dayRange.end
+        : agencyDayRange(`${shiftMonth(historyMonth, 1)}-01`).start,
+    }),
+    [historyMonth, isCurrentHistoryMonth, dayRange.end]
   );
   const teamPeriodValid = /^\d{4}-\d{2}-\d{2}$/.test(periodStart)
     && /^\d{4}-\d{2}-\d{2}$/.test(periodEnd)
@@ -546,15 +569,15 @@ export default function TimeClock() {
   const currentStatus = getCurrentStatus(punches);
 
   const historyQuery = useQuery({
-    queryKey: ["time-clock-history", organizationId, user?.id, todayKey],
+    queryKey: ["time-clock-history", organizationId, user?.id, todayKey, historyMonth],
     queryFn: async () => {
       const result = await timeClockSupabase
         .from<TimeClockPunch[]>("time_clock_punches")
         .select("*")
         .eq("organization_id", organizationId!)
         .eq("user_id", user!.id)
-        .gte("punched_at", historyStart)
-        .lt("punched_at", dayRange.end)
+        .gte("punched_at", historyRange.start)
+        .lt("punched_at", historyRange.end)
         .order("punched_at", { ascending: false });
 
       if (result.error) throw result.error;
@@ -618,13 +641,18 @@ export default function TimeClock() {
     return baseline.baseline_seconds + summarizeBalance(days, myAbonoDates).saldo;
   }, [bankBaselineQuery.data, bankPunchesQuery.data, todayKey, myAbonoDates]);
 
-  // Resumo dos últimos 30 dias. Dias anteriores à data de corte já estão
-  // dentro do saldo de abertura; contá-los de novo contradiz o acumulado.
+  // Resumo do mês escolhido. Horas trabalhadas contam todos os dias; extras,
+  // negativas e saldo pulam os dias anteriores à data de corte, que já estão
+  // dentro do saldo de abertura (contá-los de novo contradiz o acumulado).
   const personalBalance = useMemo(() => {
     const days = bankEffectiveFrom
       ? historyDays.filter((day) => day.dateKey >= bankEffectiveFrom)
       : historyDays;
-    return summarizeBalance(days, myAbonoDates);
+    return {
+      ...summarizeBalance(days, myAbonoDates),
+      worked: historyDays.reduce((sum, day) => sum + day.totalSeconds, 0),
+      hasDaysBeforeCutoff: days.length < historyDays.length,
+    };
   }, [historyDays, bankEffectiveFrom, myAbonoDates]);
 
   const teamPunchesQuery = useQuery({
@@ -1292,11 +1320,42 @@ export default function TimeClock() {
             title="Histórico"
             count={historyDays.length}
             icon={CalendarRange}
-            action={<span className="text-xs text-muted-foreground">Últimos 30 dias</span>}
+            action={
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label="Mês anterior"
+                  onClick={() => setHistoryMonth((month) => shiftMonth(month, -1))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="min-w-32 text-center text-sm font-medium tabular-nums">
+                  {formatMonthLabel(historyMonth)}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label="Próximo mês"
+                  disabled={isCurrentHistoryMonth}
+                  onClick={() => setHistoryMonth((month) => shiftMonth(month, 1))}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            }
           />
 
           {historyDays.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card px-3 py-1.5 text-xs">
+                <span className="text-muted-foreground">Trabalhadas</span>
+                <span className="font-semibold tabular-nums">{formatWorkedDuration(personalBalance.worked)}</span>
+              </span>
               <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card px-3 py-1.5 text-xs">
                 <span className="text-muted-foreground">Extras</span>
                 <span className="font-semibold tabular-nums text-success">
@@ -1310,7 +1369,7 @@ export default function TimeClock() {
                 </span>
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card px-3 py-1.5 text-xs">
-                <span className="text-muted-foreground">Saldo dos 30 dias</span>
+                <span className="text-muted-foreground">Saldo do mês</span>
                 <span
                   className={cn(
                     "font-semibold tabular-nums",
@@ -1322,6 +1381,12 @@ export default function TimeClock() {
                 </span>
               </span>
             </div>
+          )}
+          {personalBalance.hasDaysBeforeCutoff && bankEffectiveFrom && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Extras, negativas e saldo contam a partir de {formatHistoryDate(bankEffectiveFrom)}. Antes disso, as horas
+              já estão no saldo de abertura do banco.
+            </p>
           )}
 
           {historyQuery.isLoading ? (
@@ -1338,8 +1403,12 @@ export default function TimeClock() {
             <EmptyState
               className="mt-4"
               icon={CalendarRange}
-              title="Histórico vazio"
-              description="Os dias com registros de ponto aparecerão aqui."
+              title={isCurrentHistoryMonth ? "Histórico vazio" : "Nenhum registro neste mês"}
+              description={
+                isCurrentHistoryMonth
+                  ? "Os dias com registros de ponto aparecerão aqui."
+                  : "Não há pontos batidos em " + formatMonthLabel(historyMonth).toLowerCase() + "."
+              }
             />
           ) : (
             <div className="mt-4 overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
