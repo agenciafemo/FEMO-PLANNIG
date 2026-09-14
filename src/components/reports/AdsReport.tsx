@@ -19,6 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -381,105 +382,53 @@ export function AdsReport({
         </div>
       ) : null}
 
-      {/* Perfil do próprio cliente: tem prioridade sobre a conexão da agência */}
-      {clientStatus && (clienteConectado ? (
+      {/* Perfil do próprio cliente: conectado na ficha → Conexões. Aqui só o
+          status, com atalho — um lugar só para conectar. */}
+      {clientStatus && (
         <div
           className={cn(
-            "mb-4 rounded-xl border p-3",
-            clienteVenceEmBreve ? "border-warning/30 bg-warning-soft/30" : "border-border bg-muted/20",
+            "mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3",
+            clientePrecisaReconectar
+              ? "border-destructive/30 bg-destructive/5"
+              : clienteVenceEmBreve
+                ? "border-warning/30 bg-warning-soft/30"
+                : "border-border bg-muted/20",
           )}
         >
-          <p className="flex items-start gap-2 text-sm">
-            <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+          <p className="flex min-w-0 items-start gap-2 text-sm">
+            {clientePrecisaReconectar ? (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            ) : (
+              <UserRound
+                className={cn("mt-0.5 h-4 w-4 shrink-0", clienteConectado ? "text-brand" : "text-muted-foreground")}
+              />
+            )}
             <span>
-              Este cliente está conectado com o próprio perfil
-              {clientStatus.meta_user_name && (
-                <> (<span className="font-medium">{clientStatus.meta_user_name}</span>)</>
+              {clienteConectado ? (
+                <>
+                  Perfil do cliente conectado
+                  {clientStatus.meta_user_name && (
+                    <> (<span className="font-medium">{clientStatus.meta_user_name}</span>)</>
+                  )}
+                  {clienteDias !== null && clienteDias >= 0 && ` · vence em ${clienteDias} dia${clienteDias === 1 ? "" : "s"}`}
+                  . O relatório usa esse perfil.
+                </>
+              ) : clientePrecisaReconectar ? (
+                "A Meta recusou o perfil do cliente. Reconecte na ficha do cliente."
+              ) : (
+                <span className="text-muted-foreground">
+                  Perfil do cliente não conectado — o relatório usa a conexão da agência.
+                </span>
               )}
-              . O relatório dele lê os anúncios com esse perfil.
             </span>
           </p>
-          {clienteDias !== null && clientStatus.token_expires_at && (
-            <p className={cn("mt-0.5 text-xs", clienteVenceEmBreve ? "text-warning" : "text-muted-foreground")}>
-              {clienteDias < 0
-                ? "A autorização do cliente venceu."
-                : `A autorização do cliente vence em ${new Date(clientStatus.token_expires_at).toLocaleDateString("pt-BR")} (${clienteDias} dia${clienteDias === 1 ? "" : "s"}).`}
-              {clienteVenceEmBreve && " Reconecte com o cliente antes para o relatório não parar."}
-            </p>
-          )}
-          {clientStatus.can_manage && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant={clienteVenceEmBreve ? "outline" : "ghost"}
-                onClick={() => conectar.mutate("client")}
-                disabled={conectar.isPending}
-              >
-                Reconectar perfil do cliente
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive hover:text-destructive"
-                onClick={() => setConfirmarDesconexao("client")}
-                disabled={desconectar.isPending}
-              >
-                Desconectar perfil
-              </Button>
-            </div>
-          )}
-        </div>
-      ) : clientePrecisaReconectar ? (
-        <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/5 p-3">
-          <p className="flex items-center gap-2 text-sm font-medium">
-            <AlertTriangle className="h-4 w-4 text-destructive" />
-            A Meta recusou o perfil do cliente
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            A autorização venceu ou foi revogada. Reconecte com o perfil do cliente, ou desconecte
-            para voltar a usar a conexão da agência.
-          </p>
-          {clientStatus.can_manage && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => conectar.mutate("client")} disabled={conectar.isPending}>
-                Reconectar perfil do cliente
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive hover:text-destructive"
-                onClick={() => setConfirmarDesconexao("client")}
-                disabled={desconectar.isPending}
-              >
-                Desconectar perfil
-              </Button>
-            </div>
-          )}
-        </div>
-      ) : clientStatus.can_manage ? (
-        <div className="mb-4 rounded-xl border border-dashed border-border p-3">
-          <p className="flex items-center gap-2 text-sm font-medium">
-            <UserRound className="h-4 w-4 text-muted-foreground" />
-            Conectar com o perfil do cliente
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Para quando a conta de anúncios só aparece para o próprio cliente. Abra o Norteia numa{" "}
-            <span className="font-medium text-foreground">janela anônima</span> antes de clicar —
-            senão o Facebook segue com o login da agência aberto neste navegador. Na tela da Meta, o
-            cliente digita o usuário e a senha dele.
-          </p>
-          <Button
-            className="mt-3"
-            size="sm"
-            variant="outline"
-            onClick={() => conectar.mutate("client")}
-            disabled={conectar.isPending}
-          >
-            {conectar.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-            Conectar com o perfil do cliente
+          <Button asChild size="sm" variant={clientePrecisaReconectar || clienteVenceEmBreve ? "outline" : "ghost"}>
+            <Link to={`/plannings/cliente/${clientId}?secao=conexoes`}>
+              {clienteConectado && !clienteVenceEmBreve ? "Gerenciar na ficha" : "Conectar na ficha do cliente"}
+            </Link>
           </Button>
         </div>
-      ) : null)}
+      )}
 
       <AlertDialog
         open={confirmarDesconexao !== null}

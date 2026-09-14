@@ -21,6 +21,7 @@ import { ClientReports } from "@/components/client/ClientReports";
 import { ClientDocuments } from "@/components/client/ClientDocuments";
 import { ClientMeetings } from "@/components/client/ClientMeetings";
 import { GoogleBusinessConnection } from "@/components/client/GoogleBusinessConnection";
+import { MetaAdsClientConnection } from "@/components/client/MetaAdsClientConnection";
 import {
   GOOGLE_BUSINESS_ENABLED,
   META_CONNECT_ENABLED,
@@ -149,7 +150,20 @@ export function ClientProfile({
   // Qual seção está aberta. Estado simples de propósito: a ficha é um destino
   // curto, e guardar isso na URL faria "voltar" andar de seção em seção antes
   // de sair da tela.
-  const [secao, setSecao] = useState<SecaoId>("perfil");
+  // Abre direto em Conexões quando o link pede (?secao=conexoes) ou na volta de
+  // uma autorização (Meta, Meta Ads, Google). Sem isto a ficha abria no Perfil
+  // e o resultado da conexão ficava escondido até alguém clicar em Conexões.
+  const [secao, setSecao] = useState<SecaoId>(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("secao") === "conexoes") return "conexoes";
+    const voltaDeAutorizacao = [
+      "meta_status",
+      "meta_ads_status",
+      "google_business_status",
+      "google_ads_status",
+    ].some((chave) => params.has(chave));
+    return voltaDeAutorizacao ? "conexoes" : "perfil";
+  });
 
   const pct = ctxQuery.data?.percent ?? 0;
   const pctColor = pct >= 70 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-destructive";
@@ -352,6 +366,8 @@ export function ClientProfile({
             <>
           {/* Conexões (Instagram / Facebook) */}
           {META_CONNECT_ENABLED && <InstagramConnection clientId={clientId} />}
+          {/* Meta Ads com o perfil do cliente — o relatório usa esta conexão. */}
+          <MetaAdsClientConnection clientId={clientId} />
           {GOOGLE_BUSINESS_ENABLED && (
             <GoogleBusinessConnection clientId={clientId} />
           )}
