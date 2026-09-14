@@ -572,11 +572,6 @@ export default function TimeClock() {
     () => abonoDatesFrom(myAbsencesQuery.data ?? []),
     [myAbsencesQuery.data],
   );
-  const personalBalance = useMemo(
-    () => summarizeBalance(historyDays, myAbonoDates),
-    [historyDays, myAbonoDates],
-  );
-
   // Banco de horas ACUMULADO = saldo de abertura (migrado do app anterior) +
   // saldos dos pontos a partir da data de corte. Resiliente: se a tabela ainda
   // não existir neste ambiente, simplesmente não mostra o acumulado.
@@ -622,6 +617,15 @@ export default function TimeClock() {
       .filter((day) => day.dateKey >= baseline.effective_from);
     return baseline.baseline_seconds + summarizeBalance(days, myAbonoDates).saldo;
   }, [bankBaselineQuery.data, bankPunchesQuery.data, todayKey, myAbonoDates]);
+
+  // Resumo dos últimos 30 dias. Dias anteriores à data de corte já estão
+  // dentro do saldo de abertura; contá-los de novo contradiz o acumulado.
+  const personalBalance = useMemo(() => {
+    const days = bankEffectiveFrom
+      ? historyDays.filter((day) => day.dateKey >= bankEffectiveFrom)
+      : historyDays;
+    return summarizeBalance(days, myAbonoDates);
+  }, [historyDays, bankEffectiveFrom, myAbonoDates]);
 
   const teamPunchesQuery = useQuery({
     queryKey: [
@@ -1306,7 +1310,7 @@ export default function TimeClock() {
                 </span>
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card px-3 py-1.5 text-xs">
-                <span className="text-muted-foreground">Banco de horas</span>
+                <span className="text-muted-foreground">Saldo dos 30 dias</span>
                 <span
                   className={cn(
                     "font-semibold tabular-nums",
