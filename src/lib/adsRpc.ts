@@ -152,6 +152,10 @@ export type MetaAdsConnectionStatus = {
   connected_at: string | null;
   last_verified_at: string | null;
   last_error_code: string | null;
+  /** Só vêm preenchidos enquanto a conexão está desconectada. Opcionais: a
+   *  função antiga (antes da 20260914190000) não devolve estas colunas. */
+  disconnected_at?: string | null;
+  disconnected_by_name?: string | null;
 };
 
 export async function getMetaAdsStatus(
@@ -259,4 +263,21 @@ export function daysUntil(iso: string | null, now = Date.now()): number | null {
   const time = new Date(iso).getTime();
   if (!Number.isFinite(time)) return null;
   return Math.floor((time - now) / 86_400_000);
+}
+
+/** "14/09 às 13:01", no horário de Brasília — é o que a equipe vê no relógio. */
+export function formatarQuando(iso: string): string {
+  const data = new Date(iso);
+  if (!Number.isFinite(data.getTime())) return iso;
+  const dia = data.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "America/Sao_Paulo",
+  });
+  const hora = data.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Sao_Paulo",
+  });
+  return `${dia} às ${hora}`;
 }

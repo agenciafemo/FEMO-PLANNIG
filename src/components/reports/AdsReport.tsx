@@ -20,16 +20,23 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Link } from "react-router-dom";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { AlertTriangle, ChevronDown, DollarSign, Loader2, Megaphone, RefreshCw, UserRound } from "lucide-react";
+import { AlertTriangle, ChevronDown, DollarSign, Loader2, Megaphone, MoreHorizontal, RefreshCw, UserRound } from "lucide-react";
 import {
   type AdAccount,
   type AdsInsights,
   daysUntil,
   disconnectMetaAds,
+  formatarQuando,
   getAdsInsights,
   getMetaAdsClientStatus,
   getMetaAdsStatus,
@@ -321,7 +328,7 @@ export function AdsReport({
             </p>
           )}
           {adsStatus.can_manage && (
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="mt-2 flex items-center justify-between gap-2">
               <Button
                 size="sm"
                 variant={venceEmBreve ? "outline" : "ghost"}
@@ -331,15 +338,26 @@ export function AdsReport({
                 {conectar.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
                 Reconectar Meta Ads
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive hover:text-destructive"
-                onClick={() => setConfirmarDesconexao("agency")}
-                disabled={desconectar.isPending}
-              >
-                Desconectar
-              </Button>
+              {/* Desconectar mora num menu, longe do Reconectar: em 14/09 a
+                  conexão da agência foi desligada com um clique ao lado dele.
+                  modal={false}: abrir o AlertDialog a partir de um menu modal
+                  deixa a página sem receber cliques. */}
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Mais opções do Meta Ads da agência">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    disabled={desconectar.isPending}
+                    onSelect={() => setConfirmarDesconexao("agency")}
+                  >
+                    Desconectar Meta Ads da agência
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
         </div>
@@ -363,6 +381,15 @@ export function AdsReport({
                 ? "Conecte com o login do Facebook que enxerga as contas de anúncios dos clientes. Até lá, o relatório tenta usar o token antigo da agência, que pode parar sem aviso."
                 : "Conecte com o login do Facebook que enxerga as contas de anúncios dos clientes."}
           </p>
+          {adsStatus.connection_status === "disconnected" && adsStatus.disconnected_at && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Desconectado
+              {adsStatus.disconnected_by_name && (
+                <> por <span className="font-medium text-foreground">{adsStatus.disconnected_by_name}</span></>
+              )}{" "}
+              em {formatarQuando(adsStatus.disconnected_at)}.
+            </p>
+          )}
           {adsStatus.can_manage ? (
             <Button
               className="mt-3"
@@ -406,7 +433,7 @@ export function AdsReport({
             <span>
               {clienteConectado ? (
                 <>
-                  Perfil do cliente conectado
+                  Meta Ads com o perfil do cliente: conectado
                   {clientStatus.meta_user_name && (
                     <> (<span className="font-medium">{clientStatus.meta_user_name}</span>)</>
                   )}
@@ -414,10 +441,10 @@ export function AdsReport({
                   . O relatório usa esse perfil.
                 </>
               ) : clientePrecisaReconectar ? (
-                "A Meta recusou o perfil do cliente. Reconecte na ficha do cliente."
+                "Meta Ads com o perfil do cliente: a Meta recusou a autorização. Reconecte na ficha do cliente."
               ) : (
                 <span className="text-muted-foreground">
-                  Perfil do cliente não conectado — o relatório usa a conexão da agência.
+                  Meta Ads com o perfil do cliente: não conectado — o relatório usa a conexão Meta Ads da agência. (O Instagram do cliente é outra conexão.)
                 </span>
               )}
             </span>
