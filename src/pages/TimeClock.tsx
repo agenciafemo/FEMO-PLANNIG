@@ -240,7 +240,7 @@ function findPunch(punches: TimeClockPunch[], kind: PunchKind) {
   return punches.find((punch) => punch.kind === kind);
 }
 
-function getNextStep(punches: TimeClockPunch[]) {
+function getNextStep(punches: Array<{ kind: PunchKind }>) {
   const lastPunch = punches.at(-1);
   if (!lastPunch) return PUNCH_STEPS[0];
 
@@ -531,7 +531,27 @@ export default function TimeClock() {
   });
 
   const punches = punchesQuery.data ?? [];
-  const nextStep = getNextStep(punches);
+  // Ajustes de hoje ainda em análise entram na sequência pelo horário pedido,
+  // igual ao servidor (prepare_time_clock_punch). Sem isso o botão pediria de
+  // novo uma batida que já está aguardando aprovação.
+  const todayPendingAdjustments = useMemo(
+    () =>
+      (myAdjustmentsQuery.data ?? []).filter(
+        (request) =>
+          request.status === "pending" &&
+          agencyDateKey(new Date(request.requested_punched_at)) === todayKey,
+      ),
+    [myAdjustmentsQuery.data, todayKey],
+  );
+  const nextStep = getNextStep(
+    [
+      ...punches.map((punch) => ({ kind: punch.kind, at: new Date(punch.punched_at).getTime() })),
+      ...todayPendingAdjustments.map((request) => ({
+        kind: request.kind,
+        at: new Date(request.requested_punched_at).getTime(),
+      })),
+    ].sort((first, second) => first.at - second.at),
+  );
 
   const historyQuery = useQuery({
     queryKey: ["time-clock-history", organizationId, user?.id, todayKey, historyMonth],
@@ -1103,7 +1123,7 @@ export default function TimeClock() {
         <section className="mt-8">
           <SectionHeader
             title="Registros de hoje"
-            count={punches.length}
+            count={punches.length + todayPendingAdjustments.length}
             icon={Clock3}
             action={<span className="text-xs capitalize text-muted-foreground">{dateFormatter.format(new Date())}</span>}
           />
@@ -1123,7 +1143,7 @@ export default function TimeClock() {
                 Tentar novamente
               </Button>
             </div>
-          ) : punches.length === 0 ? (
+          ) : punches.length === 0 && todayPendingAdjustments.length === 0 ? (
             <EmptyState
               className="mt-4"
               icon={Clock3}
@@ -1134,6 +1154,9 @@ export default function TimeClock() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {PUNCH_STEPS.map((step) => {
                 const punch = findPunch(punches, step.kind);
+                const pendingAdjustment = punch
+                  ? undefined
+                  : todayPendingAdjustments.find((request) => request.kind === step.kind);
                 const isNext = nextStep?.kind === step.kind;
                 const Icon = step.icon;
 
@@ -1143,21 +1166,31 @@ export default function TimeClock() {
                     className={cn(
                       "rounded-2xl border bg-card p-4 shadow-sm transition-colors",
                       punch && "border-success/25 bg-success/5",
+                      pendingAdjustment && "border-warning/30 bg-warning/5",
                       isNext && "border-primary/35 ring-1 ring-primary/15"
                     )}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className={cn(
                         "flex h-9 w-9 items-center justify-center rounded-xl",
-                        punch ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"
+                        punch
+                          ? "bg-success/10 text-success"
+                          : pendingAdjustment
+                            ? "bg-warning/10 text-warning"
+                            : "bg-muted text-muted-foreground"
                       )}>
                         <Icon className="h-4.5 w-4.5" />
                       </div>
                       {punch && <CheckCircle2 className="h-4 w-4 text-success" />}
+                      {pendingAdjustment && <StatusBadge variant="warning" size="sm">Em análise</StatusBadge>}
                     </div>
                     <p className="mt-4 text-sm font-medium">{step.label}</p>
                     <p className="mt-1 text-2xl font-semibold tabular-nums">
-                      {punch ? formatPunchTime(punch.punched_at) : "--:--"}
+                      {punch
+                        ? formatPunchTime(punch.punched_at)
+                        : pendingAdjustment
+                          ? formatPunchTime(pendingAdjustment.requested_punched_at)
+                          : "--:--"}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">Referência {step.reference}</p>
                   </article>
