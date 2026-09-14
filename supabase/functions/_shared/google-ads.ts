@@ -369,6 +369,14 @@ export function apiReason(status: number, payload?: unknown): string {
   if (codigos.has("DEVELOPER_TOKEN_INVALID")) {
     return "google_ads_developer_token_invalid";
   }
+  // 14/09/2026: todas as contas voltavam com este código, e a tela dizia
+  // "permission_denied". O token e o login estão certos; quem não está
+  // aprovado para contas de produção é o PROJETO do Google Cloud do OAuth
+  // client que faz a chamada. O conserto é na Central de API/Cloud, não na
+  // conta de anúncios.
+  if (codigos.has("CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION")) {
+    return "google_ads_cloud_project_not_approved";
+  }
   if (codigos.has("SERVICE_DISABLED")) return "google_ads_api_disabled";
   if (codigos.has("ACCESS_TOKEN_SCOPE_INSUFFICIENT")) {
     return "google_ads_scope_insufficient";
@@ -403,6 +411,7 @@ export function isFatalGoogleAdsReason(reasonCode: string): boolean {
     reasonCode === "google_ads_developer_token_missing" ||
     reasonCode === "google_ads_api_disabled" ||
     reasonCode === "google_ads_scope_insufficient" ||
+    reasonCode === "google_ads_cloud_project_not_approved" ||
     reasonCode === "google_ads_reauthorization_required" ||
     reasonCode === "google_ads_rate_limited"
   );
