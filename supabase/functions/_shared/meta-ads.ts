@@ -83,6 +83,8 @@ export function buildMetaAdsAuthorizeUrl(
     redirectUri: string;
     scopes: string[];
   },
+  /** Perfil do cliente: pede a senha de novo em vez de seguir com a sessão. */
+  forceAccount = false,
 ): string {
   const url = new URL(
     `https://www.facebook.com/${config.graphVersion}/dialog/oauth`,
@@ -92,10 +94,30 @@ export function buildMetaAdsAuthorizeUrl(
   url.searchParams.set("state", state);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", config.scopes.join(","));
-  // Se alguém recusou `ads_read` antes, a Meta não pergunta de novo sem isto —
-  // e a reconexão "funciona" sem a permissão que é o motivo de existir.
-  url.searchParams.set("auth_type", "rerequest");
+  // Agência: se alguém recusou `ads_read` antes, a Meta não pergunta de novo
+  // sem `rerequest` — e a reconexão "funciona" sem a permissão.
+  // Cliente: `reauthenticate` pede a senha. Não troca sozinho o usuário logado
+  // no navegador — por isso a tela orienta usar janela anônima.
+  url.searchParams.set("auth_type", forceAccount ? "reauthenticate" : "rerequest");
   return url.toString();
+}
+
+/**
+ * O que falta na permissão de anúncios, ou null se foi concedida.
+ *
+ * "declined" = a pessoa desmarcou na tela da Meta; conectar de novo resolve.
+ * Ausente = a Meta nem ofereceu. Com acesso PADRÃO a `ads_read`, só perfis com
+ * papel no app podem concedê-la — é o que acontece com o perfil de um cliente
+ * até o app ter acesso avançado. São conclusões opostas para quem está na tela.
+ */
+export function adsPermissionProblem(
+  permissions: Record<string, string>,
+): string | null {
+  const status = permissions[META_ADS_REQUIRED_SCOPE];
+  if (status === "granted") return null;
+  return status === "declined"
+    ? "meta_ads_permission_declined"
+    : "meta_ads_permission_unavailable";
 }
 
 /** `expires_in` em segundos -> instante ISO. Ausente ou inválido = null. */

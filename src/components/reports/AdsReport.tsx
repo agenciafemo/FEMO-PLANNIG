@@ -23,13 +23,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { AlertTriangle, ChevronDown, DollarSign, Loader2, Megaphone, RefreshCw } from "lucide-react";
+import { AlertTriangle, ChevronDown, DollarSign, Loader2, Megaphone, RefreshCw, UserRound } from "lucide-react";
 import {
   type AdAccount,
   type AdsInsights,
   daysUntil,
   disconnectMetaAds,
   getAdsInsights,
+  getMetaAdsClientStatus,
   getMetaAdsStatus,
   listAdAccounts,
   loadClientAdAccounts,
@@ -136,17 +137,39 @@ export function AdsReport({
   const nuncaConectou = adsStatus?.connection_status === "not_connected";
   const diasRestantes = conectado ? daysUntil(adsStatus?.token_expires_at ?? null) : null;
   const venceEmBreve = diasRestantes !== null && diasRestantes <= AVISO_VENCIMENTO_DIAS;
-  const [confirmarDesconexao, setConfirmarDesconexao] = useState(false);
+  // Conexão com o PERFIL DO CLIENTE: vale só para este cliente e tem prioridade
+  // sobre a da agência no relatório dele.
+  const clientStatusQuery = useQuery({
+    queryKey: ["meta-ads-client-status", organizationId, clientId],
+    queryFn: () => getMetaAdsClientStatus(organizationId!, clientId),
+    enabled: !!organizationId && !!clientId,
+    staleTime: 60 * 1000,
+    // Sem a migration por cliente a RPC não existe: o painel simplesmente some.
+    retry: false,
+  });
+  const clientStatus = clientStatusQuery.data ?? null;
+  const clienteConectado = clientStatus?.connection_status === "active";
+  const clientePrecisaReconectar = clientStatus?.connection_status === "reauth_required" ||
+    clientStatus?.connection_status === "error";
+  const clienteDias = clienteConectado ? daysUntil(clientStatus?.token_expires_at ?? null) : null;
+  const clienteVenceEmBreve = clienteDias !== null && clienteDias <= AVISO_VENCIMENTO_DIAS;
+  // Qual conexão o diálogo de confirmação vai desligar.
+  const [confirmarDesconexao, setConfirmarDesconexao] = useState<"agency" | "client" | null>(null);
 
   // Volta do consentimento da Meta: o callback redireciona com ?meta_ads_status=...
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const resultado = params.get("meta_ads_status");
     if (!resultado) return;
-    if (resultado === "connected") toast.success("Meta Ads da agência conectado.");
-    else toast.error(metaAdsReasonMessage(params.get("reason_code") ?? "meta_ads_oauth_callback_failed"));
+    const doCliente = params.get("meta_ads_scope") === "client";
+    if (resultado === "connected") {
+      toast.success(doCliente ? "Perfil do cliente conectado ao Meta Ads." : "Meta Ads da agência conectado.");
+    } else {
+      toast.error(metaAdsReasonMessage(params.get("reason_code") ?? "meta_ads_oauth_callback_failed"));
+    }
     params.delete("meta_ads_status");
     params.delete("reason_code");
+    params.delete("meta_ads_scope");
     const query = params.toString();
     window.history.replaceState(
       window.history.state,
@@ -154,13 +177,15 @@ export function AdsReport({
       `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
     );
     queryClient.invalidateQueries({ queryKey: ["meta-ads-status"] });
+    queryClient.invalidateQueries({ queryKey: ["meta-ads-client-status"] });
   }, [queryClient]);
 
   const conectar = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (alvo: "agency" | "client") => {
       const url = await startMetaAdsOAuth(
         organizationId!,
         `${window.location.pathname}${window.location.search}`,
+        alvo === "client" ? clientId : null,
       );
       try {
         sessionStorage.setItem("meta-ads-return-client", clientId);
@@ -173,11 +198,17 @@ export function AdsReport({
   });
 
   const desconectar = useMutation({
-    mutationFn: () => disconnectMetaAds(organizationId!),
-    onSuccess: () => {
-      toast.success("Meta Ads da agência desconectado.");
-      setConfirmarDesconexao(false);
+    mutationFn: (alvo: "agency" | "client") =>
+      disconnectMetaAds(organizationId!, alvo === "client" ? clientId : null),
+    onSuccess: (_data, alvo) => {
+      toast.success(
+        alvo === "client"
+          ? "Perfil do cliente desconectado. O relatório dele volta a usar a conexão da agência."
+          : "Meta Ads da agência desconectado.",
+      );
+      setConfirmarDesconexao(null);
       queryClient.invalidateQueries({ queryKey: ["meta-ads-status"] });
+      queryClient.invalidateQueries({ queryKey: ["meta-ads-client-status"] });
     },
     onError: (e) => toast.error((e as Error).message),
   });
@@ -185,7 +216,7 @@ export function AdsReport({
   async function handleLoadAccounts() {
     setLoadingAccounts(true);
     try {
-      const list = await listAdAccounts(organizationId);
+      const list = await listAdAccounts(organizationId, clientId);
       setAccounts(list);
       if (list.length === 0) toast.warning("A conexão do Meta Ads não retornou nenhuma conta de anúncios.");
       else toast.success(`${list.length} conta(s) encontrada(s).`);
@@ -195,6 +226,7 @@ export function AdsReport({
       setLoadingAccounts(false);
       // Uma recusa da Meta muda o status da conexão: a tela mostra "Reconectar".
       queryClient.invalidateQueries({ queryKey: ["meta-ads-status"] });
+      queryClient.invalidateQueries({ queryKey: ["meta-ads-client-status"] });
     }
   }
 
@@ -238,6 +270,7 @@ export function AdsReport({
     } finally {
       setLoadingReport(false);
       queryClient.invalidateQueries({ queryKey: ["meta-ads-status"] });
+      queryClient.invalidateQueries({ queryKey: ["meta-ads-client-status"] });
     }
   }
 
@@ -291,7 +324,7 @@ export function AdsReport({
               <Button
                 size="sm"
                 variant={venceEmBreve ? "outline" : "ghost"}
-                onClick={() => conectar.mutate()}
+                onClick={() => conectar.mutate("agency")}
                 disabled={conectar.isPending}
               >
                 {conectar.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
@@ -301,7 +334,7 @@ export function AdsReport({
                 size="sm"
                 variant="ghost"
                 className="text-destructive hover:text-destructive"
-                onClick={() => setConfirmarDesconexao(true)}
+                onClick={() => setConfirmarDesconexao("agency")}
                 disabled={desconectar.isPending}
               >
                 Desconectar
@@ -309,7 +342,7 @@ export function AdsReport({
             </div>
           )}
         </div>
-      ) : adsStatus ? (
+      ) : adsStatus && !clienteConectado ? (
         <div
           className={cn(
             "mb-4 rounded-xl border p-3",
@@ -334,7 +367,7 @@ export function AdsReport({
               className="mt-3"
               size="sm"
               variant="outline"
-              onClick={() => conectar.mutate()}
+              onClick={() => conectar.mutate("agency")}
               disabled={conectar.isPending}
             >
               {conectar.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
@@ -348,21 +381,132 @@ export function AdsReport({
         </div>
       ) : null}
 
-      <AlertDialog open={confirmarDesconexao} onOpenChange={setConfirmarDesconexao}>
+      {/* Perfil do próprio cliente: tem prioridade sobre a conexão da agência */}
+      {clientStatus && (clienteConectado ? (
+        <div
+          className={cn(
+            "mb-4 rounded-xl border p-3",
+            clienteVenceEmBreve ? "border-warning/30 bg-warning-soft/30" : "border-border bg-muted/20",
+          )}
+        >
+          <p className="flex items-start gap-2 text-sm">
+            <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+            <span>
+              Este cliente está conectado com o próprio perfil
+              {clientStatus.meta_user_name && (
+                <> (<span className="font-medium">{clientStatus.meta_user_name}</span>)</>
+              )}
+              . O relatório dele lê os anúncios com esse perfil.
+            </span>
+          </p>
+          {clienteDias !== null && clientStatus.token_expires_at && (
+            <p className={cn("mt-0.5 text-xs", clienteVenceEmBreve ? "text-warning" : "text-muted-foreground")}>
+              {clienteDias < 0
+                ? "A autorização do cliente venceu."
+                : `A autorização do cliente vence em ${new Date(clientStatus.token_expires_at).toLocaleDateString("pt-BR")} (${clienteDias} dia${clienteDias === 1 ? "" : "s"}).`}
+              {clienteVenceEmBreve && " Reconecte com o cliente antes para o relatório não parar."}
+            </p>
+          )}
+          {clientStatus.can_manage && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant={clienteVenceEmBreve ? "outline" : "ghost"}
+                onClick={() => conectar.mutate("client")}
+                disabled={conectar.isPending}
+              >
+                Reconectar perfil do cliente
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-destructive hover:text-destructive"
+                onClick={() => setConfirmarDesconexao("client")}
+                disabled={desconectar.isPending}
+              >
+                Desconectar perfil
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : clientePrecisaReconectar ? (
+        <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+            A Meta recusou o perfil do cliente
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            A autorização venceu ou foi revogada. Reconecte com o perfil do cliente, ou desconecte
+            para voltar a usar a conexão da agência.
+          </p>
+          {clientStatus.can_manage && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => conectar.mutate("client")} disabled={conectar.isPending}>
+                Reconectar perfil do cliente
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-destructive hover:text-destructive"
+                onClick={() => setConfirmarDesconexao("client")}
+                disabled={desconectar.isPending}
+              >
+                Desconectar perfil
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : clientStatus.can_manage ? (
+        <div className="mb-4 rounded-xl border border-dashed border-border p-3">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <UserRound className="h-4 w-4 text-muted-foreground" />
+            Conectar com o perfil do cliente
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Para quando a conta de anúncios só aparece para o próprio cliente. Abra o Norteia numa{" "}
+            <span className="font-medium text-foreground">janela anônima</span> antes de clicar —
+            senão o Facebook segue com o login da agência aberto neste navegador. Na tela da Meta, o
+            cliente digita o usuário e a senha dele.
+          </p>
+          <Button
+            className="mt-3"
+            size="sm"
+            variant="outline"
+            onClick={() => conectar.mutate("client")}
+            disabled={conectar.isPending}
+          >
+            {conectar.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            Conectar com o perfil do cliente
+          </Button>
+        </div>
+      ) : null)}
+
+      <AlertDialog
+        open={confirmarDesconexao !== null}
+        onOpenChange={(aberto) => {
+          if (!aberto) setConfirmarDesconexao(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Desconectar o Meta Ads da agência?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {confirmarDesconexao === "client"
+                ? "Desconectar o perfil do cliente?"
+                : "Desconectar o Meta Ads da agência?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              O relatório de tráfego pago para de funcionar para todos os clientes até alguém
-              conectar de novo. As contas vinculadas a cada cliente e os posts programados não
-              são afetados.
+              {confirmarDesconexao === "client"
+                ? "O relatório deste cliente volta a usar a conexão da agência. Se a conta de anúncios só aparece para o perfil do cliente, o tráfego pago dele para de carregar. Os posts programados não são afetados."
+                : "O relatório de tráfego pago para de funcionar para os clientes que usam a conexão da agência até alguém conectar de novo. Clientes conectados com o próprio perfil, as contas vinculadas e os posts programados não são afetados."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => desconectar.mutate()}
+              onClick={() => {
+                if (confirmarDesconexao) desconectar.mutate(confirmarDesconexao);
+              }}
             >
               Desconectar
             </AlertDialogAction>
@@ -443,6 +587,15 @@ export function AdsReport({
 
       {report && (
         <div className="mt-4 space-y-4">
+          {report.fonte && (
+            <p className="text-xs text-muted-foreground">
+              {report.fonte === "client"
+                ? "Números lidos com o perfil do cliente."
+                : report.fonte === "agency"
+                  ? "Números lidos com a conexão da agência."
+                  : "Números lidos com o token antigo da agência."}
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[
               { label: "Investimento", value: cf.format(report.totais.gasto) },

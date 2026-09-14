@@ -20,16 +20,18 @@ import {
 
 // Relatório de TRÁFEGO PAGO (Meta Ads).
 //
-// O token de leitura de anúncios vem da conexão Meta Ads DA AGÊNCIA
-// (meta_ads_connections, token no Vault). Enquanto uma agência ainda não
-// conectou, usa o token antigo do secret META_ADS_SYSTEM_TOKEN, para a troca
-// não derrubar quem já funcionava. NÃO usa os tokens de publicação dos
-// clientes — é totalmente separado (não afeta os posts programados).
+// Qual token lê os anúncios, em ordem:
+//   1. o PERFIL DO CLIENTE, se aquele cliente foi conectado com o próprio
+//      Facebook (meta_ads_client_connections);
+//   2. a conexão DA AGÊNCIA (meta_ads_connections);
+//   3. o token antigo do secret META_ADS_SYSTEM_TOKEN, só se a agência nunca
+//      conectou.
+// NÃO usa os tokens de publicação dos clientes (não afeta posts programados).
 //
 // Modos:
 //   "accounts"   -> lista as contas de anúncios que o token enxerga
 //   "insights"   -> métricas do cliente no período + quebra por campanha
-//   "disconnect" -> desconecta o Meta Ads da agência
+//   "disconnect" -> desconecta a agência, ou o perfil de um cliente
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
@@ -77,9 +79,12 @@ const ALLOWED_PRESETS = new Set([
 // deno-lint-ignore no-explicit-any
 type Json = any;
 
+type AdsSource = "client" | "agency" | "legacy";
+
 type AdsToken = {
   token: string;
   proof: string;
+  source: AdsSource;
   /** null = token antigo do secret, sem conexão no banco para marcar. */
   connectionId: string | null;
 };
@@ -87,25 +92,85 @@ type AdsToken = {
 const RECONNECT_MESSAGE =
   "A Meta recusou o acesso de anúncios da agência (a autorização venceu ou foi revogada). Um ADM, Head ou quem tem a função Tráfego Pago precisa clicar em Reconectar Meta Ads, na seção de Tráfego Pago.";
 
+const CLIENT_RECONNECT_MESSAGE =
+  "A Meta recusou o perfil do cliente (a autorização venceu ou foi revogada). Reconecte com o perfil do cliente na seção de Tráfego Pago, ou desconecte esse perfil para voltar a usar a conexão da agência.";
+
 /**
- * Qual token usar. A conexão pela tela tem prioridade; o secret antigo só vale
- * enquanto a agência NUNCA conectou. Se a conexão existe mas caiu, não volta
- * para o secret: ele é justamente o token que costuma estar morto, e o erro
- * certo é "reconecte".
+ * Token do perfil do cliente, ou null para seguir para a agência.
+ *
+ * Perfil caído NÃO cai para a agência em silêncio: a conta de anúncios pode
+ * só existir para o cliente, e o relatório sairia com outro erro, mais confuso.
+ */
+async function clientAdsToken(
+  admin: SupabaseAdmin,
+  organizationId: string,
+  clientId: string,
+  appSecret: string,
+): Promise<AdsToken | null> {
+  const { data: connection, error } = await admin
+    .from("meta_ads_client_connections")
+    .select("status")
+    .eq("organization_id", organizationId)
+    .eq("client_id", clientId)
+    .maybeSingle();
+  // Erro aqui quase sempre é a migration por cliente ainda não aplicada.
+  if (error) {
+    console.error("meta_ads_client_connection_lookup_failed", error.code);
+    return null;
+  }
+  if (!connection || connection.status === "disconnected") return null;
+  if (connection.status !== "active") {
+    throw new HttpError(
+      409,
+      "meta_ads_client_reauthorization_required",
+      undefined,
+      CLIENT_RECONNECT_MESSAGE,
+    );
+  }
+  const { data, error: credentialsError } = await admin.rpc(
+    "meta_ads_server_get_client_credentials",
+    { _organization_id: organizationId, _client_id: clientId },
+  );
+  const row = data?.[0] as
+    | { connection_id: string; access_token: string }
+    | undefined;
+  if (credentialsError || !row?.access_token) {
+    throw new HttpError(500, "meta_ads_credentials_unavailable");
+  }
+  return {
+    token: row.access_token,
+    proof: await appSecretProof(row.access_token, appSecret),
+    source: "client",
+    connectionId: row.connection_id,
+  };
+}
+
+/**
+ * Qual token usar (ver cabeçalho). O secret antigo só vale enquanto a agência
+ * NUNCA conectou: se a conexão existe mas caiu, o erro certo é "reconecte".
  */
 async function resolveAdsToken(
   admin: SupabaseAdmin,
   organizationId: string | null,
+  clientId: string | null,
   appSecret: string,
 ): Promise<AdsToken> {
+  if (organizationId && clientId) {
+    const doCliente = await clientAdsToken(
+      admin,
+      organizationId,
+      clientId,
+      appSecret,
+    );
+    if (doCliente) return doCliente;
+  }
+
   if (organizationId) {
     const { data: connection, error } = await admin
       .from("meta_ads_connections")
       .select("status")
       .eq("organization_id", organizationId)
       .maybeSingle();
-    // Erro aqui quase sempre é a migration ainda não aplicada neste ambiente:
-    // cai para o token antigo em vez de derrubar o relatório.
     if (error) {
       console.error("meta_ads_connection_lookup_failed", error.code);
     } else if (connection) {
@@ -138,6 +203,7 @@ async function resolveAdsToken(
       return {
         token: row.access_token,
         proof: await appSecretProof(row.access_token, appSecret),
+        source: "agency",
         connectionId: row.connection_id,
       };
     }
@@ -148,6 +214,7 @@ async function resolveAdsToken(
     return {
       token: legacy,
       proof: await appSecretProof(legacy, appSecret),
+      source: "legacy",
       connectionId: null,
     };
   }
@@ -172,14 +239,28 @@ async function metaGet(
   if (!res.ok) {
     console.error(
       "meta_ads_error",
+      ads.source,
       res.status,
       json?.error?.code,
       json?.error?.error_subcode,
     );
     if (isMetaAuthorizationFailure(json, res.status)) {
-      if (ads.connectionId) {
-        // Marca a conexão: a tela passa a mostrar "Reconectar" sem precisar
-        // que alguém tente puxar um relatório para descobrir.
+      // Marca a conexão: a tela passa a mostrar "Reconectar" sem precisar que
+      // alguém tente puxar um relatório para descobrir.
+      if (ads.source === "client" && ads.connectionId) {
+        await admin.rpc("meta_ads_server_mark_client_result", {
+          _connection_id: ads.connectionId,
+          _status: "reauth_required",
+          _reason_code: "meta_ads_token_invalid",
+        });
+        throw new HttpError(
+          409,
+          "meta_ads_client_reauthorization_required",
+          res.status,
+          CLIENT_RECONNECT_MESSAGE,
+        );
+      }
+      if (ads.source === "agency" && ads.connectionId) {
         await admin.rpc("meta_ads_server_mark_result", {
           _connection_id: ads.connectionId,
           _status: "reauth_required",
@@ -206,11 +287,16 @@ async function metaGet(
 
 async function markVerified(admin: SupabaseAdmin, ads: AdsToken) {
   if (!ads.connectionId) return;
-  await admin.rpc("meta_ads_server_mark_result", {
-    _connection_id: ads.connectionId,
-    _status: "active",
-    _reason_code: null,
-  });
+  await admin.rpc(
+    ads.source === "client"
+      ? "meta_ads_server_mark_client_result"
+      : "meta_ads_server_mark_result",
+    {
+      _connection_id: ads.connectionId,
+      _status: "active",
+      _reason_code: null,
+    },
+  );
 }
 
 Deno.serve(async (request) => {
@@ -240,17 +326,26 @@ Deno.serve(async (request) => {
     const body = (await request.json().catch(() => ({}))) as Body;
     const mode = body.mode ?? "insights";
 
-    // ----- MODO: desconectar o Meta Ads da agência -----
+    // ----- MODO: desconectar a agência ou o perfil de um cliente -----
     if (mode === "disconnect") {
       const organizationId = assertUuid(
         body.organization_id,
         "organization_id_invalid",
       );
+      const clientId = body.client_id
+        ? assertUuid(body.client_id, "client_id_invalid")
+        : null;
       await requireMetaAdsMember(admin, organizationId, userId, true);
-      const { error } = await admin.rpc("meta_ads_server_disconnect", {
-        _organization_id: organizationId,
-        _actor_user_id: userId,
-      });
+      const { error } = clientId
+        ? await admin.rpc("meta_ads_server_disconnect_client", {
+          _organization_id: organizationId,
+          _client_id: clientId,
+          _actor_user_id: userId,
+        })
+        : await admin.rpc("meta_ads_server_disconnect", {
+          _organization_id: organizationId,
+          _actor_user_id: userId,
+        });
       if (error) throw new HttpError(500, "meta_ads_disconnect_failed");
       return jsonResponse({ ok: true }, 200, headers);
     }
@@ -261,10 +356,19 @@ Deno.serve(async (request) => {
       const organizationId = body.organization_id
         ? assertUuid(body.organization_id, "organization_id_invalid")
         : null;
+      // Com client_id, lista o que o PERFIL DO CLIENTE enxerga, se conectado.
+      const clientId = organizationId && body.client_id
+        ? assertUuid(body.client_id, "client_id_invalid")
+        : null;
       if (organizationId) {
         await requireMetaAdsMember(admin, organizationId, userId);
       }
-      const ads = await resolveAdsToken(admin, organizationId, cfg.appSecret);
+      const ads = await resolveAdsToken(
+        admin,
+        organizationId,
+        clientId,
+        cfg.appSecret,
+      );
       const url = new URL(`${base}/me/adaccounts`);
       url.searchParams.set(
         "fields",
@@ -279,12 +383,12 @@ Deno.serve(async (request) => {
         currency: a.currency ?? null,
         status: a.account_status ?? null,
       }));
-      return jsonResponse({ accounts }, 200, headers);
+      return jsonResponse({ accounts, fonte: ads.source }, 200, headers);
     }
 
     // ----- MODO: insights de um cliente no período -----
-    const clientId = body.client_id;
-    if (!clientId) throw new HttpError(400, "missing_client_id");
+    if (!body.client_id) throw new HttpError(400, "missing_client_id");
+    const clientId = assertUuid(body.client_id, "client_id_invalid");
 
     // Resolve a conta de anúncios do cliente (RLS garante o acesso).
     // deno-lint-ignore no-explicit-any
@@ -301,6 +405,7 @@ Deno.serve(async (request) => {
     const ads = await resolveAdsToken(
       admin,
       mapping.organization_id ?? null,
+      clientId,
       cfg.appSecret,
     );
 
@@ -384,6 +489,8 @@ Deno.serve(async (request) => {
         periodo,
         totais,
         campanhas: campaigns,
+        // Com qual perfil os números foram lidos — a tela mostra.
+        fonte: ads.source,
       },
       200,
       headers,

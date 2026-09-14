@@ -86,6 +86,56 @@ Enquanto a agência nunca conectou, a função usa `META_ADS_SYSTEM_TOKEN` como
 reserva. Depois de conectar e puxar um relatório com sucesso, o secret pode
 ser apagado.
 
+## Perfil do cliente (conexão por cliente)
+
+Para quando a conta de anúncios **só aparece para o próprio cliente**. Na
+seção de Tráfego Pago de cada cliente há **Conectar com o perfil do
+cliente**. Essa conexão vale só para aquele cliente e tem **prioridade** sobre
+a da agência no relatório dele. A tela diz com qual perfil os números foram
+lidos.
+
+**Como fazer (no computador da agência):**
+
+1. Abra o Norteia numa **janela anônima** e entre com o seu login. Sem isso,
+   o Facebook segue com o login da agência já aberto no navegador — mesmo
+   pedindo a senha de novo, ele não troca de usuário sozinho.
+2. Abra o cliente em Relatórios → **Conectar com o perfil do cliente**.
+3. Na tela da Meta, o cliente digita o usuário e a senha dele e mantém a
+   permissão de anúncios marcada.
+4. **Vincular conta de anúncios** passa a listar as contas do perfil dele.
+
+**Limite da Meta:** com acesso padrão a `ads_read`, a Meta só oferece a
+permissão para perfis com papel no app. Para um cliente comum a conexão volta
+com "A Meta não ofereceu a permissão de ler anúncios para este perfil". Para
+liberar para qualquer cliente, o app precisa de **acesso avançado a
+`ads_read`** (verificação da empresa + análise do app). Até lá:
+
+- adicione o cliente como **testador** do app (Funções do app → Testadores);
+  ele precisa aceitar o convite; ou
+- use o caminho abaixo, que não depende da Meta.
+
+**Implantação:** SQL `supabase/migrations/20260914170000_meta_ads_client_connections.sql`
+(16 linhas, todas `ok = true`) → deploy de `meta-ads-oauth-start`,
+`meta-ads-oauth-callback` e `meta-ads-insights` → merge. Não precisa de URI
+nova: o retorno é o mesmo `meta-ads-oauth-callback`.
+
+## Alternativa sem código: acesso de parceiro
+
+O cliente dá acesso da conta de anúncios dele à agência. A conexão da agência
+passa a enxergar a conta e ela aparece em **Vincular conta de anúncios**.
+
+1. O cliente abre **business.facebook.com → Configurações do negócio**.
+2. **Contas → Contas de anúncios** → escolhe a conta.
+3. **Atribuir parceiros** (ou *Parceiros → Adicionar*) → informa o **ID do
+   Gerenciador de Negócios da agência** → permissão **Ver desempenho**
+   (basta para relatório).
+4. Na agência, a pessoa conectada no Norteia precisa ter a conta atribuída no
+   Gerenciador da agência (Contas de anúncios → a conta → Adicionar pessoas).
+
+Se o cliente não tem Gerenciador de Negócios, ele pode, no Gerenciador de
+Anúncios, em **Configurações da conta → Funções de anúncio**, adicionar a
+pessoa da agência com acesso de **Analista**.
+
 ## Limite conhecido
 
 Token de usuário da Meta **vence em ~60 dias** e não tem renovação automática

@@ -6,7 +6,7 @@ import {
 } from "../_shared/meta-client.ts";
 import { HttpError, methodNotAllowed } from "../_shared/http.ts";
 import {
-  META_ADS_REQUIRED_SCOPE,
+  adsPermissionProblem,
   metaAdsConfig,
   tokenExpiresAt,
 } from "../_shared/meta-ads.ts";
@@ -42,6 +42,10 @@ Deno.serve(async (request) => {
   const query = new URL(request.url).searchParams;
   const rawState = query.get("state") ?? "";
   let state: OAuthState | null = null;
+  // Perfil do cliente (id) ou agência (null). Decide onde o token é gravado.
+  let clientId: string | null = null;
+  const scopeParam = () =>
+    clientId ? { meta_ads_scope: "client" } : {} as Record<string, string>;
 
   try {
     if (rawState.length < 32 || rawState.length > 256) {
@@ -57,10 +61,24 @@ Deno.serve(async (request) => {
     }
     state = data[0] as OAuthState;
 
+    const { data: stateRow, error: stateError } = await admin
+      .from("meta_ads_oauth_states")
+      .select("client_id")
+      .eq("id", state.oauth_state_id)
+      .maybeSingle();
+    // 42703 = coluna inexistente: migration por cliente ainda não aplicada
+    // neste ambiente. A conexão da agência não pode quebrar por isso.
+    if (stateError && stateError.code !== "42703") {
+      throw new HttpError(500, "meta_ads_oauth_state_lookup_failed");
+    }
+    clientId = (stateRow as { client_id?: string | null } | null)?.client_id ??
+      null;
+
     if (query.get("error")) {
       return redirectTarget(returnOrigin, state.redirect_path, {
         meta_ads_status: "error",
         reason_code: "meta_ads_oauth_denied_by_user",
+        ...scopeParam(),
       });
     }
     const code = query.get("code");
@@ -70,20 +88,20 @@ Deno.serve(async (request) => {
     // Troca direto pelo token de longa duração (60 dias).
     const token = await exchangeCodeForToken(code, config);
 
-    // Na tela de consentimento dá para desmarcar permissões. Sem `ads_read` a
-    // conexão seria salva e só falharia no primeiro relatório — melhor recusar
-    // aqui, com o motivo certo.
+    // Sem `ads_read` a conexão seria salva e só falharia no primeiro
+    // relatório. Recusa aqui, separando "desmarcou" de "a Meta nem ofereceu".
     const permissions = await getGrantedPermissions(token.access_token, config);
-    if (permissions[META_ADS_REQUIRED_SCOPE] !== "granted") {
-      throw new HttpError(400, "meta_ads_permission_declined");
-    }
+    const problem = adsPermissionProblem(permissions);
+    if (problem) throw new HttpError(400, problem);
     const grantedScopes = Object.entries(permissions)
       .filter(([, status]) => status === "granted")
       .map(([permission]) => permission);
 
     const user = await getMetaUser(token.access_token, config);
     const { error: saveError } = await admin.rpc(
-      "meta_ads_server_upsert_connection",
+      clientId
+        ? "meta_ads_server_upsert_client_connection"
+        : "meta_ads_server_upsert_connection",
       {
         _oauth_state_id: state.oauth_state_id,
         _meta_user_id: user.id,
@@ -97,6 +115,7 @@ Deno.serve(async (request) => {
 
     return redirectTarget(returnOrigin, state.redirect_path, {
       meta_ads_status: "connected",
+      ...scopeParam(),
     });
   } catch (error) {
     const reason = error instanceof HttpError
@@ -105,6 +124,7 @@ Deno.serve(async (request) => {
     return redirectTarget(returnOrigin, state?.redirect_path ?? "/", {
       meta_ads_status: "error",
       reason_code: reason,
+      ...scopeParam(),
     });
   }
 });

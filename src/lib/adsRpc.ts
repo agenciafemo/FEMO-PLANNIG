@@ -44,14 +44,23 @@ export interface AdsInsights {
     acoes: AdAction[];
     custo_por_acao: AdAction[];
   }>;
+  /** Com qual perfil os números foram lidos. Ausente em função antiga. */
+  fonte?: "client" | "agency" | "legacy";
 }
 
 // Lista as contas de anúncios que a conexão Meta Ads da agência enxerga.
+// Com clientId, e se o cliente foi conectado com o próprio perfil, a lista é a
+// do perfil do cliente.
 export async function listAdAccounts(
   organizationId?: string | null,
+  clientId?: string | null,
 ): Promise<AdAccount[]> {
   const { data, error } = await invokeEdge("meta-ads-insights", {
-    body: { mode: "accounts", organization_id: organizationId ?? undefined },
+    body: {
+      mode: "accounts",
+      organization_id: organizationId ?? undefined,
+      client_id: clientId ?? undefined,
+    },
   });
   if (error) throw await metaReportError(error);
   return (data as { accounts: AdAccount[] }).accounts ?? [];
@@ -159,7 +168,26 @@ export async function getMetaAdsStatus(
   return data?.[0] ?? null;
 }
 
+/** Conexão com o perfil do próprio cliente (mesmo formato da agência). */
+export async function getMetaAdsClientStatus(
+  organizationId: string,
+  clientId: string,
+): Promise<MetaAdsConnectionStatus | null> {
+  const { data, error } = await (supabase.rpc as unknown as (
+    name: string,
+    args: Record<string, unknown>,
+  ) => PromiseLike<{ data: MetaAdsConnectionStatus[] | null; error: Error | null }>)(
+    "get_meta_ads_client_connection_status",
+    { _organization_id: organizationId, _client_id: clientId },
+  );
+  if (error) throw error;
+  return data?.[0] ?? null;
+}
+
 const META_ADS_MESSAGES: Record<string, string> = {
+  meta_ads_permission_unavailable:
+    "A Meta não ofereceu a permissão de ler anúncios para este perfil. Enquanto o app não tiver acesso avançado a ads_read (análise da Meta), só perfis com papel no app — administrador, desenvolvedor ou testador — conseguem conectar. Alternativa: o cliente dá acesso de parceiro à agência na conta de anúncios.",
+  client_not_found: "Cliente não encontrado nesta agência.",
   session_expired: "Sua sessão expirou. Entre novamente para continuar.",
   meta_ads_management_forbidden:
     "Somente ADM, Head ou quem tem a função Tráfego Pago pode conectar o Meta Ads da agência.",
@@ -191,21 +219,36 @@ async function metaAdsError(error: unknown): Promise<Error> {
   );
 }
 
+/** Sem clientId conecta a agência; com clientId, o perfil daquele cliente. */
 export async function startMetaAdsOAuth(
   organizationId: string,
   redirectPath: string,
+  clientId?: string | null,
 ): Promise<string> {
   const { data, error } = await invokeEdge<{ authorize_url: string }>(
     "meta-ads-oauth-start",
-    { body: { organization_id: organizationId, redirect_path: redirectPath } },
+    {
+      body: {
+        organization_id: organizationId,
+        client_id: clientId ?? undefined,
+        redirect_path: redirectPath,
+      },
+    },
   );
   if (error) throw await metaAdsError(error);
   return (data as { authorize_url: string }).authorize_url;
 }
 
-export async function disconnectMetaAds(organizationId: string): Promise<void> {
+export async function disconnectMetaAds(
+  organizationId: string,
+  clientId?: string | null,
+): Promise<void> {
   const { error } = await invokeEdge("meta-ads-insights", {
-    body: { mode: "disconnect", organization_id: organizationId },
+    body: {
+      mode: "disconnect",
+      organization_id: organizationId,
+      client_id: clientId ?? undefined,
+    },
   });
   if (error) throw await metaAdsError(error);
 }

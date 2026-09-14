@@ -1,4 +1,5 @@
 import {
+  adsPermissionProblem,
   buildMetaAdsAuthorizeUrl,
   isMetaAuthorizationFailure,
   parseMetaAdsScopes,
@@ -62,6 +63,37 @@ Deno.test("URL de consentimento pede de novo permissão recusada", () => {
   assertEquals(
     url.searchParams.get("redirect_uri"),
     "https://exemplo.supabase.co/functions/v1/meta-ads-oauth-callback",
+  );
+});
+
+Deno.test("perfil do cliente pede a senha de novo; agência pede permissão recusada", () => {
+  const config = {
+    appId: "123",
+    graphVersion: "v23.0",
+    redirectUri:
+      "https://exemplo.supabase.co/functions/v1/meta-ads-oauth-callback",
+    scopes: ["ads_read"],
+  };
+  assertEquals(
+    new URL(buildMetaAdsAuthorizeUrl("s", config, true)).searchParams.get("auth_type"),
+    "reauthenticate",
+  );
+  assertEquals(
+    new URL(buildMetaAdsAuthorizeUrl("s", config)).searchParams.get("auth_type"),
+    "rerequest",
+  );
+});
+
+Deno.test("separa permissão desmarcada de permissão que a Meta nem ofereceu", () => {
+  assertEquals(adsPermissionProblem({ ads_read: "granted" }), null);
+  assertEquals(
+    adsPermissionProblem({ ads_read: "declined" }),
+    "meta_ads_permission_declined",
+  );
+  // Perfil sem papel no app, com ads_read em acesso padrão: nem aparece.
+  assertEquals(
+    adsPermissionProblem({ public_profile: "granted" }),
+    "meta_ads_permission_unavailable",
   );
 });
 
