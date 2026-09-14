@@ -60,6 +60,47 @@ export const CANAIS: CanalDef[] = [
 
 export const TODOS_OS_CANAIS: CanalId[] = CANAIS.map((canal) => canal.id);
 
+/** O mínimo do contrato do cliente que decide o tráfego pago. */
+export type TrafegoDoContrato = {
+  does_paid_traffic: boolean;
+  paid_platforms: string[];
+};
+
+/**
+ * Quais plataformas pagas o contrato cobre.
+ *
+ * Existe porque o relatório vinha com Meta Ads e Google Ads marcados para
+ * TODOS os clientes — e quem não anuncia (a SulCardio, por exemplo) gerava
+ * relatório com "conta não vinculada" até alguém lembrar de desmarcar.
+ *
+ * - sem contrato (ou falha ao ler): as duas, como era antes — sem informação,
+ *   esconder um canal que o cliente usa é pior que mostrar um a mais;
+ * - não faz tráfego: nenhuma;
+ * - faz tráfego sem plataforma informada: as duas (não dá para saber qual);
+ * - só "outra" (TikTok, LinkedIn Ads...): nenhuma das duas.
+ */
+export function pagosPeloContrato(
+  contrato: TrafegoDoContrato | null | undefined,
+): { meta: boolean; google: boolean } {
+  if (!contrato) return { meta: true, google: true };
+  if (!contrato.does_paid_traffic) return { meta: false, google: false };
+  const plataformas = new Set(contrato.paid_platforms ?? []);
+  if (plataformas.size === 0) return { meta: true, google: true };
+  return { meta: plataformas.has("meta"), google: plataformas.has("google") };
+}
+
+/** Canais do relatório pelo contrato: orgânico sempre, pago só o contratado. */
+export function canaisPeloContrato(
+  contrato: TrafegoDoContrato | null | undefined,
+): CanalId[] {
+  const pagos = pagosPeloContrato(contrato);
+  return TODOS_OS_CANAIS.filter((id) => {
+    if (id === "meta_ads") return pagos.meta;
+    if (id === "google_ads") return pagos.google;
+    return true;
+  });
+}
+
 /**
  * Instagram e Facebook chegam na MESMA resposta da `meta-insights` — o
  * Facebook vem como uma seção dentro dela. Quem não souber disso escreve duas
