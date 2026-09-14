@@ -114,6 +114,8 @@ export function safeLog(
     step?: string;
     rpc_name?: string;
     reason_code?: string;
+    /** O código que o terceiro devolveu, quando `reason_code` é só a etapa. */
+    upstream_reason_code?: string;
     postgres_error_code?: string;
     status?: number;
   },

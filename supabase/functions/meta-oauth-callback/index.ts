@@ -56,7 +56,16 @@ function logCallbackFailure(
     step,
     reason_code: reasonCode,
     ...(error instanceof HttpError
-      ? { status: error.upstreamStatus ?? error.status }
+      ? {
+        status: error.upstreamStatus ?? error.status,
+        // O que a Meta devolveu (meta_<status>_<code>_<subcode>). Sem isto o
+        // log dizia só "long_lived_token_exchange_failed" — a etapa, não o
+        // motivo — e não havia como separar "perfil sem papel no app" de
+        // "conta não profissional" ou "segredo errado".
+        ...(error.reasonCode !== reasonCode
+          ? { upstream_reason_code: error.reasonCode }
+          : {}),
+      }
       : {}),
   });
 }
@@ -74,6 +83,12 @@ async function runCallbackStep<T>(
     throw new HttpError(
       error instanceof HttpError ? error.status : 500,
       reasonCode,
+      error instanceof HttpError ? error.upstreamStatus : undefined,
+      // Segue até o redirecionamento como `meta_code`. É o código sanitizado
+      // (a-z0-9_.:-), nunca a mensagem da Meta.
+      error instanceof HttpError && error.reasonCode !== reasonCode
+        ? error.reasonCode
+        : undefined,
     );
   }
 }
@@ -377,6 +392,12 @@ Deno.serve(async (request) => {
       meta_status: "error",
       reason_code: reasonCode,
     };
+    if (
+      error instanceof HttpError && error.detail &&
+      /^[a-z0-9_.:-]{1,100}$/.test(error.detail)
+    ) {
+      errorParams.meta_code = error.detail;
+    }
     if (consumed) {
       errorParams.client_id = consumed.client_id;
       errorParams.provider = consumed.provider ?? "facebook";
