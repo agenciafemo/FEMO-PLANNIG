@@ -191,8 +191,12 @@ export function googleAdsErrorMessage(reasonCode: string): string {
       "Esta conta de anúncios está desativada ou cancelada no Google Ads.",
     google_ads_developer_token_missing:
       "Falta o token de desenvolvedor do Google Ads. Ele é gerado na conta de administrador (MCC) e precisa de aprovação do Google — a conexão está certa, o que falta é esse acesso.",
+    google_ads_api_disabled:
+      "A Google Ads API está desligada no projeto do Google Cloud usado pela integração. Ative em Google Cloud → APIs e serviços → Biblioteca → Google Ads API.",
+    google_ads_scope_insufficient:
+      "A conta Google foi conectada sem a permissão do Google Ads. Desconecte e conecte de novo, aceitando o acesso ao Google Ads.",
     google_ads_accounts_unreadable:
-      "O Google recusou a leitura de todas as contas. Normalmente é o nível de acesso do token de desenvolvedor — confira em Central de API → Nível de acesso.",
+      "O Google recusou a leitura de todas as contas. O código entre parênteses diz o motivo: DEVELOPER_TOKEN_NOT_APPROVED é o nível de acesso do token (Central de API); USER_PERMISSION_DENIED é o login conectado sem acesso a essas contas.",
     google_ads_account_not_linked:
       "Vincule a conta de anúncios deste cliente antes de puxar métricas.",
     google_ads_customer_not_found:

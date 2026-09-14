@@ -83,6 +83,8 @@ export class GoogleAdsApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly reasonCode: string,
+    /** Códigos crus do Google (enum do Ads, ErrorInfo.reason ou status). */
+    public readonly googleCodes: string[] = [],
   ) {
     super(reasonCode);
   }
@@ -304,10 +306,60 @@ function codigosDoBloco(payload: unknown): string[] {
   return codigos;
 }
 
+/**
+ * Motivos do ErrorInfo (google.rpc) — o formato dos erros que NÃO são do Ads.
+ *
+ * Um 403 sem código do Ads pode ser a Google Ads API desligada no projeto do
+ * Cloud (SERVICE_DISABLED) ou uma autorização sem o escopo do Ads
+ * (ACCESS_TOKEN_SCOPE_INSUFFICIENT). Os dois condenam TODAS as contas, e sem
+ * ler este campo viravam "sem permissão nesta conta", conta por conta.
+ */
+export function googleErrorInfoReasons(payload: unknown): string[] {
+  const motivos: string[] = [];
+  const blocos = Array.isArray(payload) ? payload : [payload];
+  for (const bloco of blocos) {
+    const erro = (bloco as { error?: unknown })?.error;
+    const detalhes = (erro as { details?: unknown })?.details;
+    if (!Array.isArray(detalhes)) continue;
+    for (const detalhe of detalhes) {
+      const reason = (detalhe as { reason?: unknown })?.reason;
+      if (typeof reason === "string" && reason) motivos.push(reason);
+    }
+  }
+  return motivos;
+}
+
+/**
+ * O que o Google respondeu, em códigos seguros para mostrar na tela: nomes de
+ * enum, nunca a mensagem (que pode carregar dados da conta). Sem código
+ * específico, vale o `status` do erro (PERMISSION_DENIED, UNAUTHENTICATED...).
+ *
+ * Existe porque "permission_denied" sozinho escondia a causa: o nosso 403
+ * genérico juntava falta de acesso, API desligada e escopo faltando.
+ */
+export function googleAdsDiagnosticCodes(payload: unknown): string[] {
+  const codigos = [
+    ...googleAdsFailureCodes(payload),
+    ...googleErrorInfoReasons(payload),
+  ];
+  if (codigos.length === 0) {
+    const blocos = Array.isArray(payload) ? payload : [payload];
+    for (const bloco of blocos) {
+      const erro = (bloco as { error?: unknown })?.error;
+      const status = (erro as { status?: unknown })?.status;
+      if (typeof status === "string" && status) codigos.push(status);
+    }
+  }
+  return [...new Set(codigos)].filter((codigo) => /^[A-Z0-9_]{1,80}$/.test(codigo));
+}
+
 export function apiReason(status: number, payload?: unknown): string {
   // O corpo tem prioridade sobre o status: ele e especifico, o status e uma
   // familia inteira.
-  const codigos = new Set(googleAdsFailureCodes(payload));
+  const codigos = new Set([
+    ...googleAdsFailureCodes(payload),
+    ...googleErrorInfoReasons(payload),
+  ]);
   if (
     codigos.has("DEVELOPER_TOKEN_NOT_APPROVED") ||
     codigos.has("DEVELOPER_TOKEN_PROHIBITED")
@@ -316,6 +368,10 @@ export function apiReason(status: number, payload?: unknown): string {
   }
   if (codigos.has("DEVELOPER_TOKEN_INVALID")) {
     return "google_ads_developer_token_invalid";
+  }
+  if (codigos.has("SERVICE_DISABLED")) return "google_ads_api_disabled";
+  if (codigos.has("ACCESS_TOKEN_SCOPE_INSUFFICIENT")) {
+    return "google_ads_scope_insufficient";
   }
   if (codigos.has("CUSTOMER_NOT_ENABLED")) return "google_ads_customer_not_enabled";
   if (codigos.has("USER_PERMISSION_DENIED")) return "google_ads_permission_denied";
@@ -345,6 +401,8 @@ export function isFatalGoogleAdsReason(reasonCode: string): boolean {
     reasonCode === "google_ads_developer_token_not_approved" ||
     reasonCode === "google_ads_developer_token_invalid" ||
     reasonCode === "google_ads_developer_token_missing" ||
+    reasonCode === "google_ads_api_disabled" ||
+    reasonCode === "google_ads_scope_insufficient" ||
     reasonCode === "google_ads_reauthorization_required" ||
     reasonCode === "google_ads_rate_limited"
   );
@@ -380,7 +438,18 @@ export async function listAccessibleCustomerIds(
   );
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
-    throw new GoogleAdsApiError(response.status, apiReason(response.status, payload));
+    const codigos = googleAdsDiagnosticCodes(payload);
+    console.error(
+      "google_ads_api_error",
+      "listAccessibleCustomers",
+      response.status,
+      codigos.join(","),
+    );
+    throw new GoogleAdsApiError(
+      response.status,
+      apiReason(response.status, payload),
+      codigos,
+    );
   }
   const names = Array.isArray(payload.resourceNames) ? payload.resourceNames : [];
   const ids: string[] = [];
@@ -433,7 +502,20 @@ export async function runGaql(input: {
   );
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new GoogleAdsApiError(response.status, apiReason(response.status, payload));
+    const codigos = googleAdsDiagnosticCodes(payload);
+    console.error(
+      "google_ads_api_error",
+      "searchStream",
+      input.customerId,
+      input.loginCustomerId ?? "direto",
+      response.status,
+      codigos.join(","),
+    );
+    throw new GoogleAdsApiError(
+      response.status,
+      apiReason(response.status, payload),
+      codigos,
+    );
   }
   return unwrapSearchStream(payload);
 }

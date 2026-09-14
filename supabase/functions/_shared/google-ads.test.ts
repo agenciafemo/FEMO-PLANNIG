@@ -1,6 +1,8 @@
 import {
   apiReason,
+  googleAdsDiagnosticCodes,
   googleAdsFailureCodes,
+  googleErrorInfoReasons,
   isFatalGoogleAdsReason,
   fromMicros,
   parseCustomerClientRows,
@@ -399,5 +401,70 @@ Deno.test("junta os códigos de vários blocos do array", () => {
       erro403("CUSTOMER_NOT_ENABLED"),
     ]),
     ["USER_PERMISSION_DENIED", "CUSTOMER_NOT_ENABLED"],
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 14/09/2026: todas as 7 contas voltaram "google_ads_permission_denied", e a
+// tela não tinha como dizer POR QUE. O 403 genérico juntava três causas com
+// consertos opostos: login sem acesso, API desligada no Cloud e escopo do Ads
+// faltando na autorização. Estes erros não vêm no formato do Ads, e sim no
+// ErrorInfo do google.rpc.
+// ---------------------------------------------------------------------------
+const erroInfo = (reason: string) => ({
+  error: {
+    code: 403,
+    status: "PERMISSION_DENIED",
+    details: [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        reason,
+        domain: "googleapis.com",
+      },
+    ],
+  },
+});
+
+Deno.test("API desligada no Cloud não se disfarça de 'sem permissão na conta'", () => {
+  assertEquals(apiReason(403, erroInfo("SERVICE_DISABLED")), "google_ads_api_disabled");
+  assertEquals(isFatalGoogleAdsReason("google_ads_api_disabled"), true);
+});
+
+Deno.test("autorização sem o escopo do Ads pede reconexão, e vale para todas", () => {
+  assertEquals(
+    apiReason(403, erroInfo("ACCESS_TOKEN_SCOPE_INSUFFICIENT")),
+    "google_ads_scope_insufficient",
+  );
+  assertEquals(isFatalGoogleAdsReason("google_ads_scope_insufficient"), true);
+});
+
+Deno.test("lê o motivo do ErrorInfo também com o corpo em array", () => {
+  assertEquals(googleErrorInfoReasons([erroInfo("SERVICE_DISABLED")]), ["SERVICE_DISABLED"]);
+  assertEquals(googleErrorInfoReasons(null), []);
+});
+
+Deno.test("diagnóstico traz o código cru do Google para a tela", () => {
+  assertEquals(
+    googleAdsDiagnosticCodes(erro403("USER_PERMISSION_DENIED")),
+    ["USER_PERMISSION_DENIED"],
+  );
+  assertEquals(
+    googleAdsDiagnosticCodes([erroInfo("SERVICE_DISABLED"), erroInfo("SERVICE_DISABLED")]),
+    ["SERVICE_DISABLED"],
+  );
+});
+
+Deno.test("sem código específico, o diagnóstico usa o status do erro", () => {
+  assertEquals(
+    googleAdsDiagnosticCodes({ error: { code: 403, status: "PERMISSION_DENIED" } }),
+    ["PERMISSION_DENIED"],
+  );
+  assertEquals(googleAdsDiagnosticCodes(null), []);
+});
+
+Deno.test("diagnóstico nunca repassa texto livre do Google", () => {
+  assertEquals(
+    googleAdsDiagnosticCodes({ error: { status: "Mensagem com dado da conta 123" } }),
+    [],
   );
 });

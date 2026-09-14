@@ -63,6 +63,11 @@ async function discoverAccounts(
   // consegui ler nenhuma conta" é um beco sem saída: nem a tela nem o log
   // dizem POR QUE, e sobra adivinhar.
   const recusas = new Set<string>();
+  // Os códigos CRUS do Google. `recusas` é a nossa categoria; isto é o que o
+  // Google disse — e é o que distingue "sem acesso" de "API desligada".
+  const codigosGoogle = new Set<string>();
+  // Contas recusadas na leitura direta: podem abrir pela MCC (ver abaixo).
+  const recusadasDireto: string[] = [];
 
   for (const customerId of ids.slice(0, 20)) {
     let conta: GoogleAdsAccount | null = null;
@@ -84,6 +89,10 @@ async function discoverAccounts(
       // ver com contas — e manda a agência procurar no lugar errado.
       if (!(error instanceof GoogleAdsApiError)) throw error;
       recusas.add(error.reasonCode);
+      for (const codigo of error.googleCodes) codigosGoogle.add(codigo);
+      if (error.reasonCode === "google_ads_permission_denied") {
+        recusadasDireto.push(customerId);
+      }
       continue;
     }
     if (!conta) continue;
@@ -106,6 +115,31 @@ async function discoverAccounts(
       } catch (error) {
         if (!(error instanceof GoogleAdsApiError)) throw error;
         recusas.add(error.reasonCode);
+        for (const codigo of error.googleCodes) codigosGoogle.add(codigo);
+      }
+    }
+  }
+
+  // Conta de cliente que o login só alcança ATRAVÉS da MCC recusa a leitura
+  // direta (USER_PERMISSION_DENIED) e abre com o login-customer-id da MCC. Só
+  // dá para tentar depois de achar a MCC, que pode vir depois na lista.
+  if (loginCustomerId) {
+    for (const customerId of recusadasDireto) {
+      if (encontradas.has(customerId) || customerId === loginCustomerId) continue;
+      try {
+        const conta = parseAccountRow(
+          await runGaql({
+            accessToken,
+            loginCustomerId,
+            customerId,
+            query: buildAccountQuery(),
+          }),
+        );
+        if (conta) encontradas.set(conta.customerId, conta);
+      } catch (error) {
+        if (!(error instanceof GoogleAdsApiError)) throw error;
+        recusas.add(error.reasonCode);
+        for (const codigo of error.googleCodes) codigosGoogle.add(codigo);
       }
     }
   }
@@ -131,7 +165,7 @@ async function discoverAccounts(
       // tentar de novo no escuro.
       `${ids.length} conta(s) acessível(is), nenhuma legível. Google respondeu: ${
         [...recusas].join(", ") || "sem código"
-      }`,
+      }${codigosGoogle.size ? ` (${[...codigosGoogle].join(", ")})` : ""}`,
     );
   }
 
@@ -273,7 +307,14 @@ Deno.serve(async (request) => {
   } catch (error) {
     if (error instanceof GoogleAdsApiError) {
       return errorResponse(
-        new HttpError(error.status >= 400 && error.status < 600 ? error.status : 502, error.reasonCode),
+        new HttpError(
+          error.status >= 400 && error.status < 600 ? error.status : 502,
+          error.reasonCode,
+          undefined,
+          error.googleCodes.length
+            ? `Google respondeu: ${error.googleCodes.join(", ")}`
+            : undefined,
+        ),
         headers,
       );
     }
