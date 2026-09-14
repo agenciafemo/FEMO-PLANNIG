@@ -110,11 +110,16 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
       toast.success("Instagram conectado!");
       queryClient.invalidateQueries({ queryKey: ["meta-status", clientId] });
     } else if (metaStatus === "error") {
-      toast.error("Não foi possível conectar: " + (p.get("reason_code") ?? "erro"));
+      // `meta_code` é o que a Meta respondeu; `reason_code` é só a etapa que falhou.
+      const metaCode = p.get("meta_code");
+      toast.error(
+        "Não foi possível conectar: " + (p.get("reason_code") ?? "erro") +
+          (metaCode ? ` (Meta respondeu: ${metaCode})` : ""),
+      );
     }
     if (metaStatus) {
       const url = new URL(window.location.href);
-      ["meta_status", "connection_id", "client_id", "provider", "reason_code"].forEach((k) =>
+      ["meta_status", "connection_id", "client_id", "provider", "reason_code", "meta_code"].forEach((k) =>
         url.searchParams.delete(k),
       );
       window.history.replaceState({}, "", url.toString());
