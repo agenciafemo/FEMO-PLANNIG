@@ -20,6 +20,7 @@ import {
   type MetaProvider,
 } from "@/lib/metaRpc";
 import { requiresFacebookPageSelection } from "@/lib/metaConnectionFlow";
+import { metaConnectErrorMessage } from "@/lib/metaConnectError";
 
 // Onde o Facebook devolve o navegador após o OAuth. O callback anexa
 // ?meta_status=pending&connection_id=...&client_id=... a esta rota.
@@ -110,11 +111,16 @@ export function InstagramConnection({ clientId }: { clientId: string }) {
       toast.success("Instagram conectado!");
       queryClient.invalidateQueries({ queryKey: ["meta-status", clientId] });
     } else if (metaStatus === "error") {
-      // `meta_code` é o que a Meta respondeu; `reason_code` é só a etapa que falhou.
-      const metaCode = p.get("meta_code");
+      // `meta_code` é o que a Meta respondeu; `reason_code` é só a etapa que
+      // falhou. A frase diz o que fazer (ex.: cadastrar testador no app).
       toast.error(
-        "Não foi possível conectar: " + (p.get("reason_code") ?? "erro") +
-          (metaCode ? ` (Meta respondeu: ${metaCode})` : ""),
+        metaConnectErrorMessage({
+          reasonCode: p.get("reason_code"),
+          metaCode: p.get("meta_code"),
+          provider: p.get("provider"),
+        }),
+        // Texto longo com passo a passo: 4s padrão some antes de dar para ler.
+        { duration: 15000 },
       );
     }
     if (metaStatus) {
