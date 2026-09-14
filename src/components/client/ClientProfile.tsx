@@ -155,7 +155,10 @@ export function ClientProfile({
   // e o resultado da conexão ficava escondido até alguém clicar em Conexões.
   const [secao, setSecao] = useState<SecaoId>(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("secao") === "conexoes") return "conexoes";
+    const pedida = params.get("secao");
+    if (pedida === "perfil" || pedida === "contrato" || pedida === "conexoes" || pedida === "arquivos") {
+      return pedida;
+    }
     const voltaDeAutorizacao = [
       "meta_status",
       "meta_ads_status",

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -26,12 +26,16 @@ import { generateReport, getMetaInsights, type ReportResult, type MetaInsights }
 import { ReportHistory } from "@/components/reports/ReportHistory";
 import { ReportBuilder } from "@/components/reports/ReportBuilder";
 import {
+  canaisPeloContrato,
   coletarCanais,
+  pagosPeloContrato,
   resumoDaColeta,
   TODOS_OS_CANAIS,
   type CanalId,
   type ResultadoCanal,
 } from "@/lib/reportChannels";
+import { loadContract } from "@/lib/clientContract";
+import { TrafegoForaDoContrato } from "@/components/reports/TrafegoForaDoContrato";
 import { AdsReport } from "@/components/reports/AdsReport";
 import { getAdsInsights, type AdsInsights } from "@/lib/adsRpc";
 import { ClientConnectionIndicators } from "@/components/reports/ClientConnectionIndicators";
@@ -140,15 +144,40 @@ export default function Relatorios() {
   const [googleAdsData, setGoogleAdsData] = useState<GoogleAdsInsights | null>(null);
   const [canais, setCanais] = useState<CanalId[]>(TODOS_OS_CANAIS);
   const [coleta, setColeta] = useState<ResultadoCanal[] | null>(null);
+  // Tráfego pago fora do contrato fica recolhido; "Mostrar mesmo assim" abre.
+  const [mostrarPagoForaDoContrato, setMostrarPagoForaDoContrato] = useState(false);
   useEffect(() => {
     setAdsData(null);
     setGoogleBusinessData(null);
     setGoogleAdsData(null);
-    // A seleção de canais NÃO reseta ao trocar de cliente: quem monta relatório
-    // costuma usar o mesmo recorte para a carteira inteira. O resultado da
-    // coleta, sim — ele é do cliente anterior.
+    // O resultado da coleta é do cliente anterior.
     setColeta(null);
+    setMostrarPagoForaDoContrato(false);
   }, [clientId]);
+
+  // O CONTRATO decide os canais pagos de cada cliente. Antes a seleção valia
+  // para a carteira inteira, e quem não anuncia (ex.: SulCardio) gerava
+  // relatório com "conta não vinculada" até alguém lembrar de desmarcar.
+  // Mesma chave da ficha: editar o contrato lá atualiza aqui.
+  const contratoQuery = useQuery({
+    queryKey: ["client-contract", clientId],
+    queryFn: () => loadContract(clientId),
+    enabled: !!clientId,
+    retry: false,
+  });
+  // Aplica UMA vez por cliente, quando o contrato chega. Depois disso quem
+  // manda é a pessoa: marcar Meta Ads à mão não pode ser desfeito por refetch.
+  const canaisAplicadosPara = useRef<string | null>(null);
+  useEffect(() => {
+    if (!clientId || canaisAplicadosPara.current === clientId) return;
+    if (contratoQuery.isPending) return;
+    canaisAplicadosPara.current = clientId;
+    // Falha ao ler o contrato cai no padrão antigo: todos os canais.
+    setCanais(canaisPeloContrato(contratoQuery.isError ? null : contratoQuery.data));
+  }, [clientId, contratoQuery.isPending, contratoQuery.isError, contratoQuery.data]);
+  const pagosNoContrato = pagosPeloContrato(
+    contratoQuery.isSuccess ? contratoQuery.data : null,
+  );
 
 
   // Métricas e análise ficam no CACHE do React Query (keyed por cliente), não
@@ -465,7 +494,15 @@ export default function Relatorios() {
             resultados={coleta}
           />
 
-          <AdsReport key={clientId} clientId={clientId} onReport={setAdsData} />
+          {pagosNoContrato.meta || mostrarPagoForaDoContrato ? (
+            <AdsReport key={clientId} clientId={clientId} onReport={setAdsData} />
+          ) : (
+            <TrafegoForaDoContrato
+              plataforma="Meta Ads"
+              clientId={clientId}
+              onMostrar={() => setMostrarPagoForaDoContrato(true)}
+            />
+          )}
 
           <div className="rounded-xl border bg-card p-5">
         <div className="flex flex-wrap items-end gap-3">
@@ -557,12 +594,20 @@ export default function Relatorios() {
           proposito: um mostra a descoberta organica, o outro a paga — juntos
           respondem "de onde veio o resultado deste mes". */}
       {GOOGLE_ADS_ENABLED && (
-        <GoogleAdsReport
-          clientId={clientId}
-          from={range.from}
-          to={range.to}
-          onReport={setGoogleAdsData}
-        />
+        pagosNoContrato.google || mostrarPagoForaDoContrato ? (
+          <GoogleAdsReport
+            clientId={clientId}
+            from={range.from}
+            to={range.to}
+            onReport={setGoogleAdsData}
+          />
+        ) : (
+          <TrafegoForaDoContrato
+            plataforma="Google Ads"
+            clientId={clientId}
+            onMostrar={() => setMostrarPagoForaDoContrato(true)}
+          />
+        )
       )}
 
       {insights && (
