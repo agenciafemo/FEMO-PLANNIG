@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import {
@@ -9,18 +9,37 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { ChevronDown, DollarSign, Loader2, Megaphone, RefreshCw } from "lucide-react";
+import { AlertTriangle, ChevronDown, DollarSign, Loader2, Megaphone, RefreshCw } from "lucide-react";
 import {
   type AdAccount,
   type AdsInsights,
+  daysUntil,
+  disconnectMetaAds,
   getAdsInsights,
+  getMetaAdsStatus,
   listAdAccounts,
   loadClientAdAccounts,
+  metaAdsReasonMessage,
   setClientAdAccount,
+  startMetaAdsOAuth,
 } from "@/lib/adsRpc";
+
+// A partir de quantos dias antes do vencimento a tela começa a avisar.
+const AVISO_VENCIMENTO_DIAS = 10;
 
 const nf = new Intl.NumberFormat("pt-BR");
 const cf = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -101,17 +120,81 @@ export function AdsReport({
   });
   const currentAccount = mapping?.[clientId];
 
+  // Conexão Meta Ads DA AGÊNCIA (uma para todos os clientes).
+  const statusQuery = useQuery({
+    queryKey: ["meta-ads-status", organizationId],
+    queryFn: () => getMetaAdsStatus(organizationId!),
+    enabled: !!organizationId,
+    staleTime: 60 * 1000,
+    // Sem a migration aplicada a RPC não existe: a seção segue no fluxo antigo.
+    retry: false,
+  });
+  const adsStatus = statusQuery.data ?? null;
+  const conectado = adsStatus?.connection_status === "active";
+  const precisaReconectar = adsStatus?.connection_status === "reauth_required" ||
+    adsStatus?.connection_status === "error";
+  const nuncaConectou = adsStatus?.connection_status === "not_connected";
+  const diasRestantes = conectado ? daysUntil(adsStatus?.token_expires_at ?? null) : null;
+  const venceEmBreve = diasRestantes !== null && diasRestantes <= AVISO_VENCIMENTO_DIAS;
+  const [confirmarDesconexao, setConfirmarDesconexao] = useState(false);
+
+  // Volta do consentimento da Meta: o callback redireciona com ?meta_ads_status=...
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const resultado = params.get("meta_ads_status");
+    if (!resultado) return;
+    if (resultado === "connected") toast.success("Meta Ads da agência conectado.");
+    else toast.error(metaAdsReasonMessage(params.get("reason_code") ?? "meta_ads_oauth_callback_failed"));
+    params.delete("meta_ads_status");
+    params.delete("reason_code");
+    const query = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+    );
+    queryClient.invalidateQueries({ queryKey: ["meta-ads-status"] });
+  }, [queryClient]);
+
+  const conectar = useMutation({
+    mutationFn: async () => {
+      const url = await startMetaAdsOAuth(
+        organizationId!,
+        `${window.location.pathname}${window.location.search}`,
+      );
+      try {
+        sessionStorage.setItem("meta-ads-return-client", clientId);
+      } catch {
+        // Sem sessionStorage a conexão funciona igual; só não reabre o cliente.
+      }
+      window.location.assign(url);
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
+  const desconectar = useMutation({
+    mutationFn: () => disconnectMetaAds(organizationId!),
+    onSuccess: () => {
+      toast.success("Meta Ads da agência desconectado.");
+      setConfirmarDesconexao(false);
+      queryClient.invalidateQueries({ queryKey: ["meta-ads-status"] });
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
   async function handleLoadAccounts() {
     setLoadingAccounts(true);
     try {
-      const list = await listAdAccounts();
+      const list = await listAdAccounts(organizationId);
       setAccounts(list);
-      if (list.length === 0) toast.warning("O token não retornou nenhuma conta de anúncios.");
+      if (list.length === 0) toast.warning("A conexão do Meta Ads não retornou nenhuma conta de anúncios.");
       else toast.success(`${list.length} conta(s) encontrada(s).`);
     } catch (e) {
       toast.error(`Erro ao listar contas: ${(e as Error).message}`);
     } finally {
       setLoadingAccounts(false);
+      // Uma recusa da Meta muda o status da conexão: a tela mostra "Reconectar".
+      queryClient.invalidateQueries({ queryKey: ["meta-ads-status"] });
     }
   }
 
@@ -154,6 +237,7 @@ export function AdsReport({
       toast.error(`Erro ao puxar tráfego pago: ${(e as Error).message}`);
     } finally {
       setLoadingReport(false);
+      queryClient.invalidateQueries({ queryKey: ["meta-ads-status"] });
     }
   }
 
@@ -174,6 +258,117 @@ export function AdsReport({
         <Megaphone className="h-4 w-4 text-brand" />
         <h3 className="text-sm font-semibold">Tráfego Pago (Meta Ads)</h3>
       </div>
+
+      {/* Conexão Meta Ads da agência */}
+      {statusQuery.isLoading ? (
+        <p className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Verificando conexão do Meta Ads…
+        </p>
+      ) : adsStatus && conectado ? (
+        <div
+          className={cn(
+            "mb-4 rounded-xl border p-3",
+            venceEmBreve ? "border-warning/30 bg-warning-soft/30" : "border-border bg-muted/20",
+          )}
+        >
+          <p className="text-sm">
+            Meta Ads da agência conectado
+            {adsStatus.meta_user_name && (
+              <> como <span className="font-medium">{adsStatus.meta_user_name}</span></>
+            )}
+            .
+          </p>
+          {diasRestantes !== null && adsStatus.token_expires_at && (
+            <p className={cn("mt-0.5 text-xs", venceEmBreve ? "text-warning" : "text-muted-foreground")}>
+              {diasRestantes < 0
+                ? "A autorização venceu."
+                : `A autorização vence em ${new Date(adsStatus.token_expires_at).toLocaleDateString("pt-BR")} (${diasRestantes} dia${diasRestantes === 1 ? "" : "s"}).`}
+              {venceEmBreve && " Reconecte antes para o relatório não parar."}
+            </p>
+          )}
+          {adsStatus.can_manage && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant={venceEmBreve ? "outline" : "ghost"}
+                onClick={() => conectar.mutate()}
+                disabled={conectar.isPending}
+              >
+                {conectar.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+                Reconectar Meta Ads
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-destructive hover:text-destructive"
+                onClick={() => setConfirmarDesconexao(true)}
+                disabled={desconectar.isPending}
+              >
+                Desconectar
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : adsStatus ? (
+        <div
+          className={cn(
+            "mb-4 rounded-xl border p-3",
+            precisaReconectar ? "border-destructive/30 bg-destructive/5" : "border-warning/30 bg-warning-soft/30",
+          )}
+        >
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <AlertTriangle className={cn("h-4 w-4", precisaReconectar ? "text-destructive" : "text-warning")} />
+            {precisaReconectar
+              ? "A Meta recusou o acesso de anúncios da agência"
+              : "Meta Ads da agência não conectado"}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {precisaReconectar
+              ? "A autorização venceu ou foi revogada. Reconecte com o login do Facebook que enxerga as contas de anúncios dos clientes."
+              : nuncaConectou
+                ? "Conecte com o login do Facebook que enxerga as contas de anúncios dos clientes. Até lá, o relatório tenta usar o token antigo da agência, que pode parar sem aviso."
+                : "Conecte com o login do Facebook que enxerga as contas de anúncios dos clientes."}
+          </p>
+          {adsStatus.can_manage ? (
+            <Button
+              className="mt-3"
+              size="sm"
+              variant="outline"
+              onClick={() => conectar.mutate()}
+              disabled={conectar.isPending}
+            >
+              {conectar.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+              {precisaReconectar ? "Reconectar Meta Ads" : "Conectar Meta Ads"}
+            </Button>
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Peça para um ADM, Head ou quem tem a função Tráfego Pago conectar.
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      <AlertDialog open={confirmarDesconexao} onOpenChange={setConfirmarDesconexao}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desconectar o Meta Ads da agência?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O relatório de tráfego pago para de funcionar para todos os clientes até alguém
+              conectar de novo. As contas vinculadas a cada cliente e os posts programados não
+              são afetados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => desconectar.mutate()}
+            >
+              Desconectar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Vínculo da conta de anúncios */}
       {currentAccount ? (

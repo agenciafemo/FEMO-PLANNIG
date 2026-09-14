@@ -52,10 +52,19 @@ verify_jwt = true
 [functions.meta-insights]
 verify_jwt = true
 
-# Relatório de tráfego pago (Meta Ads). Exige login; usa o secret
-# META_ADS_SYSTEM_TOKEN para ler os anúncios (separado da publicação).
+# Relatório de tráfego pago (Meta Ads). Exige login; lê os anúncios com a
+# conexão Meta Ads da agência (token no Vault), com o secret antigo
+# META_ADS_SYSTEM_TOKEN só como reserva. Separado da publicação.
 [functions.meta-ads-insights]
 verify_jwt = true
+
+[functions.meta-ads-oauth-start]
+verify_jwt = true
+
+# Pública: recebe o redirecionamento da Meta, que não carrega o JWT do app.
+# A defesa é o `state` de uso único, guardado só como hash e com expiração.
+[functions.meta-ads-oauth-callback]
+verify_jwt = false
 
 # Frase do dia no Dashboard (Gemini). Exige login.
 [functions.daily-quote]

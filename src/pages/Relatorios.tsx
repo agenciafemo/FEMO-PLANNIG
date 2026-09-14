@@ -89,7 +89,19 @@ export default function Relatorios() {
   const queryClient = useQueryClient();
   // NÃO persiste o cliente: a página deve abrir sempre na LISTA de clientes,
   // não pular direto pro último relatório aberto.
-  const [selected, setSelected] = useState<string>("");
+  // Na volta do login do Meta Ads a página recarrega do zero; sem isto a pessoa
+  // cai na lista de clientes e o resultado da conexão só aparece depois que ela
+  // reabrir o cliente em que estava.
+  const [selected, setSelected] = useState<string>(() => {
+    try {
+      if (!new URLSearchParams(window.location.search).has("meta_ads_status")) return "";
+      const saved = sessionStorage.getItem("meta-ads-return-client") ?? "";
+      sessionStorage.removeItem("meta-ads-return-client");
+      return saved;
+    } catch {
+      return "";
+    }
+  });
   const [period, setPeriod] = usePersistedState<string>("report-period", "30d");
   const [customFrom, setCustomFrom] = usePersistedState<string>("report-cfrom", "");
   const [customTo, setCustomTo] = usePersistedState<string>("report-cto", "");
