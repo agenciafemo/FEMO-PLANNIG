@@ -248,40 +248,6 @@ function getNextStep(punches: TimeClockPunch[]) {
   return currentIndex >= 0 ? PUNCH_STEPS[currentIndex + 1] ?? null : PUNCH_STEPS[0];
 }
 
-function getCurrentStatus(punches: TimeClockPunch[]) {
-  const lastPunch = punches.at(-1);
-  if (!lastPunch) {
-    return {
-      label: "Aguardando entrada",
-      detail: "Registre sua entrada para iniciar a jornada.",
-      variant: "neutral" as const,
-    };
-  }
-
-  const time = formatPunchTime(lastPunch.punched_at);
-  if (lastPunch.kind === "entrada" || lastPunch.kind === "volta_almoco") {
-    return {
-      label: `Trabalhando desde ${time}`,
-      detail: lastPunch.kind === "entrada" ? "Período da manhã em andamento." : "Período da tarde em andamento.",
-      variant: "success" as const,
-    };
-  }
-
-  if (lastPunch.kind === "saida_almoco") {
-    return {
-      label: `Em intervalo desde ${time}`,
-      detail: "Aguardando o registro da volta do almoço.",
-      variant: "warning" as const,
-    };
-  }
-
-  return {
-    label: `Jornada concluída às ${time}`,
-    detail: "Todos os registros previstos para hoje foram concluídos.",
-    variant: "info" as const,
-  };
-}
-
 type HistoryDay = {
   dateKey: string;
   punches: Partial<Record<PunchKind, TimeClockPunch>>;
@@ -566,7 +532,6 @@ export default function TimeClock() {
 
   const punches = punchesQuery.data ?? [];
   const nextStep = getNextStep(punches);
-  const currentStatus = getCurrentStatus(punches);
 
   const historyQuery = useQuery({
     queryKey: ["time-clock-history", organizationId, user?.id, todayKey, historyMonth],
@@ -1067,19 +1032,7 @@ export default function TimeClock() {
           }
         />
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
-          <MetricCard
-            label="Status atual"
-            value={loading ? <Skeleton className="h-7 w-36" /> : currentStatus.label}
-            icon={Clock3}
-            tone={currentStatus.variant === "success" ? "success" : currentStatus.variant === "warning" ? "warning" : "neutral"}
-          />
-          <MetricCard
-            label="Registros de hoje"
-            value={loading ? <Skeleton className="h-7 w-16" /> : `${punches.length}/4`}
-            icon={CheckCircle2}
-            tone={punches.length === 4 ? "success" : "brand"}
-          />
+        <div className="mt-6 grid gap-4 sm:max-w-sm">
           <MetricCard
             label="Banco de horas acumulado"
             value={
