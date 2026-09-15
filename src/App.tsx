@@ -27,6 +27,7 @@ import Programacao from "./pages/Programacao";
 import Relatorios from "./pages/Relatorios";
 import Producao from "./pages/Producao";
 import Tasks from "./pages/Tasks";
+import WhatsApp from "./pages/WhatsApp";
 import TimeClock from "./pages/TimeClock";
 import TeamCollaborators from "./pages/TeamCollaborators";
 import DashboardFinanceiro from "./pages/financeiro/Dashboard";
@@ -207,6 +208,7 @@ const App = () => (
                     para /tasks devolve a visão geral sem resíduo. */}
                 <Route path="/tasks/cliente/:boardClientId" element={<Tasks />} />
                 <Route path="/tasks/interno" element={<Tasks />} />
+                <Route path="/whatsapp" element={<WhatsApp />} />
                 <Route path="/producao" element={<Producao />} />
                 <Route path="/ponto" element={<TimeClock />} />
                 <Route path="/calendario" element={<Calendario />} />

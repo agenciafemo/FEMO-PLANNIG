@@ -22,6 +22,7 @@ import {
 import { PROGRAMACAO_ENABLED, RELATORIOS_ENABLED, REUNIOES_ENABLED } from "@/lib/featureFlags";
 import { MetaReconnectAlert } from "@/components/client/MetaReconnectAlert";
 import { ClientAttentionAlert } from "@/components/client/ClientAttentionAlert";
+import { WhatsAppForaDoHorarioCard } from "@/components/whatsapp/WhatsAppForaDoHorarioCard";
 
 // Saudação pelo horário — sem depender de nenhum dado do usuário.
 function greeting(): string {
@@ -135,6 +136,9 @@ export default function Dashboard() {
 
         {/* Clientes que chegaram ao dia 15 sem conteúdo planejado */}
         <ClientAttentionAlert />
+
+        {/* Resumo do WhatsApp que chegou fora do horário (só aparece se houver) */}
+        <WhatsAppForaDoHorarioCard />
 
         {/* Módulo em destaque */}
         <Link to="/plannings" className="group block">

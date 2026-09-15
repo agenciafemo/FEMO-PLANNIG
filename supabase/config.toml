@@ -145,3 +145,13 @@ verify_jwt = false
 
 [functions.google-ads]
 verify_jwt = true
+
+# WhatsApp (Cloud API). Pública: a Meta chama sem JWT do app. A defesa é a
+# assinatura X-Hub-Signature-256 (App Secret) no POST e o verify token no GET.
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+# Chamada pelo pg_cron (X-Internal-Secret, sem usuário) OU pelo botão "Gerar
+# resumo agora" (JWT validado dentro da função, exige papel de edição).
+[functions.whatsapp-resumo]
+verify_jwt = false

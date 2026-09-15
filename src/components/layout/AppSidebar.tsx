@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { LayoutGrid, LogOut, Shield, Bell, ListTodo, MessageSquareHeart, Clock3, CalendarDays, Video, Wallet } from "lucide-react";
+import { LayoutGrid, LogOut, Shield, Bell, ListTodo, MessageCircle, MessageSquareHeart, Clock3, CalendarDays, Video, Wallet } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { useOrganization } from "@/hooks/useOrganization";
@@ -21,6 +21,7 @@ import { toast } from "sonner";
 const navItems = [
   { to: "/dashboard", icon: LayoutGrid, label: "Dashboard" },
   { to: "/tasks", icon: ListTodo, label: "Tarefas" },
+  { to: "/whatsapp", icon: MessageCircle, label: "WhatsApp" },
   { to: "/ponto", icon: Clock3, label: "Ponto" },
   { to: "/calendario", icon: CalendarDays, label: "Calendário" },
   ...(REUNIOES_ENABLED ? [{ to: "/reunioes", icon: Video, label: "Reuniões" }] : []),
