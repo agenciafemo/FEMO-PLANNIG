@@ -93,52 +93,48 @@ const responseSchema = {
   required: ["resumo", "decisoes", "itens_acao"],
 };
 
+// SEM maxItems e SEM enum, de propósito. Cada restrição do schema multiplica os
+// estados que o Gemini precisa montar para garantir a resposta; com listas
+// dentro de listas (12 tópicos × 8 pontos × 10 participantes) mais o enum de
+// formatos, o pedido passa a ser recusado com 400 antes de gerar qualquer
+// texto — e a análise detalhada falhava em silêncio no "Gerar ata" (é
+// best-effort lá) e com "A IA não respondeu" no botão "Me dê mais detalhes".
+// Os limites continuam valendo: `validateDetails` corta as quantidades e
+// normaliza o formato para a lista FORMATOS.
 const detailsResponseSchema = {
   type: "OBJECT",
   properties: {
     panorama: { type: "STRING" },
     topicos: {
       type: "ARRAY",
-      maxItems: 12,
       items: {
         type: "OBJECT",
         properties: {
           titulo: { type: "STRING" },
           contexto: { type: "STRING" },
-          pontos_chave: {
-            type: "ARRAY",
-            items: { type: "STRING" },
-            maxItems: 8,
-          },
-          participantes_citados: {
-            type: "ARRAY",
-            items: { type: "STRING" },
-            maxItems: 10,
-          },
+          pontos_chave: { type: "ARRAY", items: { type: "STRING" } },
+          participantes_citados: { type: "ARRAY", items: { type: "STRING" } },
         },
         required: ["titulo", "contexto", "pontos_chave", "participantes_citados"],
       },
     },
-    divergencias: { type: "ARRAY", items: { type: "STRING" }, maxItems: 10 },
-    questoes_em_aberto: { type: "ARRAY", items: { type: "STRING" }, maxItems: 15 },
+    divergencias: { type: "ARRAY", items: { type: "STRING" } },
+    questoes_em_aberto: { type: "ARRAY", items: { type: "STRING" } },
     sugestoes_conteudo: {
       type: "ARRAY",
-      maxItems: 8,
       items: {
         type: "OBJECT",
         properties: {
           titulo: { type: "STRING" },
-          formato: {
-            type: "STRING",
-            enum: ["reels", "carrossel", "estatico", "story", "blog"],
-          },
+          // Um de: reels, carrossel, estatico, story, blog (validado depois).
+          formato: { type: "STRING" },
           angulo: { type: "STRING" },
           origem: { type: "STRING" },
         },
         required: ["titulo", "formato", "angulo", "origem"],
       },
     },
-    limitacoes: { type: "ARRAY", items: { type: "STRING" }, maxItems: 10 },
+    limitacoes: { type: "ARRAY", items: { type: "STRING" } },
   },
   required: [
     "panorama",
@@ -320,6 +316,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * O que o Gemini respondeu quando recusou: status HTTP, status do erro
+ * (INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE...) e a frase dele.
+ *
+ * Antes a tela dizia só "A IA não respondeu" para quatro causas com consertos
+ * diferentes — schema recusado, cota esgotada, modelo fora do ar, chave
+ * inválida — e não havia como saber qual sem abrir o log.
+ */
+async function geminiFailureDetail(response: Response): Promise<string> {
+  const payload = await response.json().catch(() => null) as
+    | { error?: { status?: unknown; message?: unknown } }
+    | null;
+  const status = typeof payload?.error?.status === "string" ? payload.error.status : "";
+  const message = typeof payload?.error?.message === "string"
+    ? payload.error.message.replace(/\s+/g, " ").trim().slice(0, 180)
+    : "";
+  return [`Gemini respondeu ${response.status}`, status, message].filter(Boolean).join(" — ");
+}
+
 interface GeminiAnalysisRequest {
   operation: GenerationMode;
   systemInstruction: string;
@@ -384,6 +399,7 @@ async function askGemini(transcript: string, request: GeminiAnalysisRequest): Pr
   // Erros permanentes (400/401/403) encerram imediatamente, pois outro modelo
   // não corrige chave, restrição ou payload inválido.
   let lastStatus = 0;
+  let lastDetail = "";
   for (const [modelIndex, model] of GEMINI_MODELS.entries()) {
     const url = `${GEMINI_BASE_URL}/${model}:generateContent`;
     for (let attempt = 1; attempt <= ATTEMPTS_PER_MODEL; attempt++) {
@@ -410,6 +426,18 @@ async function askGemini(transcript: string, request: GeminiAnalysisRequest): Pr
       });
       if (response.ok) {
         const payload = await response.json().catch(() => ({}));
+        // Resposta cortada no limite de tamanho chega com texto pela metade:
+        // sem esta checagem virava "formato inesperado", que manda procurar
+        // defeito no lugar errado. Nos modelos 2.5, o "raciocínio" também
+        // consome o maxOutputTokens.
+        if (payload?.candidates?.[0]?.finishReason === "MAX_TOKENS") {
+          throw new HttpError(
+            502,
+            "gemini_output_truncated",
+            undefined,
+            "A resposta passou do limite de tamanho da IA.",
+          );
+        }
         const text = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
         if (typeof text !== "string" || !text.trim()) {
           throw new HttpError(502, "gemini_empty_response");
@@ -422,16 +450,18 @@ async function askGemini(transcript: string, request: GeminiAnalysisRequest): Pr
       }
 
       lastStatus = response.status;
+      lastDetail = await geminiFailureDetail(response);
       console.warn(JSON.stringify({
         event: "meeting_summary_gemini_retry",
         operation: request.operation,
         model,
         attempt,
         status: response.status,
+        detail: lastDetail,
       }));
 
       if (!RETRYABLE_STATUSES.has(response.status)) {
-        throw new HttpError(502, "gemini_request_failed", response.status);
+        throw new HttpError(502, "gemini_request_failed", response.status, lastDetail);
       }
       const hasAnotherAttempt = attempt < ATTEMPTS_PER_MODEL;
       const hasAnotherModel = modelIndex < GEMINI_MODELS.length - 1;
@@ -442,7 +472,12 @@ async function askGemini(transcript: string, request: GeminiAnalysisRequest): Pr
       }
     }
   }
-  throw new HttpError(502, "gemini_request_failed", lastStatus || undefined);
+  throw new HttpError(
+    502,
+    "gemini_request_failed",
+    lastStatus || undefined,
+    lastDetail || undefined,
+  );
 }
 
 Deno.serve(async (request) => {
@@ -536,7 +571,9 @@ Deno.serve(async (request) => {
         operation: "details",
         systemInstruction: DETAILS_INSTRUCTION,
         schema: detailsResponseSchema,
-        maxOutputTokens: 7_000,
+        // 12k: análise de reunião longa + "raciocínio" dos modelos 2.5, que
+        // também consome este limite. Com 7k a resposta vinha cortada.
+        maxOutputTokens: 12_000,
         fichaDoCliente,
       });
       const details = validateDetails(raw);
@@ -611,7 +648,9 @@ Deno.serve(async (request) => {
         operation: "details",
         systemInstruction: DETAILS_INSTRUCTION,
         schema: detailsResponseSchema,
-        maxOutputTokens: 7_000,
+        // 12k: análise de reunião longa + "raciocínio" dos modelos 2.5, que
+        // também consome este limite. Com 7k a resposta vinha cortada.
+        maxOutputTokens: 12_000,
         fichaDoCliente,
       });
       details = validateDetails(rawDetails);

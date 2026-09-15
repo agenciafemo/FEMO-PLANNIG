@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import { edgeReasonCode, invokeEdge } from "@/lib/edgeInvoke";
+import { edgeDetail, edgeReasonCode, invokeEdge } from "@/lib/edgeInvoke";
 import {
   parseMeetingDetailedSummary,
   type MeetingDetailedSummary,
@@ -229,6 +229,7 @@ export async function stopMeetingRecording(
 const MOTIVO_ATA: Record<string, string> = {
   gemini_request_failed: "A IA não respondeu.",
   gemini_empty_response: "A IA respondeu vazio.",
+  gemini_output_truncated: "A resposta da IA passou do limite de tamanho. Tente de novo.",
   gemini_invalid_json: "A IA respondeu num formato inesperado.",
   gemini_invalid_response: "A IA respondeu num formato inesperado.",
   missing_transcript: "Esta reunião não tem transcrição para resumir.",
@@ -259,10 +260,21 @@ export async function generateMeetingMinutes(meetingId: string): Promise<void> {
   });
   if (!error) return;
 
+  throw await erroDaAta(error, "Não foi possível gerar a ata.");
+}
+
+/**
+ * Frase + código + o que a IA respondeu (quando a função mandou `detail`).
+ *
+ * O `detail` é o que separa "schema recusado" de "cota esgotada" ou "modelo
+ * fora do ar" — sem ele, "A IA não respondeu" não dizia o que fazer.
+ */
+async function erroDaAta(error: { message: string }, padrao: string): Promise<Error> {
   const code = await edgeReasonCode(error);
-  if (!code) throw new Error(error.message);
-  const frase = MOTIVO_ATA[code] ?? "Não foi possível gerar a ata.";
-  throw new Error(`${frase} (${code})`);
+  if (!code) return new Error(error.message);
+  const frase = MOTIVO_ATA[code] ?? padrao;
+  const detalhe = await edgeDetail(error);
+  return new Error(detalhe ? `${frase} (${code}: ${detalhe})` : `${frase} (${code})`);
 }
 
 /** Gera uma leitura aprofundada sem alterar a ata, decisões ou itens de ação. */
@@ -272,10 +284,7 @@ export async function generateMeetingDetails(meetingId: string): Promise<void> {
   });
   if (!error) return;
 
-  const code = await edgeReasonCode(error);
-  if (!code) throw new Error(error.message);
-  const frase = MOTIVO_ATA[code] ?? "Não foi possível gerar a análise detalhada.";
-  throw new Error(`${frase} (${code})`);
+  throw await erroDaAta(error, "Não foi possível gerar a análise detalhada.");
 }
 
 /**
