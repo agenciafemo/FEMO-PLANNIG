@@ -73,6 +73,26 @@ export class GoogleBusinessFunctionError extends Error {
 }
 
 /**
+ * A conexão da agência precisa ser refeita?
+ *
+ * Qualquer falha ao RENOVAR o token faz o servidor marcar a conexão como
+ * `reauth_required` (activeGoogleBusinessCredentials) — não só o
+ * `invalid_grant`. Por isso `token_failed` e `token_refresh_failed` também
+ * entram: sem eles o seletor ficava aberto na primeira falha e a pessoa só
+ * descobria no segundo clique, que já volta 409 "não conectada".
+ */
+export function googleBusinessRequiresReconnect(error: unknown): boolean {
+  if (!(error instanceof GoogleBusinessFunctionError)) return false;
+  return [
+    "google_business_reauthorization_required",
+    "google_business_refresh_token_missing",
+    "google_business_token_failed",
+    "google_business_token_refresh_failed",
+    "google_business_not_connected",
+  ].includes(error.reasonCode);
+}
+
+/**
  * Por que a consulta de status falhou.
  *
  * A tela mostrava "a integração precisa da migration e das Edge Functions"
@@ -262,12 +282,20 @@ export function googleBusinessErrorMessage(reasonCode: string): string {
     session_expired: "Sua sessão expirou. Entre novamente para continuar.",
     google_business_management_forbidden:
       "Somente ADM ou Head pode gerenciar a conexão do Google.",
+    // O mesmo 409 vale para "nunca conectou" e para "a autorização caiu na
+    // tentativa anterior" — a frase precisa servir aos dois casos.
     google_business_not_connected:
-      "Conecte a conta Google da agência antes de escolher uma unidade.",
+      "A conta Google da agência não está conectada ou a autorização expirou. Conecte (ou reconecte) a conta da agência.",
+    google_business_token_failed:
+      "O Google recusou renovar o acesso da agência. Reconecte a conta Google.",
+    google_business_token_refresh_failed:
+      "Não foi possível renovar o acesso do Google. Reconecte a conta da agência.",
     google_business_oauth_denied_by_user:
       "A conexão foi cancelada na tela do Google.",
     google_business_refresh_token_missing:
       "O Google não forneceu acesso permanente. Reconecte e aceite as permissões.",
+    google_business_reauthorization_required:
+      "A autorização do Google expirou ou foi revogada. Reconecte a conta da agência.",
     google_business_permission_denied:
       "A conta Google não tem acesso ao Perfil da Empresa ou a API necessária não está ativada.",
     google_business_location_already_linked:

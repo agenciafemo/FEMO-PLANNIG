@@ -24,6 +24,7 @@ import {
   googleBusinessErrorMessage,
   googleBusinessStatusMessage,
   GoogleBusinessFunctionError,
+  googleBusinessRequiresReconnect,
   listGoogleBusinessLocations,
   selectGoogleBusinessLocation,
   startGoogleBusinessOAuth,
@@ -97,6 +98,29 @@ export function GoogleBusinessConnection({ clientId }: { clientId: string }) {
     enabled: locationsOpen && !!organizationId,
     retry: false,
   });
+
+  useEffect(() => {
+    if (!locationsQuery.isError || !googleBusinessRequiresReconnect(locationsQuery.error)) {
+      return;
+    }
+
+    // Quando o Google revoga ou deixa o refresh token expirar, a primeira
+    // tentativa já muda a conexão para reauth_required no servidor. Manter o
+    // seletor aberto induz a pessoa a tentar novamente e receber apenas 409.
+    setLocationsOpen(false);
+    toast.error(friendlyError(locationsQuery.error), {
+      id: "google-business-reauth-required",
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["google-business-status", organizationId, clientId],
+    });
+  }, [
+    clientId,
+    locationsQuery.error,
+    locationsQuery.isError,
+    organizationId,
+    queryClient,
+  ]);
 
   const selectLocation = useMutation({
     mutationFn: (location: GoogleBusinessLocation) =>
@@ -245,10 +269,13 @@ export function GoogleBusinessConnection({ clientId }: { clientId: string }) {
       </div>
 
       <Dialog open={locationsOpen} onOpenChange={setLocationsOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent
+          className="max-w-lg"
+          aria-describedby="google-business-location-description"
+        >
           <DialogHeader>
             <DialogTitle>Escolher unidade do Google</DialogTitle>
-            <DialogDescription>
+            <DialogDescription id="google-business-location-description">
               Selecione o Perfil da Empresa que pertence a este cliente. Uma
               unidade não pode ser vinculada a dois clientes.
             </DialogDescription>

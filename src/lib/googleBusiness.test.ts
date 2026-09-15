@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  GoogleBusinessFunctionError,
   GoogleBusinessStatusError,
+  googleBusinessErrorMessage,
+  googleBusinessRequiresReconnect,
   googleBusinessStatusMessage,
 } from "./googleBusiness";
 
@@ -59,5 +62,35 @@ describe("googleBusinessStatusMessage", () => {
     // tela de aviso por uma tela branca.
     expect(() => googleBusinessStatusMessage(undefined)).not.toThrow();
     expect(googleBusinessStatusMessage(undefined).codigo).toBeNull();
+  });
+});
+
+describe("falhas da conexão do Google Business", () => {
+  it.each([
+    "google_business_reauthorization_required",
+    "google_business_refresh_token_missing",
+    // Qualquer falha de renovação já deixa a conexão em reauth_required no
+    // servidor — a tela precisa concordar logo na primeira tentativa.
+    "google_business_token_failed",
+    "google_business_token_refresh_failed",
+    "google_business_not_connected",
+  ])("manda reconectar quando o motivo é %s", (reasonCode) => {
+    expect(
+      googleBusinessRequiresReconnect(new GoogleBusinessFunctionError(reasonCode)),
+    ).toBe(true);
+  });
+
+  it("não transforma uma falha de permissão em reconexão", () => {
+    expect(
+      googleBusinessRequiresReconnect(
+        new GoogleBusinessFunctionError("google_business_permission_denied"),
+      ),
+    ).toBe(false);
+  });
+
+  it("explica quando a autorização do Google expirou", () => {
+    expect(
+      googleBusinessErrorMessage("google_business_reauthorization_required"),
+    ).toMatch(/expirou|revogada/i);
   });
 });
