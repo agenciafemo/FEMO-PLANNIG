@@ -92,8 +92,8 @@ export function ClientAttentionAlert() {
               : `${pendentes.length} clientes estão sem conteúdo planejado este mês`}
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Já passou do dia {DIA_LIMITE}. Quem só faz tráfego pago não entra aqui —
-            marque isso na ficha do cliente.
+            Já passou do dia {DIA_LIMITE}. Para tirar alguém daqui — só tráfego pago, ou a
+            própria agência — marque "Não cobrar planejamento" na ficha do cliente.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             {pendentes.map(({ client, motivo }) => (

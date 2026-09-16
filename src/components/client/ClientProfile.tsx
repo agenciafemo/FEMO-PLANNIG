@@ -301,10 +301,11 @@ export function ClientProfile({
                 </div>
                 <div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-muted/30 p-3">
                   <div className="min-w-0">
-                    <Label htmlFor="traffic-only" className="text-sm font-medium">Só tráfego pago</Label>
+                    <Label htmlFor="traffic-only" className="text-sm font-medium">Não cobrar planejamento</Label>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Este cliente não tem planejamento de conteúdo. Marcando, ele fica de fora
-                      do alerta de clientes sem planejamento no Dashboard.
+                      Para quem só faz tráfego pago e para a própria agência: o cliente sai do
+                      alerta de "sem conteúdo planejado" e da lista de pendências dos
+                      Planejamentos. Ele continua igual no resto do app.
                     </p>
                   </div>
                   <Switch
