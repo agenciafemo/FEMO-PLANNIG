@@ -853,6 +853,20 @@ export default function TimeClock() {
     return pares.filter((par) => !jaEnviados.has(new Date(par.leftAt).getTime()));
   }, [punches, myIntervalsQuery.data]);
 
+  // Horários pedidos e ainda não respondidos, por dia e tipo de batida: a
+  // linha do histórico mostra o que foi solicitado, senão a pessoa manda o
+  // pedido e continua vendo o dia vazio, sem saber se foi.
+  const ajustePendentePara = useMemo(() => {
+    const mapa = new Map<string, TimeClockAdjustmentRequest>();
+    for (const pedido of myAdjustmentsQuery.data ?? []) {
+      if (pedido.status !== "pending") continue;
+      const chave = `${agencyDateKey(new Date(pedido.requested_punched_at))}|${pedido.kind}`;
+      // Se houver mais de um para a mesma batida, o mais recente manda.
+      mapa.set(chave, pedido);
+    }
+    return (dateKey: string, kind: PunchKind) => mapa.get(`${dateKey}|${kind}`);
+  }, [myAdjustmentsQuery.data]);
+
   const notaPorDia = useMemo(() => {
     const mapa = new Map<string, TimeClockDayNote>();
     for (const nota of myDayNotesQuery.data ?? []) mapa.set(nota.work_date, nota);
@@ -1946,7 +1960,7 @@ export default function TimeClock() {
               }
             />
           ) : (
-            <div className="mt-4 overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-border/70 bg-card shadow-sm">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/35 hover:bg-muted/35">
@@ -1957,8 +1971,7 @@ export default function TimeClock() {
                     <TableHead className="text-center">Saída</TableHead>
                     <TableHead className="min-w-28">Total</TableHead>
                     <TableHead className="min-w-28">Saldo</TableHead>
-                    <TableHead className="min-w-56">Situação</TableHead>
-                    <TableHead className="min-w-56">Horário e observação</TableHead>
+                    <TableHead className="min-w-48">Situação</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1975,14 +1988,54 @@ export default function TimeClock() {
                         day.dateKey === todayKey && "bg-brand-soft/30",
                       )}
                     >
-                      <TableCell className={cn("font-medium capitalize", semRegistro && "text-muted-foreground")}>
-                        {formatHistoryDate(day.dateKey)}
+                      {/* O botão fica colado no dia: primeira coluna, sempre
+                          visível, sem como errar a data. Na última coluna ele
+                          exigia rolagem lateral e aparecia cortado. */}
+                      <TableCell className={cn("align-top font-medium capitalize", semRegistro && "text-muted-foreground")}>
+                        <div className="flex flex-col items-start gap-1">
+                          <span>{formatHistoryDate(day.dateKey)}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-1.5 text-[11px] font-normal normal-case text-muted-foreground hover:text-foreground"
+                            onClick={() => {
+                              setNotaData(day.dateKey);
+                              setNotaTexto(nota?.note ?? "");
+                              setAdjustmentDate(day.dateKey);
+                              setAdjustmentReason("");
+                            }}
+                          >
+                            <Pencil className="mr-1 h-3 w-3" /> Editar hora
+                          </Button>
+                          {nota && (
+                            <span className="line-clamp-2 text-[11px] font-normal normal-case text-muted-foreground">
+                              {nota.note}
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
-                      {PUNCH_STEPS.map((step) => (
-                        <TableCell key={step.kind} className="text-center font-medium tabular-nums">
-                          {day.punches[step.kind] ? formatPunchTime(day.punches[step.kind]!.punched_at) : "—"}
-                        </TableCell>
-                      ))}
+                      {PUNCH_STEPS.map((step) => {
+                        const batida = day.punches[step.kind];
+                        const pedido = batida ? undefined : ajustePendentePara(day.dateKey, step.kind);
+                        return (
+                          <TableCell key={step.kind} className="text-center font-medium tabular-nums">
+                            {batida ? (
+                              formatPunchTime(batida.punched_at)
+                            ) : pedido ? (
+                              // O horário pedido aparece aqui na hora: antes a
+                              // pessoa mandava e a linha continuava vazia, sem
+                              // sinal de que a solicitação tinha saído.
+                              <span className="text-warning" title="Aguardando a ADM aprovar">
+                                {formatPunchTime(pedido.requested_punched_at)}
+                                <span className="ml-1 text-[10px] font-normal">em análise</span>
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                        );
+                      })}
                       <TableCell>
                         <span className="font-semibold tabular-nums">{formatWorkedDuration(day.totalSeconds)}</span>
                         {day.partial && day.totalSeconds > 0 && (
@@ -2005,13 +2058,6 @@ export default function TimeClock() {
                               >
                                 {formatBalance(balance)}
                               </span>
-                              {/* Sem isto o saldo "não bate" com as batidas e
-                                  parece erro de conta. */}
-                              {day.toleranciaSeconds > 0 && (
-                                <span className="ml-1 text-[10px] text-muted-foreground">
-                                  inclui {Math.round(day.toleranciaSeconds / 60)} min de tolerância
-                                </span>
-                              )}
                             </>
                           );
                         })()}
@@ -2036,6 +2082,14 @@ export default function TimeClock() {
                             ))}
                           </div>
                         )}
+                        {/* Confirmação visível de que o pedido saiu. */}
+                        {PUNCH_STEPS.some(
+                          (step) => !day.punches[step.kind] && ajustePendentePara(day.dateKey, step.kind),
+                        ) && (
+                          <p className="mt-1 text-[11px] text-warning">
+                            Horário enviado — aguardando a ADM
+                          </p>
+                        )}
                         {/* O que a ADM respondeu (ou ainda não) sobre o tempo fora. */}
                         {pedidosDoDia.map((pedido) => (
                           <p key={pedido.id} className="mt-1 text-[11px] text-muted-foreground">
@@ -2047,31 +2101,6 @@ export default function TimeClock() {
                                 : "recusado"}
                           </p>
                         ))}
-                      </TableCell>
-                      <TableCell>
-                        {/* Um lugar só por dia: o horário já nasce com a data
-                            certa, sem redigitar no formulário do topo. */}
-                        <div className="flex items-start gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 shrink-0 px-2 text-xs"
-                            onClick={() => {
-                              setNotaData(day.dateKey);
-                              setNotaTexto(nota?.note ?? "");
-                              setAdjustmentDate(day.dateKey);
-                              setAdjustmentReason("");
-                            }}
-                          >
-                            <Pencil className="mr-1 h-3 w-3" /> Editar hora
-                          </Button>
-                          {nota && (
-                            <span className="min-w-0 flex-1 text-xs text-muted-foreground">
-                              {nota.note}
-                            </span>
-                          )}
-                        </div>
                       </TableCell>
                     </TableRow>
                     );
