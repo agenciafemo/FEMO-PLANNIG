@@ -13,6 +13,7 @@ import {
   revisionReasonsFor,
   commentTagLabels,
 } from "@/lib/publicRpc";
+import { chaveRascunho, usePortalDraft } from "@/lib/portalDraft";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PUBLIC_AUDIO_ENABLED } from "@/lib/featureFlags";
@@ -33,7 +34,9 @@ interface PublicPostViewProps {
 
 export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
   const queryClient = useQueryClient();
-  const [commentText, setCommentText] = useState("");
+  // Guardado no aparelho até o envio dar certo: voltar para a lista ou
+  // recarregar a página não apaga o que o cliente escreveu.
+  const [commentText, setCommentText] = usePortalDraft(chaveRascunho("comentario", postId));
   const [commentTags, setCommentTags] = useState<string[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -82,26 +85,39 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
     onSuccess: (_, status) => {
       queryClient.invalidateQueries({ queryKey: ["public-post", postId] });
       queryClient.invalidateQueries({ queryKey: ["public-posts"] });
-      toast.success(status === "approved" ? "Post aprovado!" : "Post marcado para revisão!");
+      setCancelRevOpen(false);
+      // Voltar para "pendente" dizia "marcado para revisão" — o contrário do
+      // que tinha acontecido.
+      toast.success(status === "approved" ? "Post aprovado!" : "Post voltou para pendente.");
     },
-    onError: () => toast.error("Erro ao atualizar status"),
+    onError: (error: Error) =>
+      toast.error(`Erro ao atualizar status: ${error.message || "tente novamente"}`),
   });
 
   // Pedido de correção: o cliente diz ONDE está o erro e isso devolve o
   // trabalho para a pessoa responsável no quadro de produção.
   const [revOpen, setRevOpen] = useState(false);
+  const [cancelRevOpen, setCancelRevOpen] = useState(false);
   const [revReasons, setRevReasons] = useState<string[]>([]);
-  const [revNote, setRevNote] = useState("");
+  // Fechar o diálogo sem enviar não pode apagar a explicação.
+  const [revNote, setRevNote] = usePortalDraft(chaveRascunho("correcao", postId));
+  const podeEnviarCorrecao = revReasons.length > 0 || revNote.trim().length > 0;
 
   const requestRevision = useMutation({
     mutationFn: () => requestPostRevision(clientToken, postId, revReasons, revNote),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["public-post", postId] });
       queryClient.invalidateQueries({ queryKey: ["public-posts"] });
+      // O servidor grava a correção também como comentário.
+      queryClient.invalidateQueries({ queryKey: ["post-comments", postId] });
+      if (commentText.trim() && commentText.trim() === revNote.trim()) setCommentText("");
+      setRevNote("");
+      setRevReasons([]);
       setRevOpen(false);
-      toast.success("Correção enviada para a equipe!");
+      toast.success("Correção enviada! A equipe foi avisada e ela aparece nos comentários.");
     },
-    onError: () => toast.error("Não foi possível enviar a correção"),
+    onError: (error: Error) =>
+      toast.error(`Não foi possível enviar a correção: ${error.message || "tente novamente"}. Seu texto continua guardado.`),
   });
 
   const addComment = useMutation({
@@ -114,9 +130,9 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
       setCommentText(""); setCommentTags([]); setAudioBlob(null); setAudioUrl(null); setSendingAudio(false);
       toast.success("Comentário enviado!");
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       setSendingAudio(false);
-      toast.error(`Erro ao enviar: ${error.message || "Tente novamente"}`);
+      toast.error(`Comentário NÃO enviado: ${error.message || "tente novamente"}. Seu texto continua guardado.`, { duration: 10000 });
     },
   });
 
@@ -241,9 +257,10 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
           variant={post.status === "needs_revision" ? "default" : "outline"}
           onClick={() => {
             if (post.status === "needs_revision") {
-              updatePostStatus.mutate("pending");
+              // Um toque só desfazia o pedido de correção sem aviso.
+              setCancelRevOpen(true);
             } else {
-              setRevReasons([]); setRevNote(""); setRevOpen(true);
+              setRevReasons([]); setRevOpen(true);
             }
           }}
           disabled={updatePostStatus.isPending}
@@ -294,16 +311,40 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
                 placeholder="Ex.: trocar a cor do fundo do segundo slide"
               />
             </div>
+            {!podeEnviarCorrecao && (
+              <p className="text-xs text-muted-foreground">
+                Marque onde está o problema ou escreva a explicação para enviar.
+              </p>
+            )}
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setRevOpen(false)}>Cancelar</Button>
+              <Button variant="ghost" onClick={() => setRevOpen(false)}>Fechar</Button>
               <Button
-                disabled={revReasons.length === 0 || requestRevision.isPending}
+                disabled={!podeEnviarCorrecao || requestRevision.isPending}
                 onClick={() => requestRevision.mutate()}
                 style={{ backgroundColor: "#dc2626", color: "white" }}
               >
-                Enviar correção
+                {requestRevision.isPending ? "Enviando..." : "Enviar correção"}
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cancelRevOpen} onOpenChange={setCancelRevOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Cancelar o pedido de correção?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            O post volta para pendente. Seus comentários continuam salvos.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setCancelRevOpen(false)}>Manter em revisão</Button>
+            <Button
+              variant="outline"
+              disabled={updatePostStatus.isPending}
+              onClick={() => updatePostStatus.mutate("pending")}
+            >
+              Cancelar pedido
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -573,12 +614,35 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
 
           {/* Text comment */}
           <div className="space-y-2">
-            <div className="flex gap-2">
-              <Textarea value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Escreva um comentário..." rows={1} className="flex-1" disabled={addComment.isPending} />
-              <Button size="icon" disabled={!commentText.trim() || addComment.isPending} onClick={() => addComment.mutate({ text: commentText, reasonCodes: commentTags })} title={addComment.isPending ? "Enviando..." : "Enviar"}>
-                {addComment.isPending ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> : <Send className="h-4 w-4" />}
+            <div className="flex items-end gap-2">
+              <Textarea
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && commentText.trim() && !addComment.isPending) {
+                    e.preventDefault();
+                    addComment.mutate({ text: commentText, reasonCodes: commentTags });
+                  }
+                }}
+                placeholder="Escreva um comentário..."
+                rows={2}
+                className="flex-1"
+                disabled={addComment.isPending}
+              />
+              {/* Só o ícone passava despercebido no celular: o cliente escrevia
+                  e saía achando que tinha salvo. */}
+              <Button disabled={!commentText.trim() || addComment.isPending} onClick={() => addComment.mutate({ text: commentText, reasonCodes: commentTags })}>
+                {addComment.isPending
+                  ? <div className="mr-1.5 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  : <Send className="mr-1.5 h-4 w-4" />}
+                {addComment.isPending ? "Enviando..." : "Enviar"}
               </Button>
             </div>
+            {commentText.trim() && !addComment.isPending && (
+              <p className="text-[11px] font-medium text-amber-600">
+                Ainda não enviado — toque em Enviar para a equipe receber. O texto fica guardado neste aparelho.
+              </p>
+            )}
 
             {/* Tags: dizem A QUE o comentário se refere, para a equipe achar
                 rápido o que corrigir. Opcional. */}
@@ -610,7 +674,7 @@ export function PublicPostView({ postId, clientToken }: PublicPostViewProps) {
           {post.status !== "needs_revision" && (
             <button
               type="button"
-              onClick={() => { setRevReasons([]); setRevNote(commentText); setRevOpen(true); }}
+              onClick={() => { setRevReasons([]); if (!revNote.trim()) setRevNote(commentText); setRevOpen(true); }}
               className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-red-500/40 px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-500/10"
             >
               <XCircle className="h-3.5 w-3.5" />

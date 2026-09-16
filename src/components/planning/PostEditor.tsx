@@ -985,6 +985,31 @@ export function PostEditor({ postId, planningId, clientId, onClose, clientNotes 
             )}
           </div>
 
+          {/* O que o cliente escreveu ao pedir correção ficava só em
+              posts.revision_note, que nenhuma tela mostrava: a equipe via o
+              post em revisão "sem nada explicando" e o cliente achava que não
+              tinha salvado. */}
+          {post?.status === "needs_revision" &&
+            ((post.revision_reasons?.length ?? 0) > 0 || post.revision_note) && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                Cliente pediu correção
+              </p>
+              {commentTagLabels({ reason_codes: post.revision_reasons }).length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {commentTagLabels({ reason_codes: post.revision_reasons }).map((label) => (
+                    <span key={label} className="rounded-full bg-background/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {post.revision_note && (
+                <p className="mt-2 text-sm italic text-foreground/90">“{post.revision_note}”</p>
+              )}
+            </div>
+          )}
+
           {/* Client Notes */}
           {clientNotes && (
             <div className="rounded-lg border border-primary/20 bg-accent p-4">
