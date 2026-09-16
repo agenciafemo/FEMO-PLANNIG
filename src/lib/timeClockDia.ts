@@ -118,6 +118,92 @@ export function contarDia<T extends BatidaSimples>(batidas: T[]): ContaDoDia<T> 
   return { totalSeconds, pares, intervalos, foraAgora: saidaIntervalo !== null };
 }
 
+/**
+ * Minutos de tolerância antes de marcar atraso ou saída antecipada.
+ *
+ * Sem isso, bater 08:31 já acendia "Atraso na entrada" — ninguém trabalha com
+ * o relógio no segundo, e o selo virava ruído que a equipe aprendia a ignorar.
+ * A conta das horas não muda: a tolerância é só sobre marcar ou não o dia.
+ */
+export const TOLERANCIA_MINUTOS = 5;
+
+/** Comparação por minuto cheio: 08:35:59 ainda é 08:35, e não é atraso. */
+function emMinutos(segundoDoDia: number): number {
+  return Math.floor(segundoDoDia / 60);
+}
+
+export function atrasou(
+  segundoDoDia: number,
+  referenciaSegundos: number,
+  toleranciaMinutos = TOLERANCIA_MINUTOS,
+): boolean {
+  return emMinutos(segundoDoDia) > emMinutos(referenciaSegundos) + toleranciaMinutos;
+}
+
+export function saiuAntes(
+  segundoDoDia: number,
+  referenciaSegundos: number,
+  toleranciaMinutos = TOLERANCIA_MINUTOS,
+): boolean {
+  return emMinutos(segundoDoDia) < emMinutos(referenciaSegundos) - toleranciaMinutos;
+}
+
+/**
+ * Teto de tolerância no dia inteiro. Espelha o art. 58 §1º da CLT: variações
+ * de até 5 minutos por batida são desconsideradas, limitadas a 10 minutos no
+ * dia. Passou de 5 numa batida, aquela batida conta inteira.
+ */
+export const TOLERANCIA_DIA_MINUTOS = 10;
+
+/**
+ * Horário esperado de cada batida e para que lado o desvio prejudica quem
+ * trabalha: chegar depois da entrada tira hora; sair antes do fim também.
+ */
+export const REFERENCIAS: Array<{
+  kind: PunchKind;
+  segundo: number;
+  prejudica: "depois" | "antes";
+}> = [
+  { kind: "entrada", segundo: 8 * 3600 + 30 * 60, prejudica: "depois" },
+  { kind: "saida_almoco", segundo: 12 * 3600, prejudica: "antes" },
+  { kind: "volta_almoco", segundo: 13 * 3600, prejudica: "depois" },
+  { kind: "saida", segundo: 17 * 3600 + 30 * 60, prejudica: "antes" },
+];
+
+/**
+ * Quantos segundos o dia ganha de volta pela tolerância.
+ *
+ * Só perdoa o que tira hora de quem trabalha (chegar um pouco depois, sair um
+ * pouco antes) — os minutinhos a mais continuam contando como extra, como já
+ * contavam. Sem isto, tolerar o atraso só no selo era meia solução: a pessoa
+ * não via "Atraso", mas perdia os minutos no banco de horas do mesmo jeito.
+ */
+export function toleranciaDoDia(
+  segundoPorBatida: Partial<Record<PunchKind, number>>,
+  toleranciaMinutos = TOLERANCIA_MINUTOS,
+  tetoMinutos = TOLERANCIA_DIA_MINUTOS,
+): number {
+  const limite = toleranciaMinutos * 60;
+  let perdoado = 0;
+
+  for (const referencia of REFERENCIAS) {
+    const segundo = segundoPorBatida[referencia.kind];
+    if (segundo === undefined) continue;
+
+    const desvio = referencia.prejudica === "depois"
+      ? segundo - referencia.segundo
+      : referencia.segundo - segundo;
+
+    // Desvio a favor de quem trabalha não é perdoado: já vira hora extra.
+    if (desvio <= 0) continue;
+    // Passou da tolerância: conta inteiro, nada é perdoado nesta batida.
+    if (desvio > limite) continue;
+    perdoado += desvio;
+  }
+
+  return Math.min(perdoado, tetoMinutos * 60);
+}
+
 /** Todas as datas de um mês "yyyy-MM", em ordem crescente. */
 export function diasDoMes(monthKey: string): string[] {
   if (!/^\d{4}-\d{2}$/.test(monthKey)) return [];

@@ -15,6 +15,7 @@ import {
   LogIn,
   LogOut,
   Paperclip,
+  Pencil,
   Plus,
   TimerReset,
   XCircle,
@@ -53,9 +54,13 @@ import { useOrganization } from "@/hooks/useOrganization";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import {
+  atrasou,
   contarDia,
   diasDoMes,
   estadoDoDia,
+  saiuAntes,
+  toleranciaDoDia,
+  TOLERANCIA_MINUTOS,
   type PunchKind,
 } from "@/lib/timeClockDia";
 
@@ -324,6 +329,8 @@ type HistoryDay = {
   totalSeconds: number;
   /** Tempo fora abonado por ADM/Head: volta a contar como trabalhado. */
   abonoSeconds: number;
+  /** Minutinhos perdoados pela tolerância (art. 58 §1º da CLT). */
+  toleranciaSeconds: number;
   partial: boolean;
   alerts: string[];
 };
@@ -355,11 +362,21 @@ function summarizeHistory(punches: TimeClockPunch[], todayKey: string): HistoryD
       const conta = contarDia(ordered);
       const { totalSeconds, pares: pairCount, intervalos } = conta;
 
+      // Marcações de horário respeitam 5 minutos de tolerância: 08:35 não é
+      // atraso, 08:36 é. A conta das horas não muda com isso.
       const alerts: string[] = [];
-      if (byKind.entrada && agencySecondOfDay(byKind.entrada.punched_at) > (8 * 60 + 30) * 60) alerts.push("Atraso na entrada");
-      if (byKind.saida_almoco && agencySecondOfDay(byKind.saida_almoco.punched_at) < 12 * 60 * 60) alerts.push("Saída antecipada de manhã");
-      if (byKind.volta_almoco && agencySecondOfDay(byKind.volta_almoco.punched_at) > 13 * 60 * 60) alerts.push("Atraso na volta");
-      if (byKind.saida && agencySecondOfDay(byKind.saida.punched_at) < (17 * 60 + 30) * 60) alerts.push("Saída antecipada");
+      if (byKind.entrada && atrasou(agencySecondOfDay(byKind.entrada.punched_at), (8 * 60 + 30) * 60)) {
+        alerts.push("Atraso na entrada");
+      }
+      if (byKind.saida_almoco && saiuAntes(agencySecondOfDay(byKind.saida_almoco.punched_at), 12 * 60 * 60)) {
+        alerts.push("Saída antecipada de manhã");
+      }
+      if (byKind.volta_almoco && atrasou(agencySecondOfDay(byKind.volta_almoco.punched_at), 13 * 60 * 60)) {
+        alerts.push("Atraso na volta");
+      }
+      if (byKind.saida && saiuAntes(agencySecondOfDay(byKind.saida.punched_at), (17 * 60 + 30) * 60)) {
+        alerts.push("Saída antecipada");
+      }
 
       if (intervalos.length > 0) {
         const foraSegundos = intervalos.reduce((soma, item) => soma + item.seconds, 0);
@@ -377,6 +394,14 @@ function summarizeHistory(punches: TimeClockPunch[], todayKey: string): HistoryD
         foraAgora: conta.foraAgora,
         totalSeconds,
         abonoSeconds: 0,
+        toleranciaSeconds: toleranciaDoDia(
+          Object.fromEntries(
+            PUNCH_STEPS.filter((step) => byKind[step.kind]).map((step) => [
+              step.kind,
+              agencySecondOfDay(byKind[step.kind]!.punched_at),
+            ]),
+          ),
+        ),
         partial: pairCount < 2,
         alerts,
       };
@@ -422,6 +447,7 @@ function diaVazio(dateKey: string, todayKey: string): HistoryDay {
     foraAgora: false,
     totalSeconds: 0,
     abonoSeconds: 0,
+    toleranciaSeconds: 0,
     partial: false,
     alerts,
   };
@@ -470,9 +496,12 @@ function dayBalanceSeconds(day: HistoryDay, abonoDates?: Set<string>): number | 
   // Dia coberto por atestado aprovado é abonado: não gera negativa nem extra.
   if (abonoDates?.has(day.dateKey)) return null;
   if (!isCompleteDay(day)) return null;
-  const expected = isBusinessDay(day.dateKey) ? EXPECTED_DAILY_SECONDS : 0;
-  // O tempo fora abonado conta como trabalhado.
-  return day.totalSeconds + day.abonoSeconds - expected;
+  const diaUtil = isBusinessDay(day.dateKey);
+  const expected = diaUtil ? EXPECTED_DAILY_SECONDS : 0;
+  // O tempo fora abonado conta como trabalhado, e a tolerância devolve os
+  // minutinhos de atraso/saída antecipada. No fim de semana não há horário de
+  // referência, então não há o que tolerar.
+  return day.totalSeconds + day.abonoSeconds + (diaUtil ? day.toleranciaSeconds : 0) - expected;
 }
 
 // Formata um saldo com sinal (+1h 30min / −0h 45min / 0h 00min).
@@ -1301,12 +1330,16 @@ export default function TimeClock() {
   });
 
   const requestAdjustment = useMutation({
-    mutationFn: async () => {
+    // A data vem por parâmetro quando o pedido nasce de um dia do histórico:
+    // guardar no estado antes de chamar não funcionaria, porque o setState só
+    // vale no próximo render e a mutação leria a data anterior — erraria o dia.
+    mutationFn: async (dataEscolhida?: string) => {
       if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
       if (adjustmentReason.trim().length < 5) {
         throw new Error("Explique o motivo do ajuste com pelo menos 5 caracteres.");
       }
-      const requestedAt = new Date(`${adjustmentDate}T${adjustmentTime}:00-03:00`);
+      const dia = dataEscolhida ?? adjustmentDate;
+      const requestedAt = new Date(`${dia}T${adjustmentTime}:00-03:00`);
       if (Number.isNaN(requestedAt.getTime())) throw new Error("Data ou horário inválido.");
       if (requestedAt.getTime() > Date.now() + 5 * 60 * 1000) {
         throw new Error("Não é permitido solicitar um horário futuro.");
@@ -1331,6 +1364,8 @@ export default function TimeClock() {
       toast.success("Horário enviado para análise da ADM.");
       setAdjustmentOpen(false);
       setAdjustmentReason("");
+      // O painel do dia segue aberto de propósito: a pessoa vê o pedido
+      // entrar na linha "Em análise pela ADM" daquele mesmo dia.
     },
     onError: (error: QueryError) => toast.error(error.message || "Não foi possível enviar a solicitação."),
   });
@@ -1624,6 +1659,10 @@ export default function TimeClock() {
                 <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5">
                   <span className="text-muted-foreground">Tarde</span>
                   <span className="font-semibold tabular-nums">13:00–17:30</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5">
+                  <span className="text-muted-foreground">Tolerância</span>
+                  <span className="font-semibold tabular-nums">{TOLERANCIA_MINUTOS} min</span>
                 </span>
               </div>
             </div>
@@ -1919,7 +1958,7 @@ export default function TimeClock() {
                     <TableHead className="min-w-28">Total</TableHead>
                     <TableHead className="min-w-28">Saldo</TableHead>
                     <TableHead className="min-w-56">Situação</TableHead>
-                    <TableHead className="min-w-56">Observação</TableHead>
+                    <TableHead className="min-w-56">Horário e observação</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1955,16 +1994,25 @@ export default function TimeClock() {
                           const balance = dayBalanceSeconds(day);
                           if (balance === null) return <span className="text-muted-foreground">—</span>;
                           return (
-                            <span
-                              className={cn(
-                                "font-semibold tabular-nums",
-                                balance > 0 && "text-success",
-                                balance < 0 && "text-destructive",
-                                balance === 0 && "text-muted-foreground",
+                            <>
+                              <span
+                                className={cn(
+                                  "font-semibold tabular-nums",
+                                  balance > 0 && "text-success",
+                                  balance < 0 && "text-destructive",
+                                  balance === 0 && "text-muted-foreground",
+                                )}
+                              >
+                                {formatBalance(balance)}
+                              </span>
+                              {/* Sem isto o saldo "não bate" com as batidas e
+                                  parece erro de conta. */}
+                              {day.toleranciaSeconds > 0 && (
+                                <span className="ml-1 text-[10px] text-muted-foreground">
+                                  inclui {Math.round(day.toleranciaSeconds / 60)} min de tolerância
+                                </span>
                               )}
-                            >
-                              {formatBalance(balance)}
-                            </span>
+                            </>
                           );
                         })()}
                       </TableCell>
@@ -2001,16 +2049,29 @@ export default function TimeClock() {
                         ))}
                       </TableCell>
                       <TableCell>
-                        <button
-                          type="button"
-                          onClick={() => { setNotaData(day.dateKey); setNotaTexto(nota?.note ?? ""); }}
-                          className={cn(
-                            "text-left text-xs transition-colors hover:text-foreground",
-                            nota ? "text-foreground" : "text-muted-foreground underline decoration-dotted",
+                        {/* Um lugar só por dia: o horário já nasce com a data
+                            certa, sem redigitar no formulário do topo. */}
+                        <div className="flex items-start gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 shrink-0 px-2 text-xs"
+                            onClick={() => {
+                              setNotaData(day.dateKey);
+                              setNotaTexto(nota?.note ?? "");
+                              setAdjustmentDate(day.dateKey);
+                              setAdjustmentReason("");
+                            }}
+                          >
+                            <Pencil className="mr-1 h-3 w-3" /> Editar hora
+                          </Button>
+                          {nota && (
+                            <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+                              {nota.note}
+                            </span>
                           )}
-                        >
-                          {nota?.note ?? "Anotar"}
-                        </button>
+                        </div>
                       </TableCell>
                     </TableRow>
                     );
@@ -2557,39 +2618,164 @@ export default function TimeClock() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={notaData !== null} onOpenChange={(open) => !salvarObservacao.isPending && !open && setNotaData(null)}>
-        <DialogContent className="max-w-md">
+      {/* Painel do dia: batidas, horário para corrigir e observação no mesmo
+          lugar. Antes, corrigir um horário exigia abrir o formulário do topo e
+          digitar a data de novo — dava para errar o dia sem perceber. */}
+      <Dialog
+        open={notaData !== null}
+        onOpenChange={(open) => {
+          if (salvarObservacao.isPending || requestAdjustment.isPending) return;
+          if (!open) setNotaData(null);
+        }}
+      >
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>
-              Observação de {notaData ? formatHistoryDate(notaData) : ""}
+            <DialogTitle className="capitalize">
+              {notaData ? formatHistoryDate(notaData) : ""}
             </DialogTitle>
           </DialogHeader>
-          <form
-            className="space-y-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (notaData) salvarObservacao.mutate({ dateKey: notaData, texto: notaTexto });
-            }}
-          >
-            <p className="text-sm text-muted-foreground">
-              Fica registrada no seu ponto e a ADM lê junto com o dia. Serve para explicar uma falta
-              de registro, um atraso ou um compromisso marcado.
-            </p>
-            <Textarea
-              rows={4}
-              value={notaTexto}
-              onChange={(event) => setNotaTexto(event.target.value)}
-              placeholder="Ex.: saí às 10h para o médico, volto depois do almoço"
-            />
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setNotaData(null)}>Cancelar</Button>
-              <Button type="submit" disabled={salvarObservacao.isPending}>
-                {salvarObservacao.isPending
-                  ? "Salvando..."
-                  : notaTexto.trim() ? "Salvar observação" : "Apagar observação"}
-              </Button>
-            </div>
-          </form>
+
+          {notaData && (() => {
+            const diaAberto = historyDays.find((day) => day.dateKey === notaData);
+            const futuro = notaData > todayKey;
+            const batidasDoDia = [
+              ...PUNCH_STEPS.map((step) => ({
+                label: step.label,
+                punch: diaAberto?.punches[step.kind],
+              })),
+            ];
+            const pedidosDoDia = (myAdjustmentsQuery.data ?? []).filter(
+              (request) =>
+                request.status === "pending" &&
+                agencyDateKey(new Date(request.requested_punched_at)) === notaData,
+            );
+
+            return (
+              <div className="space-y-5">
+                {/* O que já está registrado neste dia. */}
+                <div className="grid grid-cols-2 gap-2 rounded-xl border border-border/60 bg-muted/25 p-3 sm:grid-cols-4">
+                  {batidasDoDia.map(({ label, punch }) => (
+                    <div key={label}>
+                      <p className="text-[11px] text-muted-foreground">{label}</p>
+                      <p className="font-semibold tabular-nums">
+                        {punch ? formatPunchTime(punch.punched_at) : "—"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {pedidosDoDia.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Em análise pela ADM:{" "}
+                    {pedidosDoDia
+                      .map(
+                        (request) =>
+                          `${PUNCH_KIND_LABEL[request.kind] ?? request.kind} ${formatPunchTime(request.requested_punched_at)}`,
+                      )
+                      .join(" · ")}
+                  </p>
+                )}
+
+                {futuro ? (
+                  <p className="rounded-xl bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    Dia que ainda não chegou: dá para deixar a observação registrada, mas o horário
+                    só pode ser pedido a partir do próprio dia.
+                  </p>
+                ) : (
+                  <form
+                    className="space-y-3 rounded-xl border border-border/60 p-3"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      requestAdjustment.mutate(notaData);
+                    }}
+                  >
+                    <div>
+                      <p className="text-sm font-medium">Adicionar ou corrigir horário</p>
+                      <p className="text-xs text-muted-foreground">
+                        Vai para a ADM aprovar. Só entra no ponto depois da aprovação.
+                      </p>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label>Registro</Label>
+                        <Select
+                          value={adjustmentKind}
+                          onValueChange={(value: PunchKind) => setAdjustmentKind(value)}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {[...PUNCH_STEPS, PASSO_SAIDA_INTERVALO, PASSO_VOLTA_INTERVALO].map((step) => (
+                              <SelectItem key={step.kind} value={step.kind}>{step.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="dia-horario">Horário</Label>
+                        <Input
+                          id="dia-horario"
+                          type="time"
+                          value={adjustmentTime}
+                          onChange={(event) => setAdjustmentTime(event.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="dia-motivo">Motivo</Label>
+                      <Textarea
+                        id="dia-motivo"
+                        rows={2}
+                        value={adjustmentReason}
+                        onChange={(event) => setAdjustmentReason(event.target.value)}
+                        placeholder="Ex.: esqueci de bater a saída"
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        type="submit"
+                        size="sm"
+                        disabled={requestAdjustment.isPending || adjustmentReason.trim().length < 5}
+                      >
+                        {requestAdjustment.isPending ? "Enviando..." : "Enviar horário para a ADM"}
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                <form
+                  className="space-y-3 rounded-xl border border-border/60 p-3"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    salvarObservacao.mutate({ dateKey: notaData, texto: notaTexto });
+                  }}
+                >
+                  <div>
+                    <p className="text-sm font-medium">Observação do dia</p>
+                    <p className="text-xs text-muted-foreground">
+                      Fica no seu ponto e a ADM lê junto com o dia.
+                    </p>
+                  </div>
+                  <Textarea
+                    rows={3}
+                    value={notaTexto}
+                    onChange={(event) => setNotaTexto(event.target.value)}
+                    placeholder="Ex.: saí às 10h para o médico, volto depois do almoço"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setNotaData(null)}>
+                      Fechar
+                    </Button>
+                    <Button type="submit" size="sm" variant="outline" disabled={salvarObservacao.isPending}>
+                      {salvarObservacao.isPending
+                        ? "Salvando..."
+                        : notaTexto.trim() ? "Salvar observação" : "Apagar observação"}
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
@@ -2602,7 +2788,7 @@ export default function TimeClock() {
             className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              requestAdjustment.mutate();
+              requestAdjustment.mutate(undefined);
             }}
           >
             <p className="text-sm text-muted-foreground">
