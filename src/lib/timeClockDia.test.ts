@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { contarDia, diasDoMes, estadoDoDia, type PunchKind } from "./timeClockDia";
+import {
+  atrasou,
+  contarDia,
+  diasDoMes,
+  estadoDoDia,
+  saiuAntes,
+  type PunchKind,
+} from "./timeClockDia";
+
+const hora = (h: number, m: number, s = 0) => h * 3600 + m * 60 + s;
 
 const em = (hora: string) => `2026-09-16T${hora}:00-03:00`;
 
@@ -105,6 +114,37 @@ describe("conta do dia", () => {
       dia(["saida", "17:30"], ["entrada", "08:30"], ["volta_almoco", "13:00"], ["saida_almoco", "12:00"]),
     );
     expect(conta.totalSeconds).toBe(8 * 3600);
+  });
+});
+
+describe("tolerância de 5 minutos", () => {
+  const ENTRADA = hora(8, 30);
+
+  it("no horário não é atraso", () => {
+    expect(atrasou(hora(8, 30), ENTRADA)).toBe(false);
+  });
+
+  it("até 08:35 está dentro da tolerância", () => {
+    expect(atrasou(hora(8, 31), ENTRADA)).toBe(false);
+    expect(atrasou(hora(8, 35), ENTRADA)).toBe(false);
+    // O segundo não conta: 08:35:59 ainda é 08:35.
+    expect(atrasou(hora(8, 35, 59), ENTRADA)).toBe(false);
+  });
+
+  it("08:36 é atraso", () => {
+    expect(atrasou(hora(8, 36), ENTRADA)).toBe(true);
+  });
+
+  it("chegar antes nunca é atraso", () => {
+    expect(atrasou(hora(8, 10), ENTRADA)).toBe(false);
+  });
+
+  it("a mesma tolerância vale para sair antes", () => {
+    const SAIDA = hora(17, 30);
+    expect(saiuAntes(hora(17, 30), SAIDA)).toBe(false);
+    expect(saiuAntes(hora(17, 25), SAIDA)).toBe(false);
+    expect(saiuAntes(hora(17, 24), SAIDA)).toBe(true);
+    expect(saiuAntes(hora(18, 0), SAIDA)).toBe(false);
   });
 });
 

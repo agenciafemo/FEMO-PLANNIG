@@ -118,6 +118,36 @@ export function contarDia<T extends BatidaSimples>(batidas: T[]): ContaDoDia<T> 
   return { totalSeconds, pares, intervalos, foraAgora: saidaIntervalo !== null };
 }
 
+/**
+ * Minutos de tolerância antes de marcar atraso ou saída antecipada.
+ *
+ * Sem isso, bater 08:31 já acendia "Atraso na entrada" — ninguém trabalha com
+ * o relógio no segundo, e o selo virava ruído que a equipe aprendia a ignorar.
+ * A conta das horas não muda: a tolerância é só sobre marcar ou não o dia.
+ */
+export const TOLERANCIA_MINUTOS = 5;
+
+/** Comparação por minuto cheio: 08:35:59 ainda é 08:35, e não é atraso. */
+function emMinutos(segundoDoDia: number): number {
+  return Math.floor(segundoDoDia / 60);
+}
+
+export function atrasou(
+  segundoDoDia: number,
+  referenciaSegundos: number,
+  toleranciaMinutos = TOLERANCIA_MINUTOS,
+): boolean {
+  return emMinutos(segundoDoDia) > emMinutos(referenciaSegundos) + toleranciaMinutos;
+}
+
+export function saiuAntes(
+  segundoDoDia: number,
+  referenciaSegundos: number,
+  toleranciaMinutos = TOLERANCIA_MINUTOS,
+): boolean {
+  return emMinutos(segundoDoDia) < emMinutos(referenciaSegundos) - toleranciaMinutos;
+}
+
 /** Todas as datas de um mês "yyyy-MM", em ordem crescente. */
 export function diasDoMes(monthKey: string): string[] {
   if (!/^\d{4}-\d{2}$/.test(monthKey)) return [];
