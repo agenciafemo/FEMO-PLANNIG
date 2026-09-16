@@ -23,13 +23,17 @@ import { isOrganizationAdministrator } from "@/lib/organizationRoles";
 // Planejamentos (PlanningClientRail) já usam — é a convenção estabelecida do
 // app para navegação secundária de uma seção.
 
+// O Cofre é da equipe inteira: quem atende cliente precisa das senhas para
+// trabalhar. Quem pode ver e revelar é decidido no banco (vault_can_view /
+// vault_can_reveal, hoje "qualquer integrante da organização") e ainda depende
+// da senha mestre — esconder o link só fazia a equipe não achar a tela.
 const ABAS_OPERACIONAIS = [
   { to: "/administrativo/clientes", label: "Clientes", icon: Users },
+  { to: "/administrativo/cofre", label: "Cofre", icon: KeyRound },
 ] as const;
 
 const ABAS_GESTAO = [
   { to: "/administrativo/equipe", label: "Equipe e acessos", icon: UsersRound },
-  { to: "/administrativo/cofre", label: "Cofre", icon: KeyRound },
 ] as const;
 
 const ABAS_FINANCEIRAS = [

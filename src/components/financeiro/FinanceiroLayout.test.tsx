@@ -25,13 +25,15 @@ describe("navegação administrativa", () => {
   beforeEach(() => { mock.role = "editor"; });
 
   it.each(["manager", "editor", "viewer"])(
-    "mostra somente Clientes para o papel operacional %s",
+    "mostra Clientes e Cofre para o papel operacional %s",
     (role) => {
       mock.role = role;
       show();
       expect(screen.getAllByRole("link", { name: "Clientes" })).toHaveLength(2);
+      // O Cofre é de toda a equipe: quem atende cliente precisa das senhas.
+      // Quem pode ver/revelar é decidido no banco, não escondendo o link.
+      expect(screen.getAllByRole("link", { name: "Cofre" })).toHaveLength(2);
       expect(screen.queryByRole("link", { name: "Equipe e acessos" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("link", { name: "Cofre" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Visão Geral" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Fluxo de Caixa" })).not.toBeInTheDocument();
     },

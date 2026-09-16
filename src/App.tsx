@@ -239,6 +239,11 @@ const App = () => (
                   <Route index element={<AdministrativoIndex />} />
                   <Route path="clientes" element={<AdministrativeClients />} />
                   <Route path="clientes/:clientId" element={<AdministrativeClientProfile />} />
+                  {/* Cofre fica fora da guarda de administrador: quem pode ver
+                      e revelar senha é o banco que decide (e ainda exige a
+                      senha mestre). A guarda aqui escondia a tela de quem tem
+                      acesso de verdade. */}
+                  <Route path="cofre" element={<Vault />} />
                   <Route element={<RequireOrganizationAdministrator><Outlet /></RequireOrganizationAdministrator>}>
                     <Route path="anual" element={<DashboardAnual />} />
                     <Route path="analitico" element={<Analitico />} />
@@ -249,7 +254,6 @@ const App = () => (
                     <Route path="configuracoes" element={<ConfiguracoesFinanceiro />} />
                     <Route path="movimentacoes" element={<Movimentacoes />} />
                     <Route path="equipe" element={<TeamCollaborators />} />
-                    <Route path="cofre" element={<Vault />} />
                   </Route>
                 </Route>
               </Route>
