@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clock3,
   Coffee,
+  DoorOpen,
   Download,
   FileText,
   LogIn,
@@ -51,8 +52,39 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOrganization } from "@/hooks/useOrganization";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import {
+  contarDia,
+  diasDoMes,
+  estadoDoDia,
+  type PunchKind,
+} from "@/lib/timeClockDia";
 
-type PunchKind = "entrada" | "saida_almoco" | "volta_almoco" | "saida";
+type IntervalTreatment = "abono" | "banco";
+
+type TimeClockIntervalJustification = {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  work_date: string;
+  left_at: string;
+  returned_at: string;
+  minutes: number;
+  reason: string;
+  treatment: IntervalTreatment;
+  status: AbsenceStatus;
+  review_note: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+};
+
+type TimeClockDayNote = {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  work_date: string;
+  note: string;
+  updated_at: string;
+};
 
 type TimeClockPunch = {
   id: string;
@@ -109,6 +141,8 @@ interface TimeClockFilterBuilder<T> extends PromiseLike<QueryResult<T>> {
   order(column: string, options?: { ascending?: boolean }): TimeClockFilterBuilder<T>;
   insert(values: Record<string, unknown>): TimeClockFilterBuilder<T>;
   update(values: Record<string, unknown>): TimeClockFilterBuilder<T>;
+  upsert(values: Record<string, unknown>, options?: { onConflict?: string }): TimeClockFilterBuilder<T>;
+  delete(): TimeClockFilterBuilder<T>;
 }
 
 const timeClockSupabase = supabase as unknown as {
@@ -130,6 +164,31 @@ const PUNCH_STEPS: Array<{
   { kind: "volta_almoco", label: "Volta do almoço", action: "Registrar volta do almoço", reference: "13:00", icon: BriefcaseBusiness },
   { kind: "saida", label: "Saída", action: "Registrar saída", reference: "17:30", icon: LogOut },
 ];
+
+// O par do meio do dia não tem horário de referência: acontece quando precisa.
+const PASSO_SAIDA_INTERVALO = {
+  kind: "saida_intervalo" as PunchKind,
+  label: "Saída no meio do dia",
+  action: "Registrar saída no meio do dia",
+  reference: "—",
+  icon: DoorOpen,
+};
+const PASSO_VOLTA_INTERVALO = {
+  kind: "volta_intervalo" as PunchKind,
+  label: "Retorno",
+  action: "Registrar retorno",
+  reference: "—",
+  icon: DoorOpen,
+};
+
+const PUNCH_KIND_LABEL: Record<PunchKind, string> = {
+  entrada: "Entrada",
+  saida_almoco: "Saída para almoço",
+  volta_almoco: "Volta do almoço",
+  saida: "Saída",
+  saida_intervalo: "Saída no meio do dia",
+  volta_intervalo: "Retorno",
+};
 
 type AdjustmentStatus = "pending" | "approved" | "rejected";
 
@@ -240,18 +299,31 @@ function findPunch(punches: TimeClockPunch[], kind: PunchKind) {
   return punches.find((punch) => punch.kind === kind);
 }
 
-function getNextStep(punches: Array<{ kind: PunchKind }>) {
-  const lastPunch = punches.at(-1);
-  if (!lastPunch) return PUNCH_STEPS[0];
-
-  const currentIndex = PUNCH_STEPS.findIndex((step) => step.kind === lastPunch.kind);
-  return currentIndex >= 0 ? PUNCH_STEPS[currentIndex + 1] ?? null : PUNCH_STEPS[0];
+/**
+ * Traduz o estado do dia (regra compartilhada, espelho do servidor) no passo
+ * que o botão principal oferece.
+ */
+function situacaoDoDia(punches: Array<{ kind: PunchKind }>) {
+  const estado = estadoDoDia(punches.map((punch) => punch.kind));
+  const principal =
+    estado.proximo === null
+      ? null
+      : estado.proximo === "volta_intervalo"
+        ? PASSO_VOLTA_INTERVALO
+        : PUNCH_STEPS.find((step) => step.kind === estado.proximo) ?? null;
+  return { ...estado, principal };
 }
 
 type HistoryDay = {
   dateKey: string;
   punches: Partial<Record<PunchKind, TimeClockPunch>>;
+  /** Saídas no meio do dia já encerradas, na ordem em que aconteceram. */
+  intervalos: Array<{ saida: TimeClockPunch; volta: TimeClockPunch; seconds: number }>;
+  /** Saiu no meio do dia e ainda não voltou. */
+  foraAgora: boolean;
   totalSeconds: number;
+  /** Tempo fora abonado por ADM/Head: volta a contar como trabalhado. */
+  abonoSeconds: number;
   partial: boolean;
   alerts: string[];
 };
@@ -278,19 +350,10 @@ function summarizeHistory(punches: TimeClockPunch[], todayKey: string): HistoryD
         byKind[punch.kind] ??= punch;
       });
 
-      const completedPairs: Array<[TimeClockPunch | undefined, TimeClockPunch | undefined]> = [
-        [byKind.entrada, byKind.saida_almoco],
-        [byKind.volta_almoco, byKind.saida],
-      ];
-      let totalSeconds = 0;
-      let pairCount = 0;
-      completedPairs.forEach(([start, end]) => {
-        if (!start || !end) return;
-        const duration = Math.floor((new Date(end.punched_at).getTime() - new Date(start.punched_at).getTime()) / 1000);
-        if (duration < 0) return;
-        totalSeconds += duration;
-        pairCount += 1;
-      });
+      // A conta (pares entrou→saiu, tempo fora de fora) vive em timeClockDia,
+      // testada à parte: é hora de gente.
+      const conta = contarDia(ordered);
+      const { totalSeconds, pares: pairCount, intervalos } = conta;
 
       const alerts: string[] = [];
       if (byKind.entrada && agencySecondOfDay(byKind.entrada.punched_at) > (8 * 60 + 30) * 60) alerts.push("Atraso na entrada");
@@ -298,18 +361,92 @@ function summarizeHistory(punches: TimeClockPunch[], todayKey: string): HistoryD
       if (byKind.volta_almoco && agencySecondOfDay(byKind.volta_almoco.punched_at) > 13 * 60 * 60) alerts.push("Atraso na volta");
       if (byKind.saida && agencySecondOfDay(byKind.saida.punched_at) < (17 * 60 + 30) * 60) alerts.push("Saída antecipada");
 
+      if (intervalos.length > 0) {
+        const foraSegundos = intervalos.reduce((soma, item) => soma + item.seconds, 0);
+        alerts.push(`Saiu no meio do dia · ${formatWorkedDuration(foraSegundos)}`);
+      }
+      if (conta.foraAgora) alerts.push("Fora agora");
+
       const complete = PUNCH_STEPS.every((step) => byKind[step.kind]);
       if (!complete) alerts.push(dateKey === todayKey ? "Em andamento" : "Registro incompleto");
 
       return {
         dateKey,
         punches: byKind,
+        intervalos,
+        foraAgora: conta.foraAgora,
         totalSeconds,
+        abonoSeconds: 0,
         partial: pairCount < 2,
         alerts,
       };
     })
     .sort((first, second) => second.dateKey.localeCompare(first.dateKey));
+}
+
+/**
+ * Soma nos dias o tempo fora que ADM/Head abonou.
+ *
+ * O tempo entre a saída e o retorno já sai da conta sozinho (são duas batidas).
+ * Abonar é justamente devolvê-lo: quem apresentou atestado não fica com hora
+ * negativa. Pedido recusado ou "descontar do banco" não devolve nada.
+ */
+function aplicarAbonoDeIntervalos(
+  days: HistoryDay[],
+  justificativas: TimeClockIntervalJustification[],
+): HistoryDay[] {
+  if (justificativas.length === 0) return days;
+  const abonoPorDia = new Map<string, number>();
+  for (const item of justificativas) {
+    if (item.status !== "approved" || item.treatment !== "abono") continue;
+    abonoPorDia.set(item.work_date, (abonoPorDia.get(item.work_date) ?? 0) + item.minutes * 60);
+  }
+  if (abonoPorDia.size === 0) return days;
+  return days.map((day) =>
+    abonoPorDia.has(day.dateKey) ? { ...day, abonoSeconds: abonoPorDia.get(day.dateKey)! } : day,
+  );
+}
+
+/** Dia sem nenhuma batida — existe só para aparecer na lista do mês. */
+function diaVazio(dateKey: string, todayKey: string): HistoryDay {
+  const futuro = dateKey > todayKey;
+  const alerts: string[] = [];
+  if (futuro) alerts.push("A registrar");
+  else if (!isBusinessDay(dateKey)) alerts.push("Fim de semana");
+  else alerts.push("Sem registro");
+
+  return {
+    dateKey,
+    punches: {},
+    intervalos: [],
+    foraAgora: false,
+    totalSeconds: 0,
+    abonoSeconds: 0,
+    partial: false,
+    alerts,
+  };
+}
+
+/**
+ * Mostra o mês inteiro, e não só os dias batidos.
+ *
+ * Quem olhava o histórico via apenas os dias com registro — o dia esquecido
+ * simplesmente não existia na tela, e só aparecia como hora negativa no fim do
+ * mês. Com o mês completo dá para ver o buraco na hora e anotar o motivo.
+ */
+function completarMes(days: HistoryDay[], monthKey: string, todayKey: string): HistoryDay[] {
+  const datas = diasDoMes(monthKey);
+  if (datas.length === 0) return days;
+  const comRegistro = new Map(days.map((day) => [day.dateKey, day]));
+  const completo: HistoryDay[] = datas.map(
+    (dateKey) => comRegistro.get(dateKey) ?? diaVazio(dateKey, todayKey),
+  );
+  // Dias de outros meses (o histórico do mês corrente pode trazer a virada)
+  // continuam na lista, para nada sumir.
+  for (const day of days) {
+    if (!day.dateKey.startsWith(`${monthKey}-`)) completo.push(day);
+  }
+  return completo.sort((first, second) => second.dateKey.localeCompare(first.dateKey));
 }
 
 const EXPECTED_DAILY_SECONDS = 8 * 60 * 60; // jornada padrão de 8h
@@ -320,6 +457,9 @@ function isBusinessDay(dateKey: string): boolean {
 }
 
 function isCompleteDay(day: HistoryDay): boolean {
+  // Saiu no meio do dia e não voltou: o dia ainda está aberto, mesmo com as
+  // quatro batidas principais registradas.
+  if (day.foraAgora) return false;
   return PUNCH_STEPS.every((step) => day.punches[step.kind]);
 }
 
@@ -331,7 +471,8 @@ function dayBalanceSeconds(day: HistoryDay, abonoDates?: Set<string>): number | 
   if (abonoDates?.has(day.dateKey)) return null;
   if (!isCompleteDay(day)) return null;
   const expected = isBusinessDay(day.dateKey) ? EXPECTED_DAILY_SECONDS : 0;
-  return day.totalSeconds - expected;
+  // O tempo fora abonado conta como trabalhado.
+  return day.totalSeconds + day.abonoSeconds - expected;
 }
 
 // Formata um saldo com sinal (+1h 30min / −0h 45min / 0h 00min).
@@ -399,6 +540,18 @@ export default function TimeClock() {
   const [adjustmentTime, setAdjustmentTime] = useState(() => timeFormatter.format(new Date()));
   const [adjustmentKind, setAdjustmentKind] = useState<PunchKind>("entrada");
   const [adjustmentReason, setAdjustmentReason] = useState("");
+  // Saída no meio do dia: motivo na saída, e o que fazer com as horas na volta.
+  const [saidaMeioOpen, setSaidaMeioOpen] = useState(false);
+  const [saidaMeioMotivo, setSaidaMeioMotivo] = useState("");
+  const [justificarOpen, setJustificarOpen] = useState(false);
+  const [justificarTratamento, setJustificarTratamento] = useState<IntervalTreatment>("abono");
+  const [justificarMotivo, setJustificarMotivo] = useState("");
+  const [intervaloParaJustificar, setIntervaloParaJustificar] = useState<
+    { leftAt: string; returnedAt: string; minutos: number } | null
+  >(null);
+  // Observação numa data do histórico.
+  const [notaData, setNotaData] = useState<string | null>(null);
+  const [notaTexto, setNotaTexto] = useState("");
   const [absenceOpen, setAbsenceOpen] = useState(false);
   const [absenceStart, setAbsenceStart] = useState(() => agencyDateKey());
   const [absenceEnd, setAbsenceEnd] = useState(() => agencyDateKey());
@@ -467,6 +620,42 @@ export default function TimeClock() {
     retry: false,
   });
 
+  const pendingIntervalsQuery = useQuery({
+    queryKey: ["time-clock-pending-intervals", organizationId],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockIntervalJustification[]>("time_clock_interval_justifications")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .eq("status", "pending")
+        .order("work_date", { ascending: true });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: teamPermissionQuery.data === true && !!organizationId,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+
+  // Observações da equipe no período consultado: dão contexto na hora de
+  // aprovar (o "saí às 10h para o médico" fica junto do dia).
+  const teamDayNotesQuery = useQuery({
+    queryKey: ["time-clock-team-day-notes", organizationId, periodStart, periodEnd],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockDayNote[]>("time_clock_day_notes")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .gte("work_date", periodStart);
+      if (result.error) throw result.error;
+      // periodEnd é inclusivo na tela; o filtro do fim fica aqui para não
+      // perder o último dia por causa do "menor que".
+      return (result.data ?? []).filter((nota) => nota.work_date <= periodEnd);
+    },
+    enabled: teamPermissionQuery.data === true && !!organizationId && teamPeriodValid,
+    retry: false,
+  });
+
   const myAbsencesQuery = useQuery({
     queryKey: ["time-clock-my-absences", organizationId, user?.id],
     queryFn: async () => {
@@ -530,7 +719,9 @@ export default function TimeClock() {
     refetchInterval: 60_000,
   });
 
-  const punches = punchesQuery.data ?? [];
+  // Memorizado porque entra em useMemo mais abaixo: `?? []` cria um array novo
+  // a cada render e refaria a conta sem necessidade.
+  const punches = useMemo(() => punchesQuery.data ?? [], [punchesQuery.data]);
   // Ajustes de hoje ainda em análise entram na sequência pelo horário pedido,
   // igual ao servidor (prepare_time_clock_punch). Sem isso o botão pediria de
   // novo uma batida que já está aguardando aprovação.
@@ -543,7 +734,7 @@ export default function TimeClock() {
       ),
     [myAdjustmentsQuery.data, todayKey],
   );
-  const nextStep = getNextStep(
+  const situacaoDeHoje = situacaoDoDia(
     [
       ...punches.map((punch) => ({ kind: punch.kind, at: new Date(punch.punched_at).getTime() })),
       ...todayPendingAdjustments.map((request) => ({
@@ -552,6 +743,7 @@ export default function TimeClock() {
       })),
     ].sort((first, second) => first.at - second.at),
   );
+  const nextStep = situacaoDeHoje.principal;
 
   const historyQuery = useQuery({
     queryKey: ["time-clock-history", organizationId, user?.id, todayKey, historyMonth],
@@ -571,9 +763,92 @@ export default function TimeClock() {
     enabled: !!user && !!organizationId && !isLegacy,
   });
 
+  // Saídas no meio do dia: o que foi abonado volta para as horas do dia, e o
+  // que está pendente aparece na lista para a pessoa cobrar resposta.
+  const myIntervalsQuery = useQuery({
+    queryKey: ["time-clock-my-intervals", organizationId, user?.id],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockIntervalJustification[]>("time_clock_interval_justifications")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .eq("user_id", user!.id)
+        .order("work_date", { ascending: false });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: !!user && !!organizationId && !isLegacy,
+    retry: false,
+  });
+
+  const myDayNotesQuery = useQuery({
+    queryKey: ["time-clock-day-notes", organizationId, user?.id, historyMonth],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockDayNote[]>("time_clock_day_notes")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .eq("user_id", user!.id)
+        .gte("work_date", `${historyMonth}-01`)
+        .lt("work_date", `${shiftMonth(historyMonth, 1)}-01`);
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: !!user && !!organizationId && !isLegacy,
+    retry: false,
+  });
+
+  // Saídas de hoje que ainda não viraram pedido para a ADM.
+  const intervalosDeHojeSemJustificativa = useMemo(() => {
+    const pares: Array<{ leftAt: string; returnedAt: string; minutos: number; motivo: string }> = [];
+    let aberta: TimeClockPunch | null = null;
+    for (const punch of punches) {
+      if (punch.kind === "saida_intervalo") {
+        aberta = punch;
+      } else if (punch.kind === "volta_intervalo" && aberta) {
+        pares.push({
+          leftAt: aberta.punched_at,
+          returnedAt: punch.punched_at,
+          minutos: Math.max(
+            1,
+            Math.round((new Date(punch.punched_at).getTime() - new Date(aberta.punched_at).getTime()) / 60000),
+          ),
+          motivo: aberta.note ?? "",
+        });
+        aberta = null;
+      }
+    }
+    const jaEnviados = new Set(
+      (myIntervalsQuery.data ?? []).map((item) => new Date(item.left_at).getTime()),
+    );
+    return pares.filter((par) => !jaEnviados.has(new Date(par.leftAt).getTime()));
+  }, [punches, myIntervalsQuery.data]);
+
+  const notaPorDia = useMemo(() => {
+    const mapa = new Map<string, TimeClockDayNote>();
+    for (const nota of myDayNotesQuery.data ?? []) mapa.set(nota.work_date, nota);
+    return mapa;
+  }, [myDayNotesQuery.data]);
+
+  const intervalosPorDia = useMemo(() => {
+    const mapa = new Map<string, TimeClockIntervalJustification[]>();
+    for (const item of myIntervalsQuery.data ?? []) {
+      mapa.set(item.work_date, [...(mapa.get(item.work_date) ?? []), item]);
+    }
+    return mapa;
+  }, [myIntervalsQuery.data]);
+
   const historyDays = useMemo(
-    () => summarizeHistory(historyQuery.data ?? [], todayKey),
-    [historyQuery.data, todayKey]
+    () =>
+      completarMes(
+        aplicarAbonoDeIntervalos(
+          summarizeHistory(historyQuery.data ?? [], todayKey),
+          myIntervalsQuery.data ?? [],
+        ),
+        historyMonth,
+        todayKey,
+      ),
+    [historyQuery.data, todayKey, myIntervalsQuery.data, historyMonth]
   );
 
   const myAbonoDates = useMemo(
@@ -621,10 +896,12 @@ export default function TimeClock() {
   const accumulatedBank = useMemo(() => {
     const baseline = bankBaselineQuery.data;
     if (!baseline) return null;
-    const days = summarizeHistory(bankPunchesQuery.data ?? [], todayKey)
-      .filter((day) => day.dateKey >= baseline.effective_from);
+    const days = aplicarAbonoDeIntervalos(
+      summarizeHistory(bankPunchesQuery.data ?? [], todayKey),
+      myIntervalsQuery.data ?? [],
+    ).filter((day) => day.dateKey >= baseline.effective_from);
     return baseline.baseline_seconds + summarizeBalance(days, myAbonoDates).saldo;
-  }, [bankBaselineQuery.data, bankPunchesQuery.data, todayKey, myAbonoDates]);
+  }, [bankBaselineQuery.data, bankPunchesQuery.data, todayKey, myAbonoDates, myIntervalsQuery.data]);
 
   // Resumo do mês escolhido. Horas trabalhadas contam todos os dias; extras,
   // negativas e saldo pulam os dias anteriores à data de corte, que já estão
@@ -636,7 +913,14 @@ export default function TimeClock() {
     return {
       ...summarizeBalance(days, myAbonoDates),
       worked: historyDays.reduce((sum, day) => sum + day.totalSeconds, 0),
-      hasDaysBeforeCutoff: days.length < historyDays.length,
+      // Só avisa da data de corte se existir ponto batido antes dela — a lista
+      // agora traz o mês inteiro, e dia vazio não significa hora fora da conta.
+      hasDaysBeforeCutoff: historyDays.some(
+        (day) =>
+          !!bankEffectiveFrom &&
+          day.dateKey < bankEffectiveFrom &&
+          Object.keys(day.punches).length > 0,
+      ),
     };
   }, [historyDays, bankEffectiveFrom, myAbonoDates]);
 
@@ -874,6 +1158,148 @@ export default function TimeClock() {
     },
   });
 
+  // Sair no meio do dia: o motivo vai junto da batida, para a volta já saber
+  // do que se trata e a equipe entender o buraco no dia.
+  const sairNoMeioDoDia = useMutation({
+    mutationFn: async (motivo: string) => {
+      if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
+      if (motivo.trim().length < 3) throw new Error("Diga para onde você vai (ex.: médico).");
+      const result = await timeClockSupabase.from<null>("time_clock_punches").insert({
+        organization_id: organizationId,
+        user_id: user.id,
+        kind: "saida_intervalo",
+        note: motivo.trim(),
+      });
+      if (result.error) throw result.error;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["time-clock-punches", organizationId, user?.id, todayKey],
+      });
+      setSaidaMeioOpen(false);
+      setSaidaMeioMotivo("");
+      toast.success("Saída registrada. Bata o retorno quando voltar.");
+    },
+    onError: (error: QueryError) => toast.error(error.message || "Não foi possível registrar a saída."),
+  });
+
+  const registrarRetorno = useMutation({
+    mutationFn: async () => {
+      if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
+      const saidaAberta = [...punches].reverse().find((punch) => punch.kind === "saida_intervalo");
+      const result = await timeClockSupabase.from<null>("time_clock_punches").insert({
+        organization_id: organizationId,
+        user_id: user.id,
+        kind: "volta_intervalo",
+      });
+      if (result.error) throw result.error;
+      return saidaAberta ?? null;
+    },
+    onSuccess: async (saidaAberta) => {
+      const atualizados = await punchesQuery.refetch();
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["time-clock-history", organizationId, user?.id, todayKey],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-team-history", organizationId] }),
+      ]);
+
+      const volta = [...(atualizados.data ?? [])].reverse().find((punch) => punch.kind === "volta_intervalo");
+      if (!saidaAberta || !volta) {
+        toast.success("Retorno registrado.");
+        return;
+      }
+      const minutos = Math.max(
+        1,
+        Math.round(
+          (new Date(volta.punched_at).getTime() - new Date(saidaAberta.punched_at).getTime()) / 60000,
+        ),
+      );
+      setIntervaloParaJustificar({
+        leftAt: saidaAberta.punched_at,
+        returnedAt: volta.punched_at,
+        minutos,
+      });
+      setJustificarMotivo(saidaAberta.note ?? "");
+      setJustificarTratamento("abono");
+      setJustificarOpen(true);
+    },
+    onError: (error: QueryError) => toast.error(error.message || "Não foi possível registrar o retorno."),
+  });
+
+  // O tempo fora sempre sai da conta do dia. Esta justificativa é o que decide
+  // se ele volta (abono com atestado) ou sai mesmo do banco de horas — e ADM
+  // ou Head precisa responder.
+  const justificarIntervalo = useMutation({
+    mutationFn: async () => {
+      if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
+      if (!intervaloParaJustificar) throw new Error("Nenhuma saída para justificar.");
+      if (justificarMotivo.trim().length < 3) throw new Error("Escreva o motivo da saída.");
+
+      const result = await timeClockSupabase
+        .from<null>("time_clock_interval_justifications")
+        .insert({
+          organization_id: organizationId,
+          user_id: user.id,
+          work_date: agencyDateKey(new Date(intervaloParaJustificar.leftAt)),
+          left_at: intervaloParaJustificar.leftAt,
+          returned_at: intervaloParaJustificar.returnedAt,
+          minutes: intervaloParaJustificar.minutos,
+          reason: justificarMotivo.trim(),
+          treatment: justificarTratamento,
+        });
+      if (result.error) throw result.error;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["time-clock-my-intervals", organizationId, user?.id] });
+      setJustificarOpen(false);
+      setIntervaloParaJustificar(null);
+      setJustificarMotivo("");
+      toast.success("Enviado para a ADM responder.");
+    },
+    onError: (error: QueryError) => toast.error(error.message || "Não foi possível enviar a justificativa."),
+  });
+
+  const salvarObservacao = useMutation({
+    mutationFn: async ({ dateKey, texto }: { dateKey: string; texto: string }) => {
+      if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
+      const limpo = texto.trim();
+
+      if (!limpo) {
+        const result = await timeClockSupabase
+          .from<null>("time_clock_day_notes")
+          .delete()
+          .eq("organization_id", organizationId)
+          .eq("user_id", user.id)
+          .eq("work_date", dateKey);
+        if (result.error) throw result.error;
+        return;
+      }
+
+      const result = await timeClockSupabase
+        .from<null>("time_clock_day_notes")
+        .upsert(
+          {
+            organization_id: organizationId,
+            user_id: user.id,
+            work_date: dateKey,
+            note: limpo,
+          },
+          { onConflict: "organization_id,user_id,work_date" },
+        );
+      if (result.error) throw result.error;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["time-clock-day-notes", organizationId, user?.id, historyMonth],
+      });
+      setNotaData(null);
+      setNotaTexto("");
+      toast.success("Observação salva.");
+    },
+    onError: (error: QueryError) => toast.error(error.message || "Não foi possível salvar a observação."),
+  });
+
   const requestAdjustment = useMutation({
     mutationFn: async () => {
       if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
@@ -974,6 +1400,31 @@ export default function TimeClock() {
       setAbsenceFile(null);
     },
     onError: (error: QueryError) => toast.error(error.message || "Não foi possível enviar o atestado."),
+  });
+
+  const reviewInterval = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: "approved" | "rejected" }) => {
+      if (!organizationId) throw new Error("Organização indisponível.");
+      const result = await timeClockSupabase
+        .from<null>("time_clock_interval_justifications")
+        .update({ status })
+        .eq("id", id)
+        .eq("organization_id", organizationId)
+        .eq("status", "pending");
+      if (result.error) throw result.error;
+    },
+    onSuccess: async (_, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["time-clock-pending-intervals", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-my-intervals", organizationId] }),
+      ]);
+      toast.success(
+        variables.status === "approved"
+          ? "Respondido: a pessoa já foi avisada."
+          : "Pedido recusado. A pessoa foi avisada.",
+      );
+    },
+    onError: (error: QueryError) => toast.error(error.message || "Não foi possível responder o pedido."),
   });
 
   const reviewAbsence = useMutation({
@@ -1084,17 +1535,76 @@ export default function TimeClock() {
               type="button"
               size="lg"
               className="mt-7 h-16 w-full rounded-2xl text-base font-semibold shadow-md sm:text-lg"
-              disabled={loading || registerPunch.isPending || !nextStep || !organizationId || isLegacy}
-              onClick={() => nextStep && registerPunch.mutate(nextStep.kind)}
+              disabled={
+                loading || registerPunch.isPending || registrarRetorno.isPending
+                || !nextStep || !organizationId || isLegacy
+              }
+              onClick={() => {
+                if (!nextStep) return;
+                // O retorno abre a justificativa logo depois de bater.
+                if (nextStep.kind === "volta_intervalo") registrarRetorno.mutate();
+                else registerPunch.mutate(nextStep.kind);
+              }}
             >
               <Clock3 className="mr-2 h-5 w-5" />
-              {registerPunch.isPending ? "Registrando..." : nextStep?.action ?? "Jornada concluída"}
+              {registerPunch.isPending || registrarRetorno.isPending
+                ? "Registrando..."
+                : nextStep?.action ?? "Jornada concluída"}
             </Button>
 
-            {nextStep && (
+            {/* Médico, banco, imprevisto: dá para sair e voltar quantas vezes
+                precisar, sem usar o almoço no lugar errado. */}
+            {situacaoDeHoje.podeSairNoMeio && (
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-3 h-12 w-full rounded-xl"
+                disabled={registerPunch.isPending || sairNoMeioDoDia.isPending || !organizationId || isLegacy}
+                onClick={() => { setSaidaMeioMotivo(""); setSaidaMeioOpen(true); }}
+              >
+                <DoorOpen className="mr-2 h-4 w-4" />
+                Preciso sair no meio do dia
+              </Button>
+            )}
+
+            {nextStep && nextStep.reference !== "—" && (
               <p className="mt-3 text-center text-xs text-muted-foreground">
                 Próximo horário de referência: {nextStep.reference}
               </p>
+            )}
+            {nextStep?.kind === "volta_intervalo" && (
+              <p className="mt-3 text-center text-xs text-muted-foreground">
+                Você está fora desde {formatPunchTime(
+                  [...punches].reverse().find((punch) => punch.kind === "saida_intervalo")?.punched_at
+                    ?? new Date().toISOString(),
+                )}. O tempo fora sai da conta do dia até a ADM responder.
+              </p>
+            )}
+
+            {intervalosDeHojeSemJustificativa.length > 0 && (
+              <div className="mt-4 rounded-xl border border-warning/30 bg-warning/5 p-3 text-sm">
+                <p className="font-medium">Saída no meio do dia sem justificativa</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Diga o que fazer com esse tempo para a ADM responder — senão ele fica como hora negativa.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {intervalosDeHojeSemJustificativa.map((par) => (
+                    <Button
+                      key={par.leftAt}
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setIntervaloParaJustificar(par);
+                        setJustificarMotivo(par.motivo);
+                        setJustificarTratamento("abono");
+                        setJustificarOpen(true);
+                      }}
+                    >
+                      Justificar {formatPunchTime(par.leftAt)}–{formatPunchTime(par.returnedAt)} ({par.minutos} min)
+                    </Button>
+                  ))}
+                </div>
+              </div>
             )}
 
             {/* Jornada de referência — compacta, abaixo do botão. */}
@@ -1222,7 +1732,7 @@ export default function TimeClock() {
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               {(myAdjustmentsQuery.data ?? []).slice(0, 6).map((request) => {
                 const status = ADJUSTMENT_STATUS[request.status];
-                const kindLabel = PUNCH_STEPS.find((step) => step.kind === request.kind)?.label ?? request.kind;
+                const kindLabel = PUNCH_KIND_LABEL[request.kind] ?? request.kind;
                 return (
                   <article key={request.id} className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
@@ -1304,7 +1814,7 @@ export default function TimeClock() {
         <section className="mt-10">
           <SectionHeader
             title="Histórico"
-            count={historyDays.length}
+            count={historyDays.filter((day) => Object.keys(day.punches).length > 0).length}
             icon={CalendarRange}
             action={
               <div className="flex items-center gap-1">
@@ -1409,12 +1919,26 @@ export default function TimeClock() {
                     <TableHead className="min-w-28">Total</TableHead>
                     <TableHead className="min-w-28">Saldo</TableHead>
                     <TableHead className="min-w-56">Situação</TableHead>
+                    <TableHead className="min-w-56">Observação</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {historyDays.map((day) => (
-                    <TableRow key={day.dateKey}>
-                      <TableCell className="font-medium capitalize">{formatHistoryDate(day.dateKey)}</TableCell>
+                  {historyDays.map((day) => {
+                    const semRegistro = Object.keys(day.punches).length === 0;
+                    const futuro = day.dateKey > todayKey;
+                    const nota = notaPorDia.get(day.dateKey);
+                    const pedidosDoDia = intervalosPorDia.get(day.dateKey) ?? [];
+                    return (
+                    <TableRow
+                      key={day.dateKey}
+                      className={cn(
+                        futuro && "opacity-55",
+                        day.dateKey === todayKey && "bg-brand-soft/30",
+                      )}
+                    >
+                      <TableCell className={cn("font-medium capitalize", semRegistro && "text-muted-foreground")}>
+                        {formatHistoryDate(day.dateKey)}
+                      </TableCell>
                       {PUNCH_STEPS.map((step) => (
                         <TableCell key={step.kind} className="text-center font-medium tabular-nums">
                           {day.punches[step.kind] ? formatPunchTime(day.punches[step.kind]!.punched_at) : "—"}
@@ -1452,7 +1976,11 @@ export default function TimeClock() {
                             {day.alerts.map((alert) => (
                               <StatusBadge
                                 key={alert}
-                                variant={alert === "Em andamento" ? "info" : "warning"}
+                                variant={
+                                  alert === "Em andamento" ? "info"
+                                    : alert === "A registrar" || alert === "Fim de semana" ? "neutral"
+                                      : "warning"
+                                }
                                 size="sm"
                               >
                                 {alert}
@@ -1460,9 +1988,33 @@ export default function TimeClock() {
                             ))}
                           </div>
                         )}
+                        {/* O que a ADM respondeu (ou ainda não) sobre o tempo fora. */}
+                        {pedidosDoDia.map((pedido) => (
+                          <p key={pedido.id} className="mt-1 text-[11px] text-muted-foreground">
+                            {pedido.minutes} min fora ·{" "}
+                            {pedido.status === "pending"
+                              ? "aguardando a ADM"
+                              : pedido.status === "approved"
+                                ? pedido.treatment === "abono" ? "abonado" : "descontado do banco"
+                                : "recusado"}
+                          </p>
+                        ))}
+                      </TableCell>
+                      <TableCell>
+                        <button
+                          type="button"
+                          onClick={() => { setNotaData(day.dateKey); setNotaTexto(nota?.note ?? ""); }}
+                          className={cn(
+                            "text-left text-xs transition-colors hover:text-foreground",
+                            nota ? "text-foreground" : "text-muted-foreground underline decoration-dotted",
+                          )}
+                        >
+                          {nota?.note ?? "Anotar"}
+                        </button>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -1523,7 +2075,7 @@ export default function TimeClock() {
                 <div className="mt-4 space-y-3">
                   {(pendingAdjustmentsQuery.data ?? []).map((request) => {
                     const member = teamMembersQuery.data?.find((item) => item.user_id === request.user_id);
-                    const kindLabel = PUNCH_STEPS.find((step) => step.kind === request.kind)?.label ?? request.kind;
+                    const kindLabel = PUNCH_KIND_LABEL[request.kind] ?? request.kind;
                     const reviewing = reviewAdjustment.isPending && reviewAdjustment.variables?.id === request.id;
                     return (
                       <article key={request.id} className="rounded-xl border border-border/70 bg-card p-4">
@@ -1561,6 +2113,69 @@ export default function TimeClock() {
                 </div>
               )}
             </div>
+
+            {/* Saídas no meio do dia: sempre exigem resposta — abonar devolve
+                as horas, "banco" só precisa de ciência. */}
+            {(pendingIntervalsQuery.data ?? []).length > 0 && (
+              <div className="mt-4 rounded-2xl border border-warning/25 bg-warning/5 p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="font-semibold">Saídas no meio do dia</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Aprovar significa aceitar o que a pessoa pediu: abono (com atestado) ou desconto do banco.
+                    </p>
+                  </div>
+                  <StatusBadge variant="warning" size="sm">
+                    {pendingIntervalsQuery.data?.length ?? 0} pendente(s)
+                  </StatusBadge>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {(pendingIntervalsQuery.data ?? []).map((pedido) => {
+                    const member = teamMembersQuery.data?.find((item) => item.user_id === pedido.user_id);
+                    const respondendo = reviewInterval.isPending && reviewInterval.variables?.id === pedido.id;
+                    return (
+                      <article key={pedido.id} className="rounded-xl border border-border/70 bg-card p-4">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="font-medium">{member?.display_name ?? "Colaborador"}</p>
+                            {member?.job_title && <p className="text-xs text-muted-foreground">{member.job_title}</p>}
+                            <p className="mt-2 text-sm font-medium">
+                              {formatHistoryDate(pedido.work_date)} · {formatPunchTime(pedido.left_at)} às{" "}
+                              {formatPunchTime(pedido.returned_at)} ({pedido.minutes} min)
+                            </p>
+                            <p className="mt-1 text-sm text-muted-foreground">{pedido.reason}</p>
+                            <p className="mt-2">
+                              <StatusBadge variant={pedido.treatment === "abono" ? "info" : "neutral"} size="sm">
+                                {pedido.treatment === "abono" ? "Pede abono (atestado)" : "Descontar do banco"}
+                              </StatusBadge>
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              disabled={respondendo}
+                              onClick={() => reviewInterval.mutate({ id: pedido.id, status: "rejected" })}
+                            >
+                              <XCircle className="mr-1.5 h-4 w-4" /> Recusar
+                            </Button>
+                            <Button
+                              size="sm"
+                              disabled={respondendo}
+                              onClick={() => reviewInterval.mutate({ id: pedido.id, status: "approved" })}
+                            >
+                              <CheckCircle2 className="mr-1.5 h-4 w-4" /> Aprovar
+                            </Button>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="mt-6">
               <SectionHeader
@@ -1858,6 +2473,126 @@ export default function TimeClock() {
         )}
       </main>
 
+      <Dialog open={saidaMeioOpen} onOpenChange={(open) => !sairNoMeioDoDia.isPending && setSaidaMeioOpen(open)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Sair no meio do dia</DialogTitle></DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => { event.preventDefault(); sairNoMeioDoDia.mutate(saidaMeioMotivo); }}
+          >
+            <p className="text-sm text-muted-foreground">
+              Registra a saída agora. Quando voltar, bata o retorno — aí você escolhe se o tempo fora
+              é abonado (atestado) ou sai do seu banco de horas.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="saida-meio-motivo">Para onde você vai?</Label>
+              <Input
+                id="saida-meio-motivo"
+                value={saidaMeioMotivo}
+                onChange={(event) => setSaidaMeioMotivo(event.target.value)}
+                placeholder="Ex.: consulta médica"
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setSaidaMeioOpen(false)}>Cancelar</Button>
+              <Button type="submit" disabled={sairNoMeioDoDia.isPending || saidaMeioMotivo.trim().length < 3}>
+                {sairNoMeioDoDia.isPending ? "Registrando..." : "Registrar saída"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={justificarOpen} onOpenChange={(open) => !justificarIntervalo.isPending && setJustificarOpen(open)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>O que fazer com esse tempo?</DialogTitle></DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => { event.preventDefault(); justificarIntervalo.mutate(); }}
+          >
+            {intervaloParaJustificar && (
+              <p className="text-sm text-muted-foreground">
+                Você ficou <strong>{intervaloParaJustificar.minutos} min</strong> fora
+                ({formatPunchTime(intervaloParaJustificar.leftAt)} às {formatPunchTime(intervaloParaJustificar.returnedAt)}).
+                A ADM precisa responder.
+              </p>
+            )}
+            <div className="space-y-1.5">
+              <Label>Como contar</Label>
+              <Select
+                value={justificarTratamento}
+                onValueChange={(value: IntervalTreatment) => setJustificarTratamento(value)}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="abono">Tenho atestado — pedir abono</SelectItem>
+                  <SelectItem value="banco">Descontar do meu banco de horas</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {justificarTratamento === "abono"
+                  ? "Se a ADM aprovar, o tempo volta a contar como trabalhado. Leve o atestado."
+                  : "O tempo sai do seu banco de horas. A ADM só precisa tomar ciência."}
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="justificar-motivo">Motivo</Label>
+              <Textarea
+                id="justificar-motivo"
+                rows={3}
+                value={justificarMotivo}
+                onChange={(event) => setJustificarMotivo(event.target.value)}
+                placeholder="Ex.: consulta médica às 10h"
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setJustificarOpen(false)}>Depois</Button>
+              <Button type="submit" disabled={justificarIntervalo.isPending || justificarMotivo.trim().length < 3}>
+                {justificarIntervalo.isPending ? "Enviando..." : "Enviar para a ADM"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={notaData !== null} onOpenChange={(open) => !salvarObservacao.isPending && !open && setNotaData(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Observação de {notaData ? formatHistoryDate(notaData) : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (notaData) salvarObservacao.mutate({ dateKey: notaData, texto: notaTexto });
+            }}
+          >
+            <p className="text-sm text-muted-foreground">
+              Fica registrada no seu ponto e a ADM lê junto com o dia. Serve para explicar uma falta
+              de registro, um atraso ou um compromisso marcado.
+            </p>
+            <Textarea
+              rows={4}
+              value={notaTexto}
+              onChange={(event) => setNotaTexto(event.target.value)}
+              placeholder="Ex.: saí às 10h para o médico, volto depois do almoço"
+            />
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setNotaData(null)}>Cancelar</Button>
+              <Button type="submit" disabled={salvarObservacao.isPending}>
+                {salvarObservacao.isPending
+                  ? "Salvando..."
+                  : notaTexto.trim() ? "Salvar observação" : "Apagar observação"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={adjustmentOpen} onOpenChange={(open) => !requestAdjustment.isPending && setAdjustmentOpen(open)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -1901,7 +2636,7 @@ export default function TimeClock() {
               <Select value={adjustmentKind} onValueChange={(value: PunchKind) => setAdjustmentKind(value)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {PUNCH_STEPS.map((step) => (
+                  {[...PUNCH_STEPS, PASSO_SAIDA_INTERVALO, PASSO_VOLTA_INTERVALO].map((step) => (
                     <SelectItem key={step.kind} value={step.kind}>{step.label}</SelectItem>
                   ))}
                 </SelectContent>
