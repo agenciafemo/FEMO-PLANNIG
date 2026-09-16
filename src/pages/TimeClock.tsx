@@ -59,6 +59,7 @@ import {
   diasDoMes,
   estadoDoDia,
   saiuAntes,
+  toleranciaDoDia,
   TOLERANCIA_MINUTOS,
   type PunchKind,
 } from "@/lib/timeClockDia";
@@ -328,6 +329,8 @@ type HistoryDay = {
   totalSeconds: number;
   /** Tempo fora abonado por ADM/Head: volta a contar como trabalhado. */
   abonoSeconds: number;
+  /** Minutinhos perdoados pela tolerância (art. 58 §1º da CLT). */
+  toleranciaSeconds: number;
   partial: boolean;
   alerts: string[];
 };
@@ -391,6 +394,14 @@ function summarizeHistory(punches: TimeClockPunch[], todayKey: string): HistoryD
         foraAgora: conta.foraAgora,
         totalSeconds,
         abonoSeconds: 0,
+        toleranciaSeconds: toleranciaDoDia(
+          Object.fromEntries(
+            PUNCH_STEPS.filter((step) => byKind[step.kind]).map((step) => [
+              step.kind,
+              agencySecondOfDay(byKind[step.kind]!.punched_at),
+            ]),
+          ),
+        ),
         partial: pairCount < 2,
         alerts,
       };
@@ -436,6 +447,7 @@ function diaVazio(dateKey: string, todayKey: string): HistoryDay {
     foraAgora: false,
     totalSeconds: 0,
     abonoSeconds: 0,
+    toleranciaSeconds: 0,
     partial: false,
     alerts,
   };
@@ -484,9 +496,12 @@ function dayBalanceSeconds(day: HistoryDay, abonoDates?: Set<string>): number | 
   // Dia coberto por atestado aprovado é abonado: não gera negativa nem extra.
   if (abonoDates?.has(day.dateKey)) return null;
   if (!isCompleteDay(day)) return null;
-  const expected = isBusinessDay(day.dateKey) ? EXPECTED_DAILY_SECONDS : 0;
-  // O tempo fora abonado conta como trabalhado.
-  return day.totalSeconds + day.abonoSeconds - expected;
+  const diaUtil = isBusinessDay(day.dateKey);
+  const expected = diaUtil ? EXPECTED_DAILY_SECONDS : 0;
+  // O tempo fora abonado conta como trabalhado, e a tolerância devolve os
+  // minutinhos de atraso/saída antecipada. No fim de semana não há horário de
+  // referência, então não há o que tolerar.
+  return day.totalSeconds + day.abonoSeconds + (diaUtil ? day.toleranciaSeconds : 0) - expected;
 }
 
 // Formata um saldo com sinal (+1h 30min / −0h 45min / 0h 00min).
@@ -1979,16 +1994,25 @@ export default function TimeClock() {
                           const balance = dayBalanceSeconds(day);
                           if (balance === null) return <span className="text-muted-foreground">—</span>;
                           return (
-                            <span
-                              className={cn(
-                                "font-semibold tabular-nums",
-                                balance > 0 && "text-success",
-                                balance < 0 && "text-destructive",
-                                balance === 0 && "text-muted-foreground",
+                            <>
+                              <span
+                                className={cn(
+                                  "font-semibold tabular-nums",
+                                  balance > 0 && "text-success",
+                                  balance < 0 && "text-destructive",
+                                  balance === 0 && "text-muted-foreground",
+                                )}
+                              >
+                                {formatBalance(balance)}
+                              </span>
+                              {/* Sem isto o saldo "não bate" com as batidas e
+                                  parece erro de conta. */}
+                              {day.toleranciaSeconds > 0 && (
+                                <span className="ml-1 text-[10px] text-muted-foreground">
+                                  inclui {Math.round(day.toleranciaSeconds / 60)} min de tolerância
+                                </span>
                               )}
-                            >
-                              {formatBalance(balance)}
-                            </span>
+                            </>
                           );
                         })()}
                       </TableCell>
