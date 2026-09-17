@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   atrasou,
+  classificarBatida,
   contarDia,
   diasDoMes,
   estadoDoDia,
+  foraDaJanela,
   saiuAntes,
   toleranciaDoDia,
   type PunchKind,
@@ -190,6 +192,76 @@ describe("tolerância nas horas", () => {
 
   it("dia sem batidas não perdoa nada", () => {
     expect(toleranciaDoDia({})).toBe(0);
+  });
+});
+
+describe("um botão só: o horário diz o que é a batida", () => {
+  const dentro = estadoDoDia(["entrada"]);
+  const depoisDoAlmoco = estadoDoDia(["entrada", "saida_almoco", "volta_almoco"]);
+
+  it("primeira batida do dia é entrada, a qualquer hora", () => {
+    expect(classificarBatida(estadoDoDia([]), hora(7, 10), false)).toBe("entrada");
+    expect(classificarBatida(estadoDoDia([]), hora(11, 0), false)).toBe("entrada");
+  });
+
+  it("sair 09:00 é saída no meio do dia, não almoço", () => {
+    // O caso que motivou o botão único: às 08:47 a tela oferecia "saída para
+    // o almoço" só porque era a próxima etapa da jornada.
+    expect(classificarBatida(dentro, hora(9, 0), false)).toBe("saida_intervalo");
+  });
+
+  it("sair 12:00 é almoço", () => {
+    expect(classificarBatida(dentro, hora(12, 0), false)).toBe("saida_almoco");
+  });
+
+  it("almoço só uma vez: a segunda saída na mesma janela é meio do dia", () => {
+    expect(classificarBatida(depoisDoAlmoco, hora(14, 0), true)).toBe("saida_intervalo");
+  });
+
+  it("a partir das 17h encerra o dia", () => {
+    expect(classificarBatida(depoisDoAlmoco, hora(17, 30), true)).toBe("saida");
+    expect(classificarBatida(depoisDoAlmoco, hora(17, 0), true)).toBe("saida");
+  });
+
+  it("sair 16h não encerra o dia: espera o retorno", () => {
+    expect(classificarBatida(depoisDoAlmoco, hora(16, 0), true)).toBe("saida_intervalo");
+  });
+
+  it("quem está fora só volta — o horário não muda isso", () => {
+    expect(classificarBatida(estadoDoDia(["entrada", "saida_almoco"]), hora(13, 0), true))
+      .toBe("volta_almoco");
+    expect(classificarBatida(estadoDoDia(["entrada", "saida_intervalo"]), hora(9, 40), false))
+      .toBe("volta_intervalo");
+  });
+});
+
+describe("o que manda o dia para revisão", () => {
+  it("jornada normal não vai para revisão", () => {
+    expect(foraDaJanela("entrada", hora(8, 30))).toBe(false);
+    expect(foraDaJanela("saida_almoco", hora(12, 0))).toBe(false);
+    expect(foraDaJanela("volta_almoco", hora(13, 0))).toBe(false);
+    expect(foraDaJanela("saida", hora(17, 30))).toBe(false);
+  });
+
+  it("atraso de minutos não é 'fora do horário'", () => {
+    // Senão quase todo dia cairia na fila da ADM. Quem cobra minutos é a
+    // tolerância, não a revisão.
+    expect(foraDaJanela("entrada", hora(8, 36))).toBe(false);
+    expect(foraDaJanela("saida", hora(17, 24))).toBe(false);
+  });
+
+  it("entrar 05:30 ou 10:30 vai para revisão", () => {
+    expect(foraDaJanela("entrada", hora(5, 30))).toBe(true);
+    expect(foraDaJanela("entrada", hora(10, 30))).toBe(true);
+  });
+
+  it("sair 22h vai para revisão", () => {
+    expect(foraDaJanela("saida", hora(22, 0))).toBe(true);
+  });
+
+  it("saída no meio do dia sempre vai para revisão", () => {
+    expect(foraDaJanela("saida_intervalo", hora(9, 0))).toBe(true);
+    expect(foraDaJanela("volta_intervalo", hora(11, 0))).toBe(true);
   });
 });
 
