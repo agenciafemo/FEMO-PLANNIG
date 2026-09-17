@@ -246,6 +246,36 @@ export function classificarBatida(
 }
 
 /**
+ * Primeira batida do dia depois da janela da entrada: o horário sozinho não
+ * diz se a pessoa está chegando tarde ou se esqueceu a entrada e está saindo
+ * para o almoço. Em 16/09 a saída das 12:00 virou entrada e estragou o dia
+ * inteiro — então, a partir das 10h sem entrada, a tela pergunta.
+ */
+export function perguntarPelaEntrada(estado: EstadoDoDia, segundoDoDia: number): boolean {
+  return estado.proximo === "entrada" && segundoDoDia > JANELAS.entrada!.ate;
+}
+
+/**
+ * O que a batida de agora vira quando a pessoa diz que esqueceu a entrada.
+ * A entrada informada vai como pedido de ajuste e já entra na sequência do
+ * servidor, então a batida é classificada como se a pessoa estivesse dentro.
+ */
+export function batidaAposEntradaEsquecida(segundoDoDia: number): PunchKind {
+  return classificarBatida(estadoDoDia(["entrada"]), segundoDoDia, false);
+}
+
+/**
+ * Batidas que existem uma vez por dia. O ajuste aprovado de um desses tipos
+ * CORRIGE o horário que já está lá; saída no meio do dia e retorno se repetem
+ * e sempre acrescentam. Espelha prepare_time_clock_adjustment_request.
+ */
+export const KINDS_UMA_VEZ_POR_DIA: PunchKind[] = ["entrada", "saida_almoco", "volta_almoco", "saida"];
+
+export function ajusteCorrigeBatida(kind: PunchKind): boolean {
+  return KINDS_UMA_VEZ_POR_DIA.includes(kind);
+}
+
+/**
  * A batida foge da jornada? É isto que manda o dia para revisão.
  *
  * Sair no meio do dia e voltar sempre contam como fora da jornada: são a

@@ -39,7 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
@@ -54,12 +54,15 @@ import { useOrganization } from "@/hooks/useOrganization";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import {
+  ajusteCorrigeBatida,
   atrasou,
+  batidaAposEntradaEsquecida,
   classificarBatida,
   contarDia,
   diasDoMes,
   direcaoNoHorario,
   estadoDoDia,
+  perguntarPelaEntrada,
   saiuAntes,
   toleranciaDoDia,
   type PunchKind,
@@ -155,6 +158,7 @@ interface TimeClockFilterBuilder<T> extends PromiseLike<QueryResult<T>> {
   eq(column: string, value: unknown): TimeClockFilterBuilder<T>;
   gte(column: string, value: string): TimeClockFilterBuilder<T>;
   lt(column: string, value: string): TimeClockFilterBuilder<T>;
+  in(column: string, values: unknown[]): TimeClockFilterBuilder<T>;
   order(column: string, options?: { ascending?: boolean }): TimeClockFilterBuilder<T>;
   insert(values: Record<string, unknown>): TimeClockFilterBuilder<T>;
   update(values: Record<string, unknown>): TimeClockFilterBuilder<T>;
@@ -576,6 +580,9 @@ export default function TimeClock() {
   // "saída no meio do dia" ou "retorno". Quem resolve é direcaoNoHorario.
   const [adjustmentKind, setAdjustmentKind] = useState<PunchKind | "outro">("entrada");
   const [adjustmentReason, setAdjustmentReason] = useState("");
+  // Primeira batida depois das 10h: chegando agora ou esqueceu a entrada?
+  const [entradaEsquecidaOpen, setEntradaEsquecidaOpen] = useState(false);
+  const [entradaEsquecidaHora, setEntradaEsquecidaHora] = useState("08:30");
   // Saída no meio do dia: o que fazer com as horas é perguntado na volta.
   const [justificarOpen, setJustificarOpen] = useState(false);
   const [justificarTratamento, setJustificarTratamento] = useState<IntervalTreatment>("abono");
@@ -653,6 +660,45 @@ export default function TimeClock() {
     refetchInterval: 30_000,
     retry: false,
   });
+
+  // Batidas já gravadas nos dias dos pedidos: quem aprova precisa ver que
+  // "Entrada 08:30" vai TROCAR a entrada das 12:00, não criar outra.
+  const pendingAdjustmentPunchesQuery = useQuery({
+    queryKey: [
+      "time-clock-pending-adjustment-punches",
+      organizationId,
+      (pendingAdjustmentsQuery.data ?? []).map((request) => request.id).join(","),
+    ],
+    queryFn: async () => {
+      const pedidos = pendingAdjustmentsQuery.data ?? [];
+      const dias = pedidos
+        .map((pedido) => agencyDateKey(new Date(pedido.requested_punched_at)))
+        .sort();
+      const result = await timeClockSupabase
+        .from<TimeClockPunch[]>("time_clock_punches")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .in("user_id", [...new Set(pedidos.map((pedido) => pedido.user_id))])
+        .gte("punched_at", agencyDayRange(dias[0]).start)
+        .lt("punched_at", agencyDayRange(dias[dias.length - 1]).end)
+        .order("punched_at", { ascending: true });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: !!organizationId && (pendingAdjustmentsQuery.data?.length ?? 0) > 0,
+    retry: false,
+  });
+
+  const batidaQueOAjusteCorrige = (request: TimeClockAdjustmentRequest) => {
+    if (!ajusteCorrigeBatida(request.kind)) return undefined;
+    const dia = agencyDateKey(new Date(request.requested_punched_at));
+    return (pendingAdjustmentPunchesQuery.data ?? []).find(
+      (punch) =>
+        punch.user_id === request.user_id &&
+        punch.kind === request.kind &&
+        agencyDateKey(new Date(punch.punched_at)) === dia,
+    );
+  };
 
   const pendingIntervalsQuery = useQuery({
     queryKey: ["time-clock-pending-intervals", organizationId],
@@ -798,9 +844,17 @@ export default function TimeClock() {
   // Rótulo neutro: o app não promete almoço às 08:47. Quem está dentro
   // "registra saída" — o horário é que decide se aquilo foi almoço, saída no
   // meio do dia ou fim de jornada.
+  // Sem entrada e já passou das 10h: pode ser chegada tarde ou entrada
+  // esquecida. O botão não promete "entrada" — a pergunta vem no clique.
+  const semEntradaDepoisDaJanela = perguntarPelaEntrada(
+    situacaoDeHoje,
+    agencySecondOfDay(new Date().toISOString()),
+  );
   const acaoDoBotao = situacaoDeHoje.encerrado
     ? "Jornada concluída"
-    : situacaoDeHoje.proximo === "entrada"
+    : semEntradaDepoisDaJanela
+      ? "Registrar ponto"
+      : situacaoDeHoje.proximo === "entrada"
       ? "Registrar entrada"
       : situacaoDeHoje.proximo === "volta_almoco" || situacaoDeHoje.proximo === "volta_intervalo"
         ? "Registrar retorno"
@@ -1258,15 +1312,37 @@ export default function TimeClock() {
    * para o médico gravava almoço sem querer.
    */
   const baterPonto = useMutation({
-    mutationFn: async () => {
+    // entradaEsquecida = "HH:mm" quando a pessoa diz que chegou antes e não
+    // bateu. A entrada vai como pedido de ajuste ANTES da batida: o servidor
+    // conta ajuste pendente na sequência, então a batida de agora já é saída.
+    mutationFn: async (entradaEsquecida?: string) => {
       if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
 
       const agora = new Date();
-      const sugestao = classificarBatida(
+      const segundoAgora = agencySecondOfDay(agora.toISOString());
+      let sugestao = classificarBatida(
         situacaoDeHoje,
-        agencySecondOfDay(agora.toISOString()),
+        segundoAgora,
         punches.some((punch) => punch.kind === "saida_almoco"),
       );
+
+      if (entradaEsquecida) {
+        const entradaEm = new Date(`${todayKey}T${entradaEsquecida}:00-03:00`);
+        if (Number.isNaN(entradaEm.getTime()) || entradaEm.getTime() >= agora.getTime()) {
+          throw new Error("Informe um horário de chegada anterior a agora.");
+        }
+        const pedido = await timeClockSupabase
+          .from<null>("time_clock_adjustment_requests")
+          .insert({
+            organization_id: organizationId,
+            user_id: user.id,
+            requested_punched_at: entradaEm.toISOString(),
+            kind: "entrada",
+            reason: "Esqueci de bater a entrada.",
+          });
+        if (pedido.error) throw pedido.error;
+        sugestao = batidaAposEntradaEsquecida(segundoAgora);
+      }
 
       const result = await timeClockSupabase.from<null>("time_clock_punches").insert({
         organization_id: organizationId,
@@ -1279,8 +1355,11 @@ export default function TimeClock() {
       return saidaAberta ?? null;
     },
     onSuccess: async (saidaAberta) => {
+      setEntradaEsquecidaOpen(false);
       const atualizados = await punchesQuery.refetch();
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["time-clock-my-adjustments", organizationId, user?.id] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-pending-adjustments", organizationId] }),
         queryClient.invalidateQueries({
           queryKey: ["time-clock-history", organizationId, user?.id, todayKey],
         }),
@@ -1319,7 +1398,10 @@ export default function TimeClock() {
         setJustificarOpen(true);
       }
     },
-    onError: (error: QueryError) => {
+    onError: async (error: QueryError) => {
+      // Se o pedido da entrada saiu e só a batida falhou, a tela precisa saber
+      // do pedido: no próximo clique o botão já não pergunta de novo.
+      await queryClient.invalidateQueries({ queryKey: ["time-clock-my-adjustments", organizationId, user?.id] });
       toast.error(error.message || "Não foi possível registrar o ponto.");
     },
   });
@@ -1461,11 +1543,12 @@ export default function TimeClock() {
     onSuccess: async (_, variables) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["time-clock-pending-adjustments", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-pending-adjustment-punches", organizationId] }),
         queryClient.invalidateQueries({ queryKey: ["time-clock-punches", organizationId] }),
         queryClient.invalidateQueries({ queryKey: ["time-clock-history", organizationId] }),
         queryClient.invalidateQueries({ queryKey: ["time-clock-team-history", organizationId] }),
       ]);
-      toast.success(variables.status === "approved" ? "Ajuste aprovado e incluído no ponto." : "Ajuste rejeitado.");
+      toast.success(variables.status === "approved" ? "Ajuste aprovado. O ponto foi atualizado." : "Ajuste rejeitado.");
     },
     onError: (error: QueryError) => toast.error(error.message || "Não foi possível analisar a solicitação."),
   });
@@ -1677,7 +1760,15 @@ export default function TimeClock() {
                 loading || baterPonto.isPending || situacaoDeHoje.encerrado
                 || !organizationId || isLegacy
               }
-              onClick={() => baterPonto.mutate()}
+              onClick={() => {
+                // Confere na hora do clique, não no último render.
+                if (perguntarPelaEntrada(situacaoDeHoje, agencySecondOfDay(new Date().toISOString()))) {
+                  setEntradaEsquecidaHora("08:30");
+                  setEntradaEsquecidaOpen(true);
+                  return;
+                }
+                baterPonto.mutate(undefined);
+              }}
             >
               <Clock3 className="mr-2 h-5 w-5" />
               {baterPonto.isPending ? "Registrando..." : acaoDoBotao}
@@ -1749,7 +1840,7 @@ export default function TimeClock() {
               className="mt-4"
               icon={Clock3}
               title="Nenhum registro hoje"
-              description="Use o botão Registrar entrada para iniciar sua jornada."
+              description={`Use o botão ${acaoDoBotao} para iniciar sua jornada.`}
             />
           ) : (
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -2009,11 +2100,20 @@ export default function TimeClock() {
                       </TableCell>
                       {PUNCH_STEPS.map((step) => {
                         const batida = day.punches[step.kind];
-                        const pedido = batida ? undefined : ajustePendentePara(day.dateKey, step.kind);
+                        const pedido = ajustePendentePara(day.dateKey, step.kind);
                         return (
                           <TableCell key={step.kind} className="text-center font-medium tabular-nums">
                             {batida ? (
-                              formatPunchTime(batida.punched_at)
+                              <>
+                                {formatPunchTime(batida.punched_at)}
+                                {/* Correção pedida: o horário atual só é
+                                    trocado quando a ADM aprovar. */}
+                                {pedido && (
+                                  <span className="block text-[10px] font-normal text-warning" title="Aguardando a ADM aprovar">
+                                    → {formatPunchTime(pedido.requested_punched_at)} em análise
+                                  </span>
+                                )}
+                              </>
                             ) : pedido ? (
                               // O horário pedido aparece aqui na hora: antes a
                               // pessoa mandava e a linha continuava vazia, sem
@@ -2181,6 +2281,7 @@ export default function TimeClock() {
                     const member = teamMembersQuery.data?.find((item) => item.user_id === request.user_id);
                     const kindLabel = PUNCH_KIND_LABEL[request.kind] ?? request.kind;
                     const reviewing = reviewAdjustment.isPending && reviewAdjustment.variables?.id === request.id;
+                    const corrige = batidaQueOAjusteCorrige(request);
                     return (
                       <article key={request.id} className="rounded-xl border border-border/70 bg-card p-4">
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -2190,6 +2291,11 @@ export default function TimeClock() {
                             <p className="mt-2 text-sm font-medium">
                               {kindLabel} · {formatHistoryDate(agencyDateKey(new Date(request.requested_punched_at)))} às {formatPunchTime(request.requested_punched_at)}
                             </p>
+                            {corrige && (
+                              <p className="mt-1 text-xs font-medium text-warning">
+                                Corrige o horário registrado às {formatPunchTime(corrige.punched_at)}
+                              </p>
+                            )}
                             <p className="mt-1 text-sm text-muted-foreground">{request.reason}</p>
                           </div>
                           <div className="flex shrink-0 gap-2">
@@ -2793,6 +2899,18 @@ export default function TimeClock() {
                         />
                       </div>
                     </div>
+                    {/* Deixa claro que é correção, não uma batida a mais. */}
+                    {(() => {
+                      if (adjustmentKind === "outro" || !ajusteCorrigeBatida(adjustmentKind)) return null;
+                      const atual = diaAberto?.punches[adjustmentKind];
+                      if (!atual) return null;
+                      return (
+                        <p className="rounded-lg bg-warning/10 px-2.5 py-1.5 text-xs text-warning">
+                          {PUNCH_KIND_LABEL[adjustmentKind]} deste dia está como{" "}
+                          {formatPunchTime(atual.punched_at)}. Quando a ADM aprovar, fica o horário novo.
+                        </p>
+                      );
+                    })()}
                     <div className="space-y-1.5">
                       <Label htmlFor="dia-motivo">Motivo</Label>
                       <Textarea
@@ -2845,6 +2963,69 @@ export default function TimeClock() {
                     </Button>
                   </div>
                 </form>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Primeira batida depois das 10h. Antes, ela virava entrada sempre: a
+          saída para o almoço das 12:00 era gravada como chegada e o dia todo
+          ficava deslocado. */}
+      <Dialog
+        open={entradaEsquecidaOpen}
+        onOpenChange={(open) => !baterPonto.isPending && setEntradaEsquecidaOpen(open)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sua entrada de hoje não foi registrada</DialogTitle>
+            <DialogDescription>
+              Você está chegando agora ou esqueceu de bater a entrada?
+            </DialogDescription>
+          </DialogHeader>
+          {(() => {
+            const vira = PUNCH_KIND_LABEL[batidaAposEntradaEsquecida(agencySecondOfDay(new Date().toISOString()))];
+            return (
+              <div className="space-y-3">
+                <form
+                  className="space-y-3 rounded-xl border border-border/60 p-3"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    baterPonto.mutate(entradaEsquecidaHora);
+                  }}
+                >
+                  <div>
+                    <p className="text-sm font-medium">Esqueci de bater a entrada</p>
+                    <p className="text-xs text-muted-foreground">
+                      O horário de chegada vai para a ADM aprovar. Esta batida fica como{" "}
+                      <span className="font-medium text-foreground">{vira.toLowerCase()}</span>.
+                    </p>
+                  </div>
+                  <div className="flex items-end gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="entrada-esquecida">Cheguei às</Label>
+                      <Input
+                        id="entrada-esquecida"
+                        type="time"
+                        value={entradaEsquecidaHora}
+                        onChange={(event) => setEntradaEsquecidaHora(event.target.value)}
+                        required
+                      />
+                    </div>
+                    <Button type="submit" className="flex-1" disabled={baterPonto.isPending || !entradaEsquecidaHora}>
+                      {baterPonto.isPending && baterPonto.variables ? "Registrando..." : `Registrar ${vira.toLowerCase()}`}
+                    </Button>
+                  </div>
+                </form>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={baterPonto.isPending}
+                  onClick={() => baterPonto.mutate(undefined)}
+                >
+                  {baterPonto.isPending && !baterPonto.variables ? "Registrando..." : "Estou chegando agora"}
+                </Button>
               </div>
             );
           })()}
