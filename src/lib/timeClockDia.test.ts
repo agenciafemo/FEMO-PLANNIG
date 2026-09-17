@@ -4,6 +4,7 @@ import {
   classificarBatida,
   contarDia,
   diasDoMes,
+  direcaoNoHorario,
   estadoDoDia,
   foraDaJanela,
   saiuAntes,
@@ -262,6 +263,43 @@ describe("o que manda o dia para revisão", () => {
   it("saída no meio do dia sempre vai para revisão", () => {
     expect(foraDaJanela("saida_intervalo", hora(9, 0))).toBe(true);
     expect(foraDaJanela("volta_intervalo", hora(11, 0))).toBe(true);
+  });
+});
+
+describe("horário 'Outro': o sistema descobre se é saída ou retorno", () => {
+  const diaNormal = [
+    { kind: "entrada" as PunchKind, segundo: hora(8, 30) },
+    { kind: "saida_almoco" as PunchKind, segundo: hora(12, 0) },
+    { kind: "volta_almoco" as PunchKind, segundo: hora(13, 0) },
+    { kind: "saida" as PunchKind, segundo: hora(17, 30) },
+  ];
+
+  it("estava trabalhando às 10h: o que falta é a saída", () => {
+    expect(direcaoNoHorario(diaNormal, hora(10, 0))).toBe("saida_intervalo");
+  });
+
+  it("estava almoçando às 12h30: o que falta é o retorno", () => {
+    expect(direcaoNoHorario(diaNormal, hora(12, 30))).toBe("volta_intervalo");
+  });
+
+  it("depois da saída do dia, volta a ser retorno", () => {
+    expect(direcaoNoHorario(diaNormal, hora(18, 0))).toBe("volta_intervalo");
+  });
+
+  it("antes da entrada, a pessoa estava fora", () => {
+    expect(direcaoNoHorario(diaNormal, hora(7, 0))).toBe("volta_intervalo");
+  });
+
+  it("dia ainda sem batida nenhuma", () => {
+    expect(direcaoNoHorario([], hora(15, 0))).toBe("volta_intervalo");
+  });
+
+  it("depois de uma saída no meio do dia, o que falta é o retorno", () => {
+    const comSaida = [
+      { kind: "entrada" as PunchKind, segundo: hora(8, 30) },
+      { kind: "saida_intervalo" as PunchKind, segundo: hora(9, 0) },
+    ];
+    expect(direcaoNoHorario(comSaida, hora(10, 0))).toBe("volta_intervalo");
   });
 });
 

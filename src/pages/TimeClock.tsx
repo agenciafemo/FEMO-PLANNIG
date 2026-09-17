@@ -58,6 +58,7 @@ import {
   classificarBatida,
   contarDia,
   diasDoMes,
+  direcaoNoHorario,
   estadoDoDia,
   saiuAntes,
   toleranciaDoDia,
@@ -181,14 +182,7 @@ const PUNCH_STEPS: Array<{
   { kind: "saida", label: "Saída", action: "Registrar saída", reference: "17:30", icon: LogOut },
 ];
 
-// O par do meio do dia não tem horário de referência: acontece quando precisa.
-const PASSO_SAIDA_INTERVALO = {
-  kind: "saida_intervalo" as PunchKind,
-  label: "Saída no meio do dia",
-  action: "Registrar saída no meio do dia",
-  reference: "—",
-  icon: DoorOpen,
-};
+// O retorno não tem horário de referência: acontece quando a pessoa volta.
 const PASSO_VOLTA_INTERVALO = {
   kind: "volta_intervalo" as PunchKind,
   label: "Retorno",
@@ -578,7 +572,9 @@ export default function TimeClock() {
   const [adjustmentOpen, setAdjustmentOpen] = useState(false);
   const [adjustmentDate, setAdjustmentDate] = useState(() => agencyDateKey());
   const [adjustmentTime, setAdjustmentTime] = useState(() => timeFormatter.format(new Date()));
-  const [adjustmentKind, setAdjustmentKind] = useState<PunchKind>("entrada");
+  // "outro" = a pessoa esteve fora e não sabe (nem precisa saber) se aquilo é
+  // "saída no meio do dia" ou "retorno". Quem resolve é direcaoNoHorario.
+  const [adjustmentKind, setAdjustmentKind] = useState<PunchKind | "outro">("entrada");
   const [adjustmentReason, setAdjustmentReason] = useState("");
   // Saída no meio do dia: o que fazer com as horas é perguntado na volta.
   const [justificarOpen, setJustificarOpen] = useState(false);
@@ -925,6 +921,29 @@ export default function TimeClock() {
       mapa.set(chave, pedido);
     }
     return (dateKey: string, kind: PunchKind) => mapa.get(`${dateKey}|${kind}`);
+  }, [myAdjustmentsQuery.data]);
+
+  // Batidas de cada dia do mês em segundos, para resolver o horário "Outro".
+  const batidasPorDia = useMemo(() => {
+    const mapa = new Map<string, Array<{ kind: PunchKind; segundo: number }>>();
+    for (const punch of historyQuery.data ?? []) {
+      const dia = agencyDateKey(new Date(punch.punched_at));
+      mapa.set(dia, [
+        ...(mapa.get(dia) ?? []),
+        { kind: punch.kind, segundo: agencySecondOfDay(punch.punched_at) },
+      ]);
+    }
+    return mapa;
+  }, [historyQuery.data]);
+
+  const ajustesPendentesDoDia = useMemo(() => {
+    const mapa = new Map<string, TimeClockAdjustmentRequest[]>();
+    for (const pedido of myAdjustmentsQuery.data ?? []) {
+      if (pedido.status !== "pending") continue;
+      const dia = agencyDateKey(new Date(pedido.requested_punched_at));
+      mapa.set(dia, [...(mapa.get(dia) ?? []), pedido]);
+    }
+    return (dateKey: string) => mapa.get(dateKey) ?? [];
   }, [myAdjustmentsQuery.data]);
 
   const notaPorDia = useMemo(() => {
@@ -1389,6 +1408,15 @@ export default function TimeClock() {
       }
       const dia = dataEscolhida ?? adjustmentDate;
       const requestedAt = new Date(`${dia}T${adjustmentTime}:00-03:00`);
+      // "Outro": o sistema descobre se falta a saída ou o retorno olhando onde
+      // aquele horário cai na sequência do dia. A pessoa não precisa escolher
+      // entre dois nomes que significam a mesma coisa para ela.
+      const kindResolvido: PunchKind = adjustmentKind === "outro"
+        ? direcaoNoHorario(
+            batidasPorDia.get(dia) ?? [],
+            agencySecondOfDay(requestedAt.toISOString()),
+          )
+        : adjustmentKind;
       if (Number.isNaN(requestedAt.getTime())) throw new Error("Data ou horário inválido.");
       if (requestedAt.getTime() > Date.now() + 5 * 60 * 1000) {
         throw new Error("Não é permitido solicitar um horário futuro.");
@@ -1400,7 +1428,7 @@ export default function TimeClock() {
           organization_id: organizationId,
           user_id: user.id,
           requested_punched_at: requestedAt.toISOString(),
-          kind: adjustmentKind,
+          kind: kindResolvido,
           reason: adjustmentReason.trim(),
         });
       if (result.error) throw result.error;
@@ -1775,53 +1803,6 @@ export default function TimeClock() {
 
         <section className="mt-8">
           <SectionHeader
-            title="Meus ajustes de horário"
-            count={myAdjustmentsQuery.data?.length ?? 0}
-            icon={Clock3}
-            action={<span className="text-xs text-muted-foreground">Acompanhamento das solicitações</span>}
-          />
-
-          {myAdjustmentsQuery.isLoading ? (
-            <Skeleton className="mt-3 h-28 rounded-2xl" />
-          ) : myAdjustmentsQuery.isError ? (
-            <div className="mt-3 rounded-2xl border border-warning/20 bg-warning/5 p-4 text-sm text-muted-foreground">
-              As solicitações ficarão disponíveis após a migration de ajustes do ponto ser aplicada.
-            </div>
-          ) : (myAdjustmentsQuery.data ?? []).length === 0 ? (
-            <div className="mt-3 rounded-2xl border border-dashed border-border/70 px-5 py-6 text-center text-sm text-muted-foreground">
-              Você ainda não solicitou nenhum ajuste de horário.
-            </div>
-          ) : (
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {(myAdjustmentsQuery.data ?? []).slice(0, 6).map((request) => {
-                const status = ADJUSTMENT_STATUS[request.status];
-                const kindLabel = PUNCH_KIND_LABEL[request.kind] ?? request.kind;
-                return (
-                  <article key={request.id} className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold">{kindLabel}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {formatHistoryDate(agencyDateKey(new Date(request.requested_punched_at)))} · {formatPunchTime(request.requested_punched_at)}
-                        </p>
-                      </div>
-                      <StatusBadge variant={status.variant} size="sm">{status.label}</StatusBadge>
-                    </div>
-                    <p className="mt-3 text-sm text-muted-foreground">{request.reason}</p>
-                    {request.review_note && (
-                      <p className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                        Retorno da análise: {request.review_note}
-                      </p>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        <section className="mt-8">
-          <SectionHeader
             title="Meus atestados"
             count={myAbsencesQuery.data?.length ?? 0}
             icon={Paperclip}
@@ -2111,12 +2092,16 @@ export default function TimeClock() {
                                 : "Fora do horário — recusado"}
                           </p>
                         )}
-                        {/* Confirmação visível de que o pedido saiu. */}
-                        {PUNCH_STEPS.some(
-                          (step) => !day.punches[step.kind] && ajustePendentePara(day.dateKey, step.kind),
-                        ) && (
+                        {/* Confirmação visível de que o pedido saiu. Cobre
+                            qualquer tipo: o "Outro" vira saída/retorno, que não
+                            têm coluna própria e sumiriam da linha. */}
+                        {ajustesPendentesDoDia(day.dateKey).length > 0 && (
                           <p className="mt-1 text-[11px] text-warning">
-                            Horário enviado — aguardando a ADM
+                            Enviado — aguardando a ADM:{" "}
+                            {ajustesPendentesDoDia(day.dateKey)
+                              .map((pedido) =>
+                                `${PUNCH_KIND_LABEL[pedido.kind]} ${formatPunchTime(pedido.requested_punched_at)}`)
+                              .join(" · ")}
                           </p>
                         )}
                         {/* O que a ADM respondeu (ou ainda não) sobre o tempo fora. */}
@@ -2786,13 +2771,14 @@ export default function TimeClock() {
                         <Label>Registro</Label>
                         <Select
                           value={adjustmentKind}
-                          onValueChange={(value: PunchKind) => setAdjustmentKind(value)}
+                          onValueChange={(value: PunchKind | "outro") => setAdjustmentKind(value)}
                         >
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {[...PUNCH_STEPS, PASSO_SAIDA_INTERVALO, PASSO_VOLTA_INTERVALO].map((step) => (
+                            {PUNCH_STEPS.map((step) => (
                               <SelectItem key={step.kind} value={step.kind}>{step.label}</SelectItem>
                             ))}
+                            <SelectItem value="outro">Outro (explique no motivo)</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -2905,12 +2891,13 @@ export default function TimeClock() {
             </div>
             <div className="space-y-1.5">
               <Label>Tipo de registro</Label>
-              <Select value={adjustmentKind} onValueChange={(value: PunchKind) => setAdjustmentKind(value)}>
+              <Select value={adjustmentKind} onValueChange={(value: PunchKind | "outro") => setAdjustmentKind(value)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {[...PUNCH_STEPS, PASSO_SAIDA_INTERVALO, PASSO_VOLTA_INTERVALO].map((step) => (
+                  {PUNCH_STEPS.map((step) => (
                     <SelectItem key={step.kind} value={step.kind}>{step.label}</SelectItem>
                   ))}
+                  <SelectItem value="outro">Outro (explique no motivo)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
