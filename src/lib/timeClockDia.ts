@@ -257,6 +257,25 @@ export function foraDaJanela(kind: PunchKind, segundoDoDia: number): boolean {
   return segundoDoDia < janela.de || segundoDoDia > janela.ate;
 }
 
+/**
+ * Ao pedir um horário "Outro", a pessoa não deve escolher entre "saída no meio
+ * do dia" e "retorno" — ela só sabe que esteve fora. O sistema descobre pela
+ * posição do horário na sequência do dia: se naquele instante ela estava
+ * trabalhando, o que falta é a saída; se estava fora, é o retorno.
+ */
+export function direcaoNoHorario(
+  batidasDoDia: Array<{ kind: PunchKind; segundo: number }>,
+  segundoDoDia: number,
+): "saida_intervalo" | "volta_intervalo" {
+  const anteriores = batidasDoDia
+    .filter((batida) => batida.segundo <= segundoDoDia)
+    .sort((a, b) => a.segundo - b.segundo);
+
+  const ultima = anteriores.at(-1);
+  if (!ultima) return "volta_intervalo"; // antes da entrada do dia: estava fora
+  return KINDS_DENTRO.includes(ultima.kind) ? "saida_intervalo" : "volta_intervalo";
+}
+
 /** Todas as datas de um mês "yyyy-MM", em ordem crescente. */
 export function diasDoMes(monthKey: string): string[] {
   if (!/^\d{4}-\d{2}$/.test(monthKey)) return [];
