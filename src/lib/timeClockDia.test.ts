@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  ajusteCorrigeBatida,
   atrasou,
+  batidaAposEntradaEsquecida,
   classificarBatida,
   contarDia,
   diasDoMes,
   direcaoNoHorario,
   estadoDoDia,
   foraDaJanela,
+  perguntarPelaEntrada,
   saiuAntes,
   toleranciaDoDia,
   type PunchKind,
@@ -233,6 +236,43 @@ describe("um botão só: o horário diz o que é a batida", () => {
       .toBe("volta_almoco");
     expect(classificarBatida(estadoDoDia(["entrada", "saida_intervalo"]), hora(9, 40), false))
       .toBe("volta_intervalo");
+  });
+});
+
+describe("esqueceu a entrada: a tela pergunta antes de gravar", () => {
+  it("sem entrada até as 10h, bate entrada direto", () => {
+    expect(perguntarPelaEntrada(estadoDoDia([]), hora(8, 40))).toBe(false);
+    expect(perguntarPelaEntrada(estadoDoDia([]), hora(10, 0))).toBe(false);
+  });
+
+  it("sem entrada depois das 10h, pergunta", () => {
+    // O caso de 16/09: batida das 12:00 gravada como entrada.
+    expect(perguntarPelaEntrada(estadoDoDia([]), hora(12, 0))).toBe(true);
+    expect(perguntarPelaEntrada(estadoDoDia([]), hora(10, 1))).toBe(true);
+  });
+
+  it("com o dia já começado, nunca pergunta", () => {
+    expect(perguntarPelaEntrada(estadoDoDia(["entrada"]), hora(12, 0))).toBe(false);
+    expect(perguntarPelaEntrada(estadoDoDia(["entrada", "saida_almoco"]), hora(13, 0))).toBe(false);
+  });
+
+  it("com a entrada informada, a batida vira o que o horário manda", () => {
+    expect(batidaAposEntradaEsquecida(hora(12, 0))).toBe("saida_almoco");
+    expect(batidaAposEntradaEsquecida(hora(17, 30))).toBe("saida");
+    expect(batidaAposEntradaEsquecida(hora(10, 30))).toBe("saida_intervalo");
+  });
+});
+
+describe("ajuste aprovado: corrige ou acrescenta", () => {
+  it("batidas de uma vez por dia são corrigidas", () => {
+    for (const kind of ["entrada", "saida_almoco", "volta_almoco", "saida"] as PunchKind[]) {
+      expect(ajusteCorrigeBatida(kind)).toBe(true);
+    }
+  });
+
+  it("saída no meio do dia e retorno se repetem: sempre acrescentam", () => {
+    expect(ajusteCorrigeBatida("saida_intervalo")).toBe(false);
+    expect(ajusteCorrigeBatida("volta_intervalo")).toBe(false);
   });
 });
 
