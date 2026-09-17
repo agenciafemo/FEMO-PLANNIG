@@ -204,6 +204,59 @@ export function toleranciaDoDia(
   return Math.min(perdoado, tetoMinutos * 60);
 }
 
+/**
+ * Janela esperada de cada batida, em segundos do dia.
+ *
+ * É mais larga que o horário de referência de propósito: serve para dizer "isto
+ * é uma batida normal do dia", não para cobrar pontualidade (quem cobra é a
+ * tolerância). Uma batida fora da sua janela é o que manda a data para revisão
+ * de ADM/Head.
+ */
+export const JANELAS: Partial<Record<PunchKind, { de: number; ate: number }>> = {
+  entrada: { de: 6 * 3600, ate: 10 * 3600 },
+  saida_almoco: { de: 11 * 3600, ate: 14 * 3600 + 30 * 60 },
+  volta_almoco: { de: 11 * 3600 + 30 * 60, ate: 15 * 3600 },
+  saida: { de: 17 * 3600, ate: 21 * 3600 },
+};
+
+/**
+ * O que a batida significa, decidido pelo horário — não pela ordem.
+ *
+ * Com um botão só, bater às 09:00 para ir ao médico não pode virar "saída para
+ * o almoço" só porque foi a primeira saída do dia. Quem está dentro e sai na
+ * janela do almoço vai para o almoço; a partir das 17h encerra o dia; em
+ * qualquer outro horário é saída no meio do dia, e o retorno é esperado.
+ */
+export function classificarBatida(
+  estado: EstadoDoDia,
+  segundoDoDia: number,
+  almocoFeito: boolean,
+): PunchKind {
+  // Fora: o próximo passo já é único (entrada, volta do almoço ou retorno).
+  if (estado.proximo && estado.proximo !== "saida_almoco" && estado.proximo !== "saida") {
+    return estado.proximo;
+  }
+
+  const almoco = JANELAS.saida_almoco!;
+  if (!almocoFeito && segundoDoDia >= almoco.de && segundoDoDia <= almoco.ate) {
+    return "saida_almoco";
+  }
+  if (segundoDoDia >= JANELAS.saida!.de) return "saida";
+  return "saida_intervalo";
+}
+
+/**
+ * A batida foge da jornada? É isto que manda o dia para revisão.
+ *
+ * Sair no meio do dia e voltar sempre contam como fora da jornada: são a
+ * exceção, e quem decide o que fazer com as horas é ADM/Head.
+ */
+export function foraDaJanela(kind: PunchKind, segundoDoDia: number): boolean {
+  const janela = JANELAS[kind];
+  if (!janela) return true;
+  return segundoDoDia < janela.de || segundoDoDia > janela.ate;
+}
+
 /** Todas as datas de um mês "yyyy-MM", em ordem crescente. */
 export function diasDoMes(monthKey: string): string[] {
   if (!/^\d{4}-\d{2}$/.test(monthKey)) return [];

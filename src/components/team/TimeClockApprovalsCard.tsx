@@ -13,21 +13,37 @@ import { useOrganization } from "@/hooks/useOrganization";
  * aparece apenas quando há pedido em aberto, e só para quem pode responder.
  */
 
-// can_view_team_time_clock não consta no types.ts gerado.
-type PontoRpc = {
+// As tabelas do Ponto criadas pelas migrations recentes e a RPC de permissão
+// ainda não constam no types.ts gerado.
+type PontoClient = {
   rpc(fn: string, params: Record<string, unknown>): PromiseLike<{ data: unknown; error: Error | null }>;
+  from(relation: string): {
+    select(colunas: string, opcoes: { count: "exact"; head: true }): {
+      eq(coluna: string, valor: unknown): {
+        eq(coluna: string, valor: unknown): PromiseLike<{ count: number | null; error: Error | null }>;
+      };
+    };
+  };
 };
 
+const FILAS = [
+  "time_clock_adjustment_requests",
+  "time_clock_absences",
+  "time_clock_interval_justifications",
+  "time_clock_day_reviews",
+] as const;
+
 async function contarPendentes(
-  relation: "time_clock_adjustment_requests" | "time_clock_absences",
+  relation: (typeof FILAS)[number],
   organizationId: string,
 ): Promise<number> {
-  const { count, error } = await supabase
+  const { count, error } = await (supabase as unknown as PontoClient)
     .from(relation)
     .select("id", { count: "exact", head: true })
     .eq("organization_id", organizationId)
     .eq("status", "pending");
-  if (error) throw error;
+  // Tabela ainda não aplicada neste ambiente não derruba o card.
+  if (error) return 0;
   return count ?? 0;
 }
 
@@ -38,7 +54,7 @@ export function TimeClockApprovalsCard() {
   const permissaoQuery = useQuery({
     queryKey: ["time-clock-team-permission", organizationId, user?.id],
     queryFn: async () => {
-      const { data, error } = await (supabase as unknown as PontoRpc).rpc(
+      const { data, error } = await (supabase as unknown as PontoClient).rpc(
         "can_view_team_time_clock",
         { _organization_id: organizationId! },
       );
@@ -54,11 +70,13 @@ export function TimeClockApprovalsCard() {
   const pendentesQuery = useQuery({
     queryKey: ["time-clock-pendentes", organizationId],
     queryFn: async () => {
-      const [ajustes, ausencias] = await Promise.all([
+      const [ajustes, ausencias, saidas, dias] = await Promise.all([
         contarPendentes("time_clock_adjustment_requests", organizationId!),
         contarPendentes("time_clock_absences", organizationId!),
+        contarPendentes("time_clock_interval_justifications", organizationId!),
+        contarPendentes("time_clock_day_reviews", organizationId!),
       ]);
-      return { ajustes, ausencias };
+      return { ajustes, ausencias, saidas, dias };
     },
     enabled: podeAprovar && !!organizationId,
     retry: false,
@@ -67,12 +85,16 @@ export function TimeClockApprovalsCard() {
 
   const ajustes = pendentesQuery.data?.ajustes ?? 0;
   const ausencias = pendentesQuery.data?.ausencias ?? 0;
-  const total = ajustes + ausencias;
+  const saidas = pendentesQuery.data?.saidas ?? 0;
+  const dias = pendentesQuery.data?.dias ?? 0;
+  const total = ajustes + ausencias + saidas + dias;
   if (!podeAprovar || total === 0) return null;
 
   const partes = [
     ajustes > 0 ? `${ajustes} ${ajustes === 1 ? "horário" : "horários"}` : null,
     ausencias > 0 ? `${ausencias} ${ausencias === 1 ? "ausência" : "ausências"}` : null,
+    saidas > 0 ? `${saidas} ${saidas === 1 ? "saída no meio do dia" : "saídas no meio do dia"}` : null,
+    dias > 0 ? `${dias} ${dias === 1 ? "dia fora do horário" : "dias fora do horário"}` : null,
   ].filter(Boolean);
 
   return (

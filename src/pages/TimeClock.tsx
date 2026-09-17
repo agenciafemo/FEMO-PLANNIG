@@ -55,12 +55,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import {
   atrasou,
+  classificarBatida,
   contarDia,
   diasDoMes,
   estadoDoDia,
   saiuAntes,
   toleranciaDoDia,
-  TOLERANCIA_MINUTOS,
   type PunchKind,
 } from "@/lib/timeClockDia";
 
@@ -80,6 +80,17 @@ type TimeClockIntervalJustification = {
   review_note: string | null;
   reviewed_at: string | null;
   created_at: string;
+};
+
+type TimeClockDayReview = {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  work_date: string;
+  motivos: string[];
+  status: AbsenceStatus;
+  review_note: string | null;
+  reviewed_at: string | null;
 };
 
 type TimeClockDayNote = {
@@ -569,9 +580,7 @@ export default function TimeClock() {
   const [adjustmentTime, setAdjustmentTime] = useState(() => timeFormatter.format(new Date()));
   const [adjustmentKind, setAdjustmentKind] = useState<PunchKind>("entrada");
   const [adjustmentReason, setAdjustmentReason] = useState("");
-  // Saída no meio do dia: motivo na saída, e o que fazer com as horas na volta.
-  const [saidaMeioOpen, setSaidaMeioOpen] = useState(false);
-  const [saidaMeioMotivo, setSaidaMeioMotivo] = useState("");
+  // Saída no meio do dia: o que fazer com as horas é perguntado na volta.
   const [justificarOpen, setJustificarOpen] = useState(false);
   const [justificarTratamento, setJustificarTratamento] = useState<IntervalTreatment>("abono");
   const [justificarMotivo, setJustificarMotivo] = useState("");
@@ -654,6 +663,23 @@ export default function TimeClock() {
     queryFn: async () => {
       const result = await timeClockSupabase
         .from<TimeClockIntervalJustification[]>("time_clock_interval_justifications")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .eq("status", "pending")
+        .order("work_date", { ascending: true });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: teamPermissionQuery.data === true && !!organizationId,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+
+  const pendingDayReviewsQuery = useQuery({
+    queryKey: ["time-clock-pending-day-reviews", organizationId],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockDayReview[]>("time_clock_day_reviews")
         .select("*")
         .eq("organization_id", organizationId!)
         .eq("status", "pending")
@@ -773,6 +799,16 @@ export default function TimeClock() {
     ].sort((first, second) => first.at - second.at),
   );
   const nextStep = situacaoDeHoje.principal;
+  // Rótulo neutro: o app não promete almoço às 08:47. Quem está dentro
+  // "registra saída" — o horário é que decide se aquilo foi almoço, saída no
+  // meio do dia ou fim de jornada.
+  const acaoDoBotao = situacaoDeHoje.encerrado
+    ? "Jornada concluída"
+    : situacaoDeHoje.proximo === "entrada"
+      ? "Registrar entrada"
+      : situacaoDeHoje.proximo === "volta_almoco" || situacaoDeHoje.proximo === "volta_intervalo"
+        ? "Registrar retorno"
+        : "Registrar saída";
 
   const historyQuery = useQuery({
     queryKey: ["time-clock-history", organizationId, user?.id, todayKey, historyMonth],
@@ -809,6 +845,30 @@ export default function TimeClock() {
     enabled: !!user && !!organizationId && !isLegacy,
     retry: false,
   });
+
+  // Datas marcadas por batida fora da jornada (horário atípico ou fim de
+  // semana). Quem resolve é ADM/Head.
+  const myDayReviewsQuery = useQuery({
+    queryKey: ["time-clock-my-day-reviews", organizationId, user?.id],
+    queryFn: async () => {
+      const result = await timeClockSupabase
+        .from<TimeClockDayReview[]>("time_clock_day_reviews")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .eq("user_id", user!.id)
+        .order("work_date", { ascending: false });
+      if (result.error) throw result.error;
+      return result.data ?? [];
+    },
+    enabled: !!user && !!organizationId && !isLegacy,
+    retry: false,
+  });
+
+  const revisaoPorDia = useMemo(() => {
+    const mapa = new Map<string, TimeClockDayReview>();
+    for (const revisao of myDayReviewsQuery.data ?? []) mapa.set(revisao.work_date, revisao);
+    return mapa;
+  }, [myDayReviewsQuery.data]);
 
   const myDayNotesQuery = useQuery({
     queryKey: ["time-clock-day-notes", organizationId, user?.id, historyMonth],
@@ -1170,72 +1230,33 @@ export default function TimeClock() {
     }
   };
 
-  const registerPunch = useMutation({
-    mutationFn: async (kind: PunchKind) => {
-      if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
-
-      const result = await timeClockSupabase.from<null>("time_clock_punches").insert({
-        organization_id: organizationId,
-        user_id: user.id,
-        kind,
-      });
-
-      if (result.error) throw result.error;
-    },
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ["time-clock-punches", organizationId, user?.id, todayKey],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["time-clock-history", organizationId, user?.id, todayKey],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["time-clock-team-history", organizationId],
-        }),
-      ]);
-      toast.success("Ponto registrado com sucesso.");
-    },
-    onError: (error: QueryError) => {
-      toast.error(error.message || "Não foi possível registrar o ponto.");
-    },
-  });
-
-  // Sair no meio do dia: o motivo vai junto da batida, para a volta já saber
-  // do que se trata e a equipe entender o buraco no dia.
-  const sairNoMeioDoDia = useMutation({
-    mutationFn: async (motivo: string) => {
-      if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
-      if (motivo.trim().length < 3) throw new Error("Diga para onde você vai (ex.: médico).");
-      const result = await timeClockSupabase.from<null>("time_clock_punches").insert({
-        organization_id: organizationId,
-        user_id: user.id,
-        kind: "saida_intervalo",
-        note: motivo.trim(),
-      });
-      if (result.error) throw result.error;
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ["time-clock-punches", organizationId, user?.id, todayKey],
-      });
-      setSaidaMeioOpen(false);
-      setSaidaMeioMotivo("");
-      toast.success("Saída registrada. Bata o retorno quando voltar.");
-    },
-    onError: (error: QueryError) => toast.error(error.message || "Não foi possível registrar a saída."),
-  });
-
-  const registrarRetorno = useMutation({
+  /**
+   * Um botão só. O horário decide o que é a batida (classificarBatida), e o
+   * servidor confirma pelo relógio dele — o cliente só sugere.
+   *
+   * Antes a tela oferecia a próxima etapa da jornada: às 08:47, com a entrada
+   * batida, o botão dizia "Registrar saída para almoço", e quem saísse às 09:00
+   * para o médico gravava almoço sem querer.
+   */
+  const baterPonto = useMutation({
     mutationFn: async () => {
       if (!user || !organizationId) throw new Error("Organização ou usuário indisponível.");
-      const saidaAberta = [...punches].reverse().find((punch) => punch.kind === "saida_intervalo");
+
+      const agora = new Date();
+      const sugestao = classificarBatida(
+        situacaoDeHoje,
+        agencySecondOfDay(agora.toISOString()),
+        punches.some((punch) => punch.kind === "saida_almoco"),
+      );
+
       const result = await timeClockSupabase.from<null>("time_clock_punches").insert({
         organization_id: organizationId,
         user_id: user.id,
-        kind: "volta_intervalo",
+        kind: sugestao,
       });
       if (result.error) throw result.error;
+
+      const saidaAberta = [...punches].reverse().find((punch) => punch.kind === "saida_intervalo");
       return saidaAberta ?? null;
     },
     onSuccess: async (saidaAberta) => {
@@ -1245,29 +1266,43 @@ export default function TimeClock() {
           queryKey: ["time-clock-history", organizationId, user?.id, todayKey],
         }),
         queryClient.invalidateQueries({ queryKey: ["time-clock-team-history", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-my-day-reviews", organizationId, user?.id] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-pending-day-reviews", organizationId] }),
       ]);
 
-      const volta = [...(atualizados.data ?? [])].reverse().find((punch) => punch.kind === "volta_intervalo");
-      if (!saidaAberta || !volta) {
-        toast.success("Retorno registrado.");
+      const registrada = (atualizados.data ?? []).at(-1);
+      if (!registrada) {
+        toast.success("Ponto registrado.");
         return;
       }
-      const minutos = Math.max(
-        1,
-        Math.round(
-          (new Date(volta.punched_at).getTime() - new Date(saidaAberta.punched_at).getTime()) / 60000,
-        ),
+
+      // Diz o que ficou gravado: com um botão só, a pessoa precisa ver o tipo.
+      toast.success(
+        `${PUNCH_KIND_LABEL[registrada.kind]} às ${formatPunchTime(registrada.punched_at)}.`,
       );
-      setIntervaloParaJustificar({
-        leftAt: saidaAberta.punched_at,
-        returnedAt: volta.punched_at,
-        minutos,
-      });
-      setJustificarMotivo(saidaAberta.note ?? "");
-      setJustificarTratamento("abono");
-      setJustificarOpen(true);
+
+      // Voltou de uma saída no meio do dia: é a hora de dizer o que fazer com
+      // o tempo fora.
+      if (registrada.kind === "volta_intervalo" && saidaAberta) {
+        const minutos = Math.max(
+          1,
+          Math.round(
+            (new Date(registrada.punched_at).getTime() - new Date(saidaAberta.punched_at).getTime()) / 60000,
+          ),
+        );
+        setIntervaloParaJustificar({
+          leftAt: saidaAberta.punched_at,
+          returnedAt: registrada.punched_at,
+          minutos,
+        });
+        setJustificarMotivo(saidaAberta.note ?? "");
+        setJustificarTratamento("abono");
+        setJustificarOpen(true);
+      }
     },
-    onError: (error: QueryError) => toast.error(error.message || "Não foi possível registrar o retorno."),
+    onError: (error: QueryError) => {
+      toast.error(error.message || "Não foi possível registrar o ponto.");
+    },
   });
 
   // O tempo fora sempre sai da conta do dia. Esta justificativa é o que decide
@@ -1476,6 +1511,29 @@ export default function TimeClock() {
     onError: (error: QueryError) => toast.error(error.message || "Não foi possível responder o pedido."),
   });
 
+  const reviewDay = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: "approved" | "rejected" }) => {
+      if (!organizationId) throw new Error("Organização indisponível.");
+      const result = await timeClockSupabase
+        .from<null>("time_clock_day_reviews")
+        .update({ status })
+        .eq("id", id)
+        .eq("organization_id", organizationId)
+        .eq("status", "pending");
+      if (result.error) throw result.error;
+    },
+    onSuccess: async (_, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["time-clock-pending-day-reviews", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["time-clock-my-day-reviews", organizationId] }),
+      ]);
+      toast.success(
+        variables.status === "approved" ? "Dia aprovado. A pessoa foi avisada." : "Dia recusado. A pessoa foi avisada.",
+      );
+    },
+    onError: (error: QueryError) => toast.error(error.message || "Não foi possível responder a revisão."),
+  });
+
   const reviewAbsence = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: "approved" | "rejected" }) => {
       if (!organizationId) throw new Error("Organização indisponível.");
@@ -1580,48 +1638,24 @@ export default function TimeClock() {
           <section className="rounded-3xl border border-border/70 bg-card p-5 shadow-sm sm:p-7">
             <ReferenceClock timeZone={AGENCY_TIME_ZONE} />
 
+            {/* Um botão só: o horário decide se é entrada, saída, almoço ou
+                saída no meio do dia. Nada de oferecer "saída para o almoço"
+                às 08:47 só porque é a próxima etapa da jornada. */}
             <Button
               type="button"
               size="lg"
               className="mt-7 h-16 w-full rounded-2xl text-base font-semibold shadow-md sm:text-lg"
               disabled={
-                loading || registerPunch.isPending || registrarRetorno.isPending
-                || !nextStep || !organizationId || isLegacy
+                loading || baterPonto.isPending || situacaoDeHoje.encerrado
+                || !organizationId || isLegacy
               }
-              onClick={() => {
-                if (!nextStep) return;
-                // O retorno abre a justificativa logo depois de bater.
-                if (nextStep.kind === "volta_intervalo") registrarRetorno.mutate();
-                else registerPunch.mutate(nextStep.kind);
-              }}
+              onClick={() => baterPonto.mutate()}
             >
               <Clock3 className="mr-2 h-5 w-5" />
-              {registerPunch.isPending || registrarRetorno.isPending
-                ? "Registrando..."
-                : nextStep?.action ?? "Jornada concluída"}
+              {baterPonto.isPending ? "Registrando..." : acaoDoBotao}
             </Button>
 
-            {/* Médico, banco, imprevisto: dá para sair e voltar quantas vezes
-                precisar, sem usar o almoço no lugar errado. */}
-            {situacaoDeHoje.podeSairNoMeio && (
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-3 h-12 w-full rounded-xl"
-                disabled={registerPunch.isPending || sairNoMeioDoDia.isPending || !organizationId || isLegacy}
-                onClick={() => { setSaidaMeioMotivo(""); setSaidaMeioOpen(true); }}
-              >
-                <DoorOpen className="mr-2 h-4 w-4" />
-                Preciso sair no meio do dia
-              </Button>
-            )}
-
-            {nextStep && nextStep.reference !== "—" && (
-              <p className="mt-3 text-center text-xs text-muted-foreground">
-                Próximo horário de referência: {nextStep.reference}
-              </p>
-            )}
-            {nextStep?.kind === "volta_intervalo" && (
+            {situacaoDeHoje.proximo === "volta_intervalo" && (
               <p className="mt-3 text-center text-xs text-muted-foreground">
                 Você está fora desde {formatPunchTime(
                   [...punches].reverse().find((punch) => punch.kind === "saida_intervalo")?.punched_at
@@ -1656,30 +1690,6 @@ export default function TimeClock() {
               </div>
             )}
 
-            {/* Jornada de referência — compacta, abaixo do botão. */}
-            <div className="mt-6 border-t border-border/60 pt-4">
-              <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                <BriefcaseBusiness className="h-3.5 w-3.5" /> Jornada de referência
-              </p>
-              <div className="flex flex-wrap gap-2 text-xs">
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5">
-                  <span className="text-muted-foreground">Manhã</span>
-                  <span className="font-semibold tabular-nums">08:30–12:00</span>
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5">
-                  <span className="text-muted-foreground">Intervalo</span>
-                  <span className="font-semibold tabular-nums">12:00–13:00</span>
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5">
-                  <span className="text-muted-foreground">Tarde</span>
-                  <span className="font-semibold tabular-nums">13:00–17:30</span>
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5">
-                  <span className="text-muted-foreground">Tolerância</span>
-                  <span className="font-semibold tabular-nums">{TOLERANCIA_MINUTOS} min</span>
-                </span>
-              </div>
-            </div>
           </section>
         </div>
 
@@ -1980,6 +1990,7 @@ export default function TimeClock() {
                     const futuro = day.dateKey > todayKey;
                     const nota = notaPorDia.get(day.dateKey);
                     const pedidosDoDia = intervalosPorDia.get(day.dateKey) ?? [];
+                    const revisaoDoDia = revisaoPorDia.get(day.dateKey);
                     return (
                     <TableRow
                       key={day.dateKey}
@@ -2081,6 +2092,24 @@ export default function TimeClock() {
                               </StatusBadge>
                             ))}
                           </div>
+                        )}
+                        {/* Bateu fora da jornada: a data espera ADM/Head. */}
+                        {revisaoDoDia && (
+                          <p
+                            className={cn(
+                              "mt-1 text-[11px]",
+                              revisaoDoDia.status === "pending" && "text-warning",
+                              revisaoDoDia.status === "approved" && "text-success",
+                              revisaoDoDia.status === "rejected" && "text-destructive",
+                            )}
+                            title={revisaoDoDia.motivos.join(" · ")}
+                          >
+                            {revisaoDoDia.status === "pending"
+                              ? "Fora do horário — em revisão pela ADM"
+                              : revisaoDoDia.status === "approved"
+                                ? "Fora do horário — aprovado"
+                                : "Fora do horário — recusado"}
+                          </p>
                         )}
                         {/* Confirmação visível de que o pedido saiu. */}
                         {PUNCH_STEPS.some(
@@ -2203,6 +2232,65 @@ export default function TimeClock() {
                 </div>
               )}
             </div>
+
+            {(pendingDayReviewsQuery.data ?? []).length > 0 && (
+              <div className="mt-4 rounded-2xl border border-warning/25 bg-warning/5 p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="font-semibold">Dias fora do horário</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Batida em horário atípico ou em fim de semana. Confira o dia antes de aprovar.
+                    </p>
+                  </div>
+                  <StatusBadge variant="warning" size="sm">
+                    {pendingDayReviewsQuery.data?.length ?? 0} pendente(s)
+                  </StatusBadge>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {(pendingDayReviewsQuery.data ?? []).map((revisao) => {
+                    const member = teamMembersQuery.data?.find((item) => item.user_id === revisao.user_id);
+                    const respondendo = reviewDay.isPending && reviewDay.variables?.id === revisao.id;
+                    return (
+                      <article key={revisao.id} className="rounded-xl border border-border/70 bg-card p-4">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="font-medium">{member?.display_name ?? "Colaborador"}</p>
+                            {member?.job_title && <p className="text-xs text-muted-foreground">{member.job_title}</p>}
+                            <p className="mt-2 text-sm font-medium capitalize">
+                              {formatHistoryDate(revisao.work_date)}
+                            </p>
+                            <ul className="mt-1 space-y-0.5 text-sm text-muted-foreground">
+                              {revisao.motivos.map((motivo) => (
+                                <li key={motivo}>{motivo}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div className="flex shrink-0 gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              disabled={respondendo}
+                              onClick={() => reviewDay.mutate({ id: revisao.id, status: "rejected" })}
+                            >
+                              <XCircle className="mr-1.5 h-4 w-4" /> Recusar
+                            </Button>
+                            <Button
+                              size="sm"
+                              disabled={respondendo}
+                              onClick={() => reviewDay.mutate({ id: revisao.id, status: "approved" })}
+                            >
+                              <CheckCircle2 className="mr-1.5 h-4 w-4" /> Aprovar
+                            </Button>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Saídas no meio do dia: sempre exigem resposta — abonar devolve
                 as horas, "banco" só precisa de ciência. */}
@@ -2562,37 +2650,6 @@ export default function TimeClock() {
           </section>
         )}
       </main>
-
-      <Dialog open={saidaMeioOpen} onOpenChange={(open) => !sairNoMeioDoDia.isPending && setSaidaMeioOpen(open)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Sair no meio do dia</DialogTitle></DialogHeader>
-          <form
-            className="space-y-4"
-            onSubmit={(event) => { event.preventDefault(); sairNoMeioDoDia.mutate(saidaMeioMotivo); }}
-          >
-            <p className="text-sm text-muted-foreground">
-              Registra a saída agora. Quando voltar, bata o retorno — aí você escolhe se o tempo fora
-              é abonado (atestado) ou sai do seu banco de horas.
-            </p>
-            <div className="space-y-1.5">
-              <Label htmlFor="saida-meio-motivo">Para onde você vai?</Label>
-              <Input
-                id="saida-meio-motivo"
-                value={saidaMeioMotivo}
-                onChange={(event) => setSaidaMeioMotivo(event.target.value)}
-                placeholder="Ex.: consulta médica"
-                required
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setSaidaMeioOpen(false)}>Cancelar</Button>
-              <Button type="submit" disabled={sairNoMeioDoDia.isPending || saidaMeioMotivo.trim().length < 3}>
-                {sairNoMeioDoDia.isPending ? "Registrando..." : "Registrar saída"}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={justificarOpen} onOpenChange={(open) => !justificarIntervalo.isPending && setJustificarOpen(open)}>
         <DialogContent className="max-w-md">
